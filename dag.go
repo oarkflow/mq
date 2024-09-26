@@ -55,18 +55,6 @@ func NewDAG(brokerAddr string, syncMode bool) *DAG {
 	return dag
 }
 
-func (dag *DAG) processEdge(ctx context.Context, id string, payload []byte, targets []string) {
-	newTask := &Task{
-		ID:      id,
-		Payload: payload,
-	}
-	for _, target := range targets {
-		if target != "" {
-			dag.processNode(ctx, newTask, target)
-		}
-	}
-}
-
 func (dag *DAG) TaskCallback(ctx context.Context, task *Task) error {
 	if task.Error != nil {
 		return task.Error
@@ -172,6 +160,43 @@ func (dag *DAG) Prepare(ctx context.Context) error {
 	return nil
 }
 
+func (dag *DAG) ProcessTask(ctx context.Context, task Task) Result {
+	return dag.processNode(ctx, &task, dag.startNode.Queue())
+}
+
+func (dag *DAG) getConditionalNode(status, currentNode string) string {
+	conditions, ok := dag.conditions[currentNode]
+	if !ok {
+		return ""
+	}
+	conditionNodeID, ok := conditions[status]
+	if !ok {
+		return ""
+	}
+	return conditionNodeID
+}
+
+func (dag *DAG) validateNodes(nodeIDs ...string) error {
+	for _, nodeID := range nodeIDs {
+		if _, ok := dag.nodes.Get(nodeID); !ok {
+			return fmt.Errorf("node %s not found", nodeID)
+		}
+	}
+	return nil
+}
+
+func (dag *DAG) processEdge(ctx context.Context, id string, payload []byte, targets []string) {
+	newTask := &Task{
+		ID:      id,
+		Payload: payload,
+	}
+	for _, target := range targets {
+		if target != "" {
+			dag.processNode(ctx, newTask, target)
+		}
+	}
+}
+
 func (dag *DAG) calculateForFirstNode() (string, bool) {
 	inDegree := make(map[string]int)
 	for _, n := range dag.nodes.Keys() {
@@ -241,29 +266,4 @@ func (dag *DAG) processNode(ctx context.Context, task *Task, queue string) Resul
 		return Result{Error: err, Status: result.Status}
 	}
 	return result
-}
-
-func (dag *DAG) ProcessTask(ctx context.Context, task Task) Result {
-	return dag.processNode(ctx, &task, dag.startNode.Queue())
-}
-
-func (dag *DAG) getConditionalNode(status, currentNode string) string {
-	conditions, ok := dag.conditions[currentNode]
-	if !ok {
-		return ""
-	}
-	conditionNodeID, ok := conditions[status]
-	if !ok {
-		return ""
-	}
-	return conditionNodeID
-}
-
-func (dag *DAG) validateNodes(nodeIDs ...string) error {
-	for _, nodeID := range nodeIDs {
-		if _, ok := dag.nodes.Get(nodeID); !ok {
-			return fmt.Errorf("node %s not found", nodeID)
-		}
-	}
-	return nil
 }
