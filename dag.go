@@ -9,6 +9,10 @@ import (
 	"github.com/oarkflow/xsync"
 )
 
+const (
+	triggerNodeKey string = "triggerNode"
+)
+
 type Node interface {
 	Queue() string
 	Consumer() *Consumer
@@ -62,6 +66,10 @@ func (dag *DAG) TaskCallback(ctx context.Context, task *Task) error {
 	if task.CurrentQueue == "" {
 		return errors.New("queue is empty")
 	}
+	triggerNode, ok := ctx.Value(triggerNodeKey).(string)
+	if ok {
+		fmt.Println("Triggered by node:", triggerNode)
+	}
 	for _, loopEdge := range dag.loopEdges {
 		start := loopEdge[0]
 		targets := loopEdge[1:]
@@ -73,6 +81,7 @@ func (dag *DAG) TaskCallback(ctx context.Context, task *Task) error {
 		if err != nil {
 			return err
 		}
+		ctx = context.WithValue(ctx, triggerNodeKey, start)
 		for _, item := range items {
 			bt, _ := json.Marshal(item)
 			dag.processEdge(ctx, task.ID, bt, targets)
@@ -84,9 +93,11 @@ func (dag *DAG) TaskCallback(ctx context.Context, task *Task) error {
 		if start != task.CurrentQueue {
 			continue
 		}
+		ctx = context.WithValue(ctx, triggerNodeKey, start)
 		dag.processEdge(ctx, task.ID, task.Result, targets)
 	}
 	n := dag.getConditionalNode(task.Status, task.CurrentQueue)
+	ctx = context.WithValue(ctx, triggerNodeKey, task.CurrentQueue)
 	dag.processEdge(ctx, task.ID, task.Result, []string{n})
 	return nil
 }

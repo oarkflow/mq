@@ -12,8 +12,9 @@ import (
 )
 
 type Message struct {
-	Headers map[string]string `json:"headers"`
-	Data    json.RawMessage   `json:"data"`
+	Headers     map[string]string `json:"headers"`
+	Data        json.RawMessage   `json:"data"`
+	TriggerNode string            `json:"triggerNode"`
 }
 
 func IsClosed(conn net.Conn) bool {
@@ -35,10 +36,22 @@ func GetHeadersFromContext(ctx context.Context) (map[string]string, bool) {
 	return headers, ok
 }
 
+func SetTriggerNodeToContext(ctx context.Context, triggerNode string) context.Context {
+	return context.WithValue(ctx, "triggerNode", triggerNode)
+}
+
+func GetTriggerNodeFromContext(ctx context.Context) (string, bool) {
+	headers, ok := ctx.Value("triggerNode").(string)
+	return headers, ok
+}
+
 func Write(ctx context.Context, conn net.Conn, data any) error {
 	msg := Message{Headers: make(map[string]string)}
 	if headers, ok := GetHeadersFromContext(ctx); ok {
 		msg.Headers = headers
+	}
+	if trigger, ok := GetTriggerNodeFromContext(ctx); ok {
+		msg.TriggerNode = trigger
 	}
 	dataBytes, err := json.Marshal(data)
 	if err != nil {
@@ -78,6 +91,7 @@ func ReadFromConn(ctx context.Context, conn net.Conn, handler MessageHandler) {
 			continue
 		}
 		ctx = SetHeadersToContext(ctx, msg.Headers)
+		ctx = SetTriggerNodeToContext(ctx, msg.TriggerNode)
 		if handler != nil {
 			err = handler(ctx, conn, msg.Data)
 			if err != nil {
