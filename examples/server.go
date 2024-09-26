@@ -3,13 +3,12 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/oarkflow/mq"
 	"time"
-
-	"github.com/oarkflow/mq/broker"
 )
 
 func main() {
-	b := broker.NewBroker(func(ctx context.Context, task *broker.Task) error {
+	b := mq.NewBroker(func(ctx context.Context, task *mq.Task) error {
 		fmt.Println("Received task", task.ID, string(task.Payload), string(task.Result), task.Error, task.CurrentQueue)
 		return nil
 	})
@@ -17,11 +16,11 @@ func main() {
 	b.NewQueue("queue2")
 	go func() {
 		for i := 0; i < 10; i++ {
-			b.Publish(context.Background(), broker.Task{
+			b.Publish(context.Background(), mq.Task{
 				ID:      fmt.Sprint(i),
 				Payload: []byte(`"Hello"`),
 			}, "queue1")
-			b.Publish(context.Background(), broker.Task{
+			b.Publish(context.Background(), mq.Task{
 				ID:      fmt.Sprint(i),
 				Payload: []byte(`"World"`),
 			}, "queue2")

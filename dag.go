@@ -1,4 +1,4 @@
-package broker
+package mq
 
 import (
 	"context"
@@ -124,7 +124,6 @@ func (dag *DAG) AddEdge(fromNodeID, toNodeID string) error {
 		return err
 	}
 	dag.edges = append(dag.edges, []string{fromNodeID, toNodeID})
-	fmt.Printf("Edge added from %s to %s\n", fromNodeID, toNodeID)
 	return nil
 }
 

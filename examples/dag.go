@@ -4,12 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/oarkflow/mq"
 	"time"
-
-	"github.com/oarkflow/mq/broker"
 )
 
-func handleNode1(_ context.Context, task broker.Task) broker.Result {
+func handleNode1(_ context.Context, task mq.Task) mq.Result {
 	result := []map[string]string{
 		{"field": "facility", "item": "item1"},
 		{"field": "facility", "item": "item2"},
@@ -18,18 +17,18 @@ func handleNode1(_ context.Context, task broker.Task) broker.Result {
 	var payload string
 	err := json.Unmarshal(task.Payload, &payload)
 	if err != nil {
-		return broker.Result{Status: "fail", Payload: json.RawMessage(`{"field": "node1", "item": "error"}`)}
+		return mq.Result{Status: "fail", Payload: json.RawMessage(`{"field": "node1", "item": "error"}`)}
 	}
 	fmt.Printf("Processing task at node1: %s\n", string(task.Payload))
 	bt, _ := json.Marshal(result)
-	return broker.Result{Status: "completed", Payload: bt}
+	return mq.Result{Status: "completed", Payload: bt}
 }
 
-func handleNode2(_ context.Context, task broker.Task) broker.Result {
+func handleNode2(_ context.Context, task mq.Task) mq.Result {
 	var payload map[string]string
 	err := json.Unmarshal(task.Payload, &payload)
 	if err != nil {
-		return broker.Result{Status: "fail", Payload: json.RawMessage(`{"field": "node2", "item": "error"}`)}
+		return mq.Result{Status: "fail", Payload: json.RawMessage(`{"field": "node2", "item": "error"}`)}
 	}
 	status := "fail"
 	if payload["item"] == "item2" {
@@ -37,24 +36,24 @@ func handleNode2(_ context.Context, task broker.Task) broker.Result {
 	}
 	fmt.Printf("Processing task at node2: %s %s\n", payload, status)
 	bt, _ := json.Marshal(payload)
-	return broker.Result{Status: status, Payload: bt}
+	return mq.Result{Status: status, Payload: bt}
 }
 
-func handleNode3(_ context.Context, task broker.Task) broker.Result {
+func handleNode3(_ context.Context, task mq.Task) mq.Result {
 	result := `{"field": "node3", "item": %s}`
 	fmt.Printf("Processing task at node3: %s\n", string(task.Payload))
-	return broker.Result{Status: "completed", Payload: json.RawMessage(fmt.Sprintf(result, string(task.Payload)))}
+	return mq.Result{Status: "completed", Payload: json.RawMessage(fmt.Sprintf(result, string(task.Payload)))}
 }
 
-func handleNode4(_ context.Context, task broker.Task) broker.Result {
+func handleNode4(_ context.Context, task mq.Task) mq.Result {
 	result := `{"field": "node4", "item": %s}`
 	fmt.Printf("Processing task at node4: %s\n", string(task.Payload))
-	return broker.Result{Status: "completed", Payload: json.RawMessage(fmt.Sprintf(result, string(task.Payload)))}
+	return mq.Result{Status: "completed", Payload: json.RawMessage(fmt.Sprintf(result, string(task.Payload)))}
 }
 
 func main() {
 	ctx := context.Background()
-	d := broker.NewDAG(":8082", false)
+	d := mq.NewDAG(":8082", false)
 
 	d.AddNode("node1", handleNode1, true)
 	d.AddNode("node2", handleNode2)
@@ -75,7 +74,7 @@ func main() {
 			fmt.Println("Error starting DAG:", err)
 		}
 	}()
-	result := d.ProcessTask(ctx, broker.Task{Payload: []byte(`"Start processing"`)})
+	result := d.ProcessTask(ctx, mq.Task{Payload: []byte(`"Start processing"`)})
 	fmt.Println(string(result.Payload))
 	time.Sleep(50 * time.Second)
 }
