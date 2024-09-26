@@ -14,7 +14,7 @@ import (
 	"github.com/oarkflow/xid"
 	"github.com/oarkflow/xsync"
 
-	"github.com/oarkflow/golong/utils"
+	"github.com/oarkflow/mq/utils"
 )
 
 type Handler func(context.Context, Task) Result

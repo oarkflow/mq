@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/oarkflow/golong/broker"
+	"github.com/oarkflow/mq/broker"
 )
 
 func handleNode1(_ context.Context, task broker.Task) broker.Result {

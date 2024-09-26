@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/oarkflow/golong/broker"
+	"github.com/oarkflow/mq/broker"
 )
 
 func main() {
