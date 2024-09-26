@@ -72,16 +72,6 @@ func NewBroker(callback ...func(context.Context, *Task) error) *Broker {
 	return broker
 }
 
-func (b *Broker) NewQueue(qName string) {
-	if _, ok := b.queues.Get(qName); !ok {
-		b.queues.Set(qName, &Queue{
-			name:     qName,
-			messages: xsync.NewMap[string, *Task](),
-			deferred: xsync.NewMap[string, *Task](),
-		})
-	}
-}
-
 func (b *Broker) Send(ctx context.Context, cmd Command) error {
 	queue, ok := b.queues.Get(cmd.Queue)
 	if !ok || queue == nil {
@@ -94,6 +84,25 @@ func (b *Broker) Send(ctx context.Context, cmd Command) error {
 		}
 	}
 	return nil
+}
+
+func (b *Broker) Start(ctx context.Context, addr string) error {
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = listener.Close()
+	}()
+	fmt.Println("Broker server started on", addr)
+	for {
+		conn, err := listener.Accept()
+		if err != nil {
+			fmt.Println("Error accepting connection:", err)
+			continue
+		}
+		go utils.ReadFromConn(ctx, conn, b.readMessage)
+	}
 }
 
 func (b *Broker) Publish(ctx context.Context, message Task, queueName string) error {
@@ -115,6 +124,16 @@ func (b *Broker) Publish(ctx context.Context, message Task, queueName string) er
 	return nil
 }
 
+func (b *Broker) NewQueue(qName string) {
+	if _, ok := b.queues.Get(qName); !ok {
+		b.queues.Set(qName, &Queue{
+			name:     qName,
+			messages: xsync.NewMap[string, *Task](),
+			deferred: xsync.NewMap[string, *Task](),
+		})
+	}
+}
+
 func (b *Broker) AddMessageToQueue(message *Task, queueName string) (*Queue, error) {
 	queue, ok := b.queues.Get(queueName)
 	if !ok {
@@ -129,34 +148,6 @@ func (b *Broker) AddMessageToQueue(message *Task, queueName string) (*Queue, err
 	message.CreatedAt = time.Now()
 	queue.messages.Set(message.ID, message)
 	return queue, nil
-}
-
-func (b *Broker) handleCommandMessage(ctx context.Context, conn net.Conn, msg Command) error {
-	switch msg.Command {
-	case SUBSCRIBE:
-		b.subscribe(ctx, msg.Queue, conn)
-	default:
-		return fmt.Errorf("unknown command: %d", msg.Command)
-	}
-	return nil
-}
-
-func (b *Broker) handleTaskMessage(ctx context.Context, _ net.Conn, msg Result) error {
-	return b.HandleProcessedMessage(ctx, msg)
-}
-
-func (b *Broker) readMessage(ctx context.Context, conn net.Conn, message []byte) error {
-	var cmdMsg Command
-	var resultMsg Result
-	err := json.Unmarshal(message, &cmdMsg)
-	if err == nil {
-		return b.handleCommandMessage(ctx, conn, cmdMsg)
-	}
-	err = json.Unmarshal(message, &resultMsg)
-	if err == nil {
-		return b.handleTaskMessage(ctx, conn, resultMsg)
-	}
-	return nil
 }
 
 func (b *Broker) HandleProcessedMessage(ctx context.Context, clientMsg Result) error {
@@ -204,21 +195,30 @@ func (b *Broker) subscribe(ctx context.Context, queueName string, conn net.Conn)
 	q.deferred = nil
 }
 
-func (b *Broker) Start(ctx context.Context, addr string) error {
-	listener, err := net.Listen("tcp", addr)
-	if err != nil {
-		return err
+func (b *Broker) readMessage(ctx context.Context, conn net.Conn, message []byte) error {
+	var cmdMsg Command
+	var resultMsg Result
+	err := json.Unmarshal(message, &cmdMsg)
+	if err == nil {
+		return b.handleCommandMessage(ctx, conn, cmdMsg)
 	}
-	defer func() {
-		_ = listener.Close()
-	}()
-	fmt.Println("Broker server started on", addr)
-	for {
-		conn, err := listener.Accept()
-		if err != nil {
-			fmt.Println("Error accepting connection:", err)
-			continue
-		}
-		go utils.ReadFromConn(ctx, conn, b.readMessage)
+	err = json.Unmarshal(message, &resultMsg)
+	if err == nil {
+		return b.handleTaskMessage(ctx, conn, resultMsg)
 	}
+	return nil
+}
+
+func (b *Broker) handleTaskMessage(ctx context.Context, _ net.Conn, msg Result) error {
+	return b.HandleProcessedMessage(ctx, msg)
+}
+
+func (b *Broker) handleCommandMessage(ctx context.Context, conn net.Conn, msg Command) error {
+	switch msg.Command {
+	case SUBSCRIBE:
+		b.subscribe(ctx, msg.Queue, conn)
+	default:
+		return fmt.Errorf("unknown command: %d", msg.Command)
+	}
+	return nil
 }
