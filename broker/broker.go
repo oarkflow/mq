@@ -96,15 +96,10 @@ func (b *Broker) Send(ctx context.Context, cmd Command) {
 }
 
 func (b *Broker) Publish(ctx context.Context, message Task, queueName string) error {
-	queue, ok := b.queues.Get(queueName)
-	if !ok {
-		return fmt.Errorf("queue %s not found", queueName)
+	queue, err := b.AddMessageToQueue(&message, queueName)
+	if err != nil {
+		return err
 	}
-	if queueName != "" {
-		message.CurrentQueue = queueName
-	}
-	message.CreatedAt = time.Now()
-	queue.messages.Set(message.ID, &message)
 	if len(queue.conn) == 0 {
 		queue.deferred.Set(xid.New().String(), &message)
 		fmt.Println("task deferred as no conn are connected", queueName)
@@ -114,6 +109,22 @@ func (b *Broker) Publish(ctx context.Context, message Task, queueName string) er
 		utils.Write(ctx, client, message)
 	}
 	return nil
+}
+
+func (b *Broker) AddMessageToQueue(message *Task, queueName string) (*Queue, error) {
+	queue, ok := b.queues.Get(queueName)
+	if !ok {
+		return nil, fmt.Errorf("queue %s not found", queueName)
+	}
+	if message.ID == "" {
+		message.ID = xid.New().String()
+	}
+	if queueName != "" {
+		message.CurrentQueue = queueName
+	}
+	message.CreatedAt = time.Now()
+	queue.messages.Set(message.ID, message)
+	return queue, nil
 }
 
 func (b *Broker) handleCommandMessage(ctx context.Context, conn net.Conn, msg Command) error {
@@ -127,8 +138,7 @@ func (b *Broker) handleCommandMessage(ctx context.Context, conn net.Conn, msg Co
 }
 
 func (b *Broker) handleTaskMessage(ctx context.Context, _ net.Conn, msg Result) error {
-	b.handleProcessedMessage(ctx, msg)
-	return nil
+	return b.HandleProcessedMessage(ctx, msg)
 }
 
 func (b *Broker) readMessage(ctx context.Context, conn net.Conn, message []byte) error {
@@ -145,7 +155,7 @@ func (b *Broker) readMessage(ctx context.Context, conn net.Conn, message []byte)
 	return nil
 }
 
-func (b *Broker) handleProcessedMessage(ctx context.Context, clientMsg Result) error {
+func (b *Broker) HandleProcessedMessage(ctx context.Context, clientMsg Result) error {
 	if queue, ok := b.queues.Get(clientMsg.Queue); ok {
 		if msg, ok := queue.messages.Get(clientMsg.MessageID); ok {
 			msg.ProcessedAt = time.Now()

@@ -54,7 +54,7 @@ func handleNode4(_ context.Context, task broker.Task) broker.Result {
 
 func main() {
 	ctx := context.Background()
-	d := broker.NewDAG(":8082")
+	d := broker.NewDAG(":8082", false)
 
 	d.AddNode("node1", handleNode1, true)
 	d.AddNode("node2", handleNode2)
@@ -75,8 +75,7 @@ func main() {
 			fmt.Println("Error starting DAG:", err)
 		}
 	}()
-	d.ProcessTask(ctx, broker.Task{Payload: []byte(`"Start processing"`)})
-
-	// Keep the program running to allow task processing
+	result := d.ProcessTask(ctx, broker.Task{Payload: []byte(`"Start processing"`)})
+	fmt.Println(string(result.Payload))
 	time.Sleep(50 * time.Second)
 }

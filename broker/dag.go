@@ -6,18 +6,19 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/oarkflow/xid"
 	"github.com/oarkflow/xsync"
 )
 
 type Node interface {
 	Queue() string
 	Consumer() *Consumer
+	Handler() Handler
 }
 
 type node struct {
 	queue    string
 	consumer *Consumer
+	handler  Handler
 }
 
 func (n *node) Queue() string {
@@ -28,6 +29,10 @@ func (n *node) Consumer() *Consumer {
 	return n.consumer
 }
 
+func (n *node) Handler() Handler {
+	return n.handler
+}
+
 type DAG struct {
 	nodes      *xsync.MapOf[string, Node]
 	edges      [][]string
@@ -36,20 +41,22 @@ type DAG struct {
 	startNode  Node
 	brokerAddr string
 	conditions map[string]map[string]string
+	syncMode   bool
 }
 
-func NewDAG(brokerAddr string) *DAG {
+func NewDAG(brokerAddr string, syncMode bool) *DAG {
 	dag := &DAG{
 		nodes:      xsync.NewMap[string, Node](),
 		brokerAddr: brokerAddr,
 		conditions: make(map[string]map[string]string),
+		syncMode:   syncMode,
 	}
 	dag.broker = NewBroker(dag.TaskCallback)
 	return dag
 }
 
 func (dag *DAG) processEdge(ctx context.Context, id string, payload []byte, targets []string) {
-	newTask := Task{
+	newTask := &Task{
 		ID:      id,
 		Payload: payload,
 	}
@@ -103,6 +110,7 @@ func (dag *DAG) AddNode(queue string, handler Handler, firstNode ...bool) {
 	n := &node{
 		queue:    queue,
 		consumer: consumer,
+		handler:  handler,
 	}
 	if len(firstNode) > 0 && firstNode[0] {
 		dag.startNode = n
@@ -140,6 +148,9 @@ func (dag *DAG) AddLoop(fromNodeID, toNodeID string) error {
 }
 
 func (dag *DAG) Start(ctx context.Context) error {
+	if dag.syncMode {
+		return nil
+	}
 	return dag.broker.Start(ctx, dag.brokerAddr)
 }
 
@@ -152,6 +163,9 @@ func (dag *DAG) Prepare(ctx context.Context) error {
 		return fmt.Errorf("no initial node found")
 	}
 	dag.startNode = startNode
+	if dag.syncMode {
+		return nil
+	}
 	dag.nodes.ForEach(func(_ string, node Node) bool {
 		go node.Consumer().Consume(ctx)
 		return true
@@ -194,18 +208,44 @@ func (dag *DAG) findInitialNode() (Node, error) {
 	return nt, nil
 }
 
-func (dag *DAG) processNode(ctx context.Context, task Task, queue string) Result {
-	if task.ID == "" {
-		task.ID = xid.New().String()
+func (dag *DAG) processNode(ctx context.Context, task *Task, queue string) Result {
+	if !dag.syncMode {
+		if err := dag.broker.Publish(ctx, *task, queue); err != nil {
+			fmt.Println("Failed to publish task:", err)
+		}
+		return Result{}
 	}
-	if err := dag.broker.Publish(ctx, task, queue); err != nil {
-		fmt.Println("Failed to publish task:", err)
+	n, ok := dag.nodes.Get(queue)
+	if task.CurrentQueue == "" {
+		task.CurrentQueue = queue
 	}
-	return Result{}
+	if !ok {
+		fmt.Println("Node not found:", queue)
+		return Result{Error: fmt.Errorf("node not found %s", queue)}
+	}
+	_, err := dag.broker.AddMessageToQueue(task, queue)
+	if err != nil {
+		return Result{Error: err}
+	}
+	result := n.Handler()(ctx, *task)
+	if result.Queue == "" {
+		result.Queue = task.CurrentQueue
+	}
+	if result.MessageID == "" {
+		result.MessageID = task.ID
+	}
+	if result.Error != nil {
+		return result
+	}
+	err = dag.broker.HandleProcessedMessage(ctx, result)
+	if err != nil {
+		return Result{Error: err, Status: result.Status}
+	}
+	return result
 }
 
 func (dag *DAG) ProcessTask(ctx context.Context, task Task) Result {
-	return dag.processNode(ctx, task, dag.startNode.Queue())
+	return dag.processNode(ctx, &task, dag.startNode.Queue())
 }
 
 func (dag *DAG) getConditionalNode(status, currentNode string) string {
