@@ -4,10 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net"
-
-	"github.com/oarkflow/xid"
-
-	"github.com/oarkflow/mq/utils"
 )
 
 type Publisher struct {
@@ -25,20 +21,20 @@ func (p *Publisher) Publish(ctx context.Context, queue string, task Task) error 
 		return fmt.Errorf("failed to connect to broker: %w", err)
 	}
 	defer conn.Close()
-
+	ctx = SetHeaders(ctx, map[string]string{
+		PublisherKey: p.id,
+		ContentType:  TypeJson,
+	})
 	cmd := Command{
-		ID:        xid.New().String(),
+		ID:        NewID(),
 		Command:   PUBLISH,
 		Queue:     queue,
 		MessageID: task.ID,
 		Payload:   task.Payload,
-		Options: map[string]any{
-			"publisher_id": p.id,
-		},
 	}
 
 	// Fire and forget: No need to wait for response
-	return utils.Write(ctx, conn, cmd)
+	return Write(ctx, conn, cmd)
 }
 
 func (p *Publisher) Request(ctx context.Context, queue string, task Task) (Result, error) {
@@ -47,22 +43,23 @@ func (p *Publisher) Request(ctx context.Context, queue string, task Task) (Resul
 		return Result{}, fmt.Errorf("failed to connect to broker: %w", err)
 	}
 	defer conn.Close()
+	ctx = SetHeaders(ctx, map[string]string{
+		PublisherKey: p.id,
+		ContentType:  TypeJson,
+	})
 	cmd := Command{
-		ID:        xid.New().String(),
+		ID:        NewID(),
 		Command:   REQUEST,
 		Queue:     queue,
 		MessageID: task.ID,
 		Payload:   task.Payload,
-		Options: map[string]any{
-			"publisher_id": p.id,
-		},
 	}
 	var result Result
-	err = utils.Write(ctx, conn, cmd)
+	err = Write(ctx, conn, cmd)
 	if err != nil {
 		return result, err
 	}
-	utils.ReadFromConn(ctx, conn, func(ctx context.Context, conn net.Conn, bytes []byte) error {
+	ReadFromConn(ctx, conn, func(ctx context.Context, conn net.Conn, bytes []byte) error {
 		fmt.Println(string(bytes))
 		return nil
 	})

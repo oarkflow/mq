@@ -1,4 +1,4 @@
-package utils
+package mq
 
 import (
 	"bufio"
@@ -9,12 +9,13 @@ import (
 	"io"
 	"net"
 	"strings"
+
+	"github.com/oarkflow/xid"
 )
 
 type Message struct {
-	Headers     map[string]string `json:"headers"`
-	Data        json.RawMessage   `json:"data"`
-	TriggerNode string            `json:"triggerNode"`
+	Headers map[string]string `json:"headers"`
+	Data    json.RawMessage   `json:"data"`
 }
 
 func IsClosed(conn net.Conn) bool {
@@ -27,31 +28,46 @@ func IsClosed(conn net.Conn) bool {
 	return false
 }
 
-func SetHeadersToContext(ctx context.Context, headers map[string]string) context.Context {
-	return context.WithValue(ctx, "headers", headers)
+func SetHeaders(ctx context.Context, headers map[string]string) context.Context {
+	return context.WithValue(ctx, HeaderKey, headers)
 }
 
-func GetHeadersFromContext(ctx context.Context) (map[string]string, bool) {
-	headers, ok := ctx.Value("headers").(map[string]string)
+func GetHeaders(ctx context.Context) (map[string]string, bool) {
+	headers, ok := ctx.Value(HeaderKey).(map[string]string)
 	return headers, ok
 }
 
-func SetTriggerNodeToContext(ctx context.Context, triggerNode string) context.Context {
-	return context.WithValue(ctx, "triggerNode", triggerNode)
+func GetContentType(ctx context.Context) (string, bool) {
+	headers, ok := GetHeaders(ctx)
+	if !ok {
+		return "", false
+	}
+	contentType, ok := headers[ContentType]
+	return contentType, ok
 }
 
-func GetTriggerNodeFromContext(ctx context.Context) (string, bool) {
-	headers, ok := ctx.Value("triggerNode").(string)
-	return headers, ok
+func GetConsumerID(ctx context.Context) (string, bool) {
+	headers, ok := GetHeaders(ctx)
+	if !ok {
+		return "", false
+	}
+	contentType, ok := headers[ConsumerKey]
+	return contentType, ok
+}
+
+func GetPublisherID(ctx context.Context) (string, bool) {
+	headers, ok := GetHeaders(ctx)
+	if !ok {
+		return "", false
+	}
+	contentType, ok := headers[PublisherKey]
+	return contentType, ok
 }
 
 func Write(ctx context.Context, conn net.Conn, data any) error {
 	msg := Message{Headers: make(map[string]string)}
-	if headers, ok := GetHeadersFromContext(ctx); ok {
+	if headers, ok := GetHeaders(ctx); ok {
 		msg.Headers = headers
-	}
-	if trigger, ok := GetTriggerNodeFromContext(ctx); ok {
-		msg.TriggerNode = trigger
 	}
 	dataBytes, err := json.Marshal(data)
 	if err != nil {
@@ -90,8 +106,7 @@ func ReadFromConn(ctx context.Context, conn net.Conn, handler MessageHandler) {
 			fmt.Println("Error unmarshalling message:", err)
 			continue
 		}
-		ctx = SetHeadersToContext(ctx, msg.Headers)
-		ctx = SetTriggerNodeToContext(ctx, msg.TriggerNode)
+		ctx = SetHeaders(ctx, msg.Headers)
 		if handler != nil {
 			err = handler(ctx, conn, msg.Data)
 			if err != nil {
@@ -100,4 +115,8 @@ func ReadFromConn(ctx context.Context, conn net.Conn, handler MessageHandler) {
 			}
 		}
 	}
+}
+
+func NewID() string {
+	return xid.New().String()
 }

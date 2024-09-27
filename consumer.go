@@ -10,10 +10,6 @@ import (
 	"slices"
 	"sync"
 	"time"
-
-	"github.com/oarkflow/xid"
-
-	"github.com/oarkflow/mq/utils"
 )
 
 type Consumer struct {
@@ -39,15 +35,16 @@ func (c *Consumer) Close() error {
 
 func (c *Consumer) subscribe(queue string) error {
 	ctx := context.Background()
+	ctx = SetHeaders(ctx, map[string]string{
+		ConsumerKey: c.id,
+		ContentType: TypeJson,
+	})
 	subscribe := Command{
 		Command: SUBSCRIBE,
 		Queue:   queue,
-		ID:      xid.New().String(),
-		Options: map[string]any{
-			"consumer_id": c.id,
-		},
+		ID:      NewID(),
 	}
-	return utils.Write(ctx, c.conn, subscribe)
+	return Write(ctx, c.conn, subscribe)
 }
 
 func (c *Consumer) ProcessTask(ctx context.Context, msg Task) Result {
@@ -81,7 +78,7 @@ func (c *Consumer) handleTaskMessage(ctx context.Context, msg Task) error {
 }
 
 func (c *Consumer) sendResult(ctx context.Context, response Result) error {
-	return utils.Write(ctx, c.conn, response)
+	return Write(ctx, c.conn, response)
 }
 
 func (c *Consumer) readMessage(ctx context.Context, message []byte) error {
@@ -141,7 +138,7 @@ func (c *Consumer) Consume(ctx context.Context, queues ...string) error {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		utils.ReadFromConn(ctx, c.conn, func(ctx context.Context, conn net.Conn, message []byte) error {
+		ReadFromConn(ctx, c.conn, func(ctx context.Context, conn net.Conn, message []byte) error {
 			return c.readMessage(ctx, message)
 		})
 		fmt.Println("Stopping consumer")

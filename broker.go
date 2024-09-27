@@ -8,10 +8,7 @@ import (
 	"net"
 	"time"
 
-	"github.com/oarkflow/xid"
 	"github.com/oarkflow/xsync"
-
-	"github.com/oarkflow/mq/utils"
 )
 
 type Handler func(context.Context, Task) Result
@@ -39,15 +36,6 @@ type Task struct {
 	Error        error           `json:"error"`
 }
 
-type CMD int
-
-const (
-	SUBSCRIBE CMD = iota + 1
-	PUBLISH
-	REQUEST
-	STOP
-)
-
 type Command struct {
 	ID        string          `json:"id"`
 	Command   CMD             `json:"command"`
@@ -55,7 +43,6 @@ type Command struct {
 	MessageID string          `json:"message_id"`
 	Payload   json.RawMessage `json:"payload,omitempty"` // Used for carrying the task payload
 	Error     string          `json:"error,omitempty"`
-	Options   map[string]any  `json:"options"`
 }
 
 type Result struct {
@@ -83,7 +70,7 @@ func (b *Broker) Send(ctx context.Context, cmd Command) error {
 		return errors.New("invalid queue or not exists")
 	}
 	for client := range queue.conn {
-		err := utils.Write(ctx, client, cmd)
+		err := Write(ctx, client, cmd)
 		if err != nil {
 			return err
 		}
@@ -106,7 +93,7 @@ func (b *Broker) Start(ctx context.Context, addr string) error {
 			fmt.Println("Error accepting connection:", err)
 			continue
 		}
-		go utils.ReadFromConn(ctx, conn, b.readMessage)
+		go ReadFromConn(ctx, conn, b.readMessage)
 	}
 }
 
@@ -116,12 +103,12 @@ func (b *Broker) Publish(ctx context.Context, message Task, queueName string) er
 		return err
 	}
 	if len(queue.conn) == 0 {
-		queue.deferred.Set(xid.New().String(), &message)
+		queue.deferred.Set(NewID(), &message)
 		fmt.Println("task deferred as no conn are connected", queueName)
 		return nil
 	}
 	for client := range queue.conn {
-		err = utils.Write(ctx, client, message)
+		err = Write(ctx, client, message)
 		if err != nil {
 			return err
 		}
@@ -145,7 +132,7 @@ func (b *Broker) AddMessageToQueue(message *Task, queueName string) (*Queue, err
 		return nil, fmt.Errorf("queue %s not found", queueName)
 	}
 	if message.ID == "" {
-		message.ID = xid.New().String()
+		message.ID = NewID()
 	}
 	if queueName != "" {
 		message.CurrentQueue = queueName
@@ -242,7 +229,7 @@ func (b *Broker) publish(ctx context.Context, conn net.Conn, msg Command) error 
 			Status:    "success",
 			Queue:     msg.Queue,
 		}
-		return utils.Write(ctx, conn, result)
+		return Write(ctx, conn, result)
 	}
 	return nil
 }
@@ -265,7 +252,7 @@ func (b *Broker) request(ctx context.Context, conn net.Conn, msg Command) error 
 			Status:    "success",
 			Queue:     msg.Queue,
 		}
-		return utils.Write(ctx, conn, result)
+		return Write(ctx, conn, result)
 	}
 	return nil
 }
