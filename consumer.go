@@ -129,6 +129,19 @@ func calculateJitter(baseDelay time.Duration) time.Duration {
 	return baseDelay + jitter
 }
 
+func (c *Consumer) readConn(ctx context.Context, conn net.Conn, message []byte) error {
+	return c.readMessage(ctx, message)
+}
+
+func (c *Consumer) onClose(ctx context.Context, conn net.Conn) error {
+	fmt.Println("Consumer Connection closed", c.id, conn.RemoteAddr())
+	return nil
+}
+
+func (c *Consumer) onError(ctx context.Context, conn net.Conn, err error) {
+	fmt.Println("Error reading from consumer connection:", err, conn.RemoteAddr())
+}
+
 func (c *Consumer) Consume(ctx context.Context, queues ...string) error {
 	err := c.AttemptConnect()
 	if err != nil {
@@ -138,9 +151,7 @@ func (c *Consumer) Consume(ctx context.Context, queues ...string) error {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		ReadFromConn(ctx, c.conn, func(ctx context.Context, conn net.Conn, message []byte) error {
-			return c.readMessage(ctx, message)
-		})
+		ReadFromConn(ctx, c.conn, c.readConn, c.onClose, c.onError)
 		fmt.Println("Stopping consumer")
 	}()
 	c.queues = slices.Compact(append(c.queues, queues...))

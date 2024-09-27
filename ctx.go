@@ -91,8 +91,19 @@ func Write(ctx context.Context, conn net.Conn, data any) error {
 
 type MessageHandler func(context.Context, net.Conn, []byte) error
 
-func ReadFromConn(ctx context.Context, conn net.Conn, handler MessageHandler) {
-	defer conn.Close()
+type CloseHandler func(context.Context, net.Conn) error
+
+type ErrorHandler func(context.Context, net.Conn, error)
+
+func ReadFromConn(ctx context.Context, conn net.Conn, handler MessageHandler, closeHandler CloseHandler, errorHandler ErrorHandler) {
+	defer func() {
+		if closeHandler != nil {
+			if err := closeHandler(ctx, conn); err != nil {
+				fmt.Println("Error in close handler:", err)
+			}
+		}
+		conn.Close()
+	}()
 	reader := bufio.NewReader(conn)
 	for {
 		messageBytes, err := reader.ReadBytes('\n')
@@ -100,7 +111,9 @@ func ReadFromConn(ctx context.Context, conn net.Conn, handler MessageHandler) {
 			if err == io.EOF || IsClosed(conn) || strings.Contains(err.Error(), "closed network connection") {
 				break
 			}
-			fmt.Println("Error reading message:", err)
+			if errorHandler != nil {
+				errorHandler(ctx, conn, err)
+			}
 			continue
 		}
 		messageBytes = bytes.TrimSpace(messageBytes)
@@ -110,14 +123,18 @@ func ReadFromConn(ctx context.Context, conn net.Conn, handler MessageHandler) {
 		var msg Message
 		err = json.Unmarshal(messageBytes, &msg)
 		if err != nil {
-			fmt.Println("Error unmarshalling message:", err)
+			if errorHandler != nil {
+				errorHandler(ctx, conn, err)
+			}
 			continue
 		}
 		ctx = SetHeaders(ctx, msg.Headers)
 		if handler != nil {
 			err = handler(ctx, conn, msg.Data)
 			if err != nil {
-				fmt.Println("Error handling message:", err)
+				if errorHandler != nil {
+					errorHandler(ctx, conn, err)
+				}
 				continue
 			}
 		}

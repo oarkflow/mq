@@ -122,6 +122,32 @@ func (b *Broker) sendToPublisher(ctx context.Context, publisherID string, result
 	return pub.send(ctx, result)
 }
 
+func (b *Broker) onClose(ctx context.Context, conn net.Conn) error {
+	consumerID, ok := GetConsumerID(ctx)
+	if ok && consumerID != "" {
+		if con, exists := b.consumers.Get(consumerID); exists {
+			con.conn.Close()
+			b.consumers.Del(consumerID)
+		}
+		b.queues.ForEach(func(_ string, queue *Queue) bool {
+			queue.consumers.Del(consumerID)
+			return true
+		})
+	}
+	publisherID, ok := GetPublisherID(ctx)
+	if ok && publisherID != "" {
+		if con, exists := b.publishers.Get(publisherID); exists {
+			con.conn.Close()
+			b.publishers.Del(publisherID)
+		}
+	}
+	return nil
+}
+
+func (b *Broker) onError(ctx context.Context, conn net.Conn, err error) {
+	fmt.Println("Error reading from connection:", err, conn.RemoteAddr())
+}
+
 func (b *Broker) Start(ctx context.Context, addr string) error {
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -137,7 +163,7 @@ func (b *Broker) Start(ctx context.Context, addr string) error {
 			fmt.Println("Error accepting connection:", err)
 			continue
 		}
-		go ReadFromConn(ctx, conn, b.readMessage)
+		go ReadFromConn(ctx, conn, b.readMessage, b.onClose, b.onError)
 	}
 }
 
