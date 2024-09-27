@@ -43,14 +43,16 @@ type CMD int
 
 const (
 	SUBSCRIBE CMD = iota + 1
+	PUBLISH
 	STOP
 )
 
 type Command struct {
-	Command   CMD    `json:"command"`
-	Queue     string `json:"queue"`
-	MessageID string `json:"message_id"`
-	Error     string `json:"error,omitempty"`
+	Command   CMD             `json:"command"`
+	Queue     string          `json:"queue"`
+	MessageID string          `json:"message_id"`
+	Payload   json.RawMessage `json:"payload,omitempty"` // Used for carrying the task payload
+	Error     string          `json:"error,omitempty"`
 }
 
 type Result struct {
@@ -217,6 +219,14 @@ func (b *Broker) handleCommandMessage(ctx context.Context, conn net.Conn, msg Co
 	switch msg.Command {
 	case SUBSCRIBE:
 		b.subscribe(ctx, msg.Queue, conn)
+	case PUBLISH:
+		task := Task{
+			ID:           msg.MessageID,
+			Payload:      json.RawMessage(msg.Error), // Assuming Error field carries task payload here
+			CreatedAt:    time.Now(),
+			CurrentQueue: msg.Queue,
+		}
+		return b.Publish(ctx, task, msg.Queue)
 	default:
 		return fmt.Errorf("unknown command: %d", msg.Command)
 	}

@@ -5,12 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/oarkflow/mq/utils"
 	"math/rand"
 	"net"
 	"slices"
 	"sync"
 	"time"
+
+	"github.com/oarkflow/mq/utils"
 )
 
 type Consumer struct {
@@ -128,6 +129,7 @@ func (c *Consumer) Consume(ctx context.Context, queues ...string) error {
 		utils.ReadFromConn(ctx, c.conn, func(ctx context.Context, conn net.Conn, message []byte) error {
 			return c.readMessage(ctx, message)
 		})
+		fmt.Println("Stopping consumer")
 	}()
 	c.queues = slices.Compact(append(c.queues, queues...))
 	for _, q := range c.queues {
