@@ -44,15 +44,18 @@ type CMD int
 const (
 	SUBSCRIBE CMD = iota + 1
 	PUBLISH
+	REQUEST
 	STOP
 )
 
 type Command struct {
+	ID        string          `json:"id"`
 	Command   CMD             `json:"command"`
 	Queue     string          `json:"queue"`
 	MessageID string          `json:"message_id"`
 	Payload   json.RawMessage `json:"payload,omitempty"` // Used for carrying the task payload
 	Error     string          `json:"error,omitempty"`
+	Options   map[string]any  `json:"options"`
 }
 
 type Result struct {
@@ -221,30 +224,61 @@ func (b *Broker) handleTaskMessage(ctx context.Context, _ net.Conn, msg Result) 
 	return b.HandleProcessedMessage(ctx, msg)
 }
 
+func (b *Broker) publish(ctx context.Context, conn net.Conn, msg Command) error {
+	task := Task{
+		ID:           msg.MessageID,
+		Payload:      msg.Payload,
+		CreatedAt:    time.Now(),
+		CurrentQueue: msg.Queue,
+	}
+	err := b.Publish(ctx, task, msg.Queue)
+	if err != nil {
+		return err
+	}
+	if task.ID != "" {
+		result := Result{
+			Command:   "PUBLISH",
+			MessageID: task.ID,
+			Status:    "success",
+			Queue:     msg.Queue,
+		}
+		return utils.Write(ctx, conn, result)
+	}
+	return nil
+}
+
+func (b *Broker) request(ctx context.Context, conn net.Conn, msg Command) error {
+	task := Task{
+		ID:           msg.MessageID,
+		Payload:      msg.Payload,
+		CreatedAt:    time.Now(),
+		CurrentQueue: msg.Queue,
+	}
+	err := b.Publish(ctx, task, msg.Queue)
+	if err != nil {
+		return err
+	}
+	if task.ID != "" {
+		result := Result{
+			Command:   "REQUEST",
+			MessageID: task.ID,
+			Status:    "success",
+			Queue:     msg.Queue,
+		}
+		return utils.Write(ctx, conn, result)
+	}
+	return nil
+}
+
 func (b *Broker) handleCommandMessage(ctx context.Context, conn net.Conn, msg Command) error {
 	switch msg.Command {
 	case SUBSCRIBE:
 		b.subscribe(ctx, msg.Queue, conn)
+		return nil
 	case PUBLISH:
-		task := Task{
-			ID:           msg.MessageID,
-			Payload:      msg.Payload,
-			CreatedAt:    time.Now(),
-			CurrentQueue: msg.Queue,
-		}
-		err := b.Publish(ctx, task, msg.Queue)
-		if err != nil {
-			return err
-		}
-		if task.ID != "" {
-			result := Result{
-				Command:   "PUBLISH",
-				MessageID: task.ID,
-				Status:    "success",
-				Queue:     msg.Queue,
-			}
-			_ = utils.Write(ctx, conn, result)
-		}
+		return b.publish(ctx, conn, msg)
+	case REQUEST:
+		return b.request(ctx, conn, msg)
 	default:
 		return fmt.Errorf("unknown command: %d", msg.Command)
 	}

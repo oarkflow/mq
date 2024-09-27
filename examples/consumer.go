@@ -8,7 +8,7 @@ import (
 )
 
 func main() {
-	consumer := mq.NewConsumer(":8080")
+	consumer := mq.NewConsumer("consumer-1", ":8080")
 	consumer.RegisterHandler("queue1", func(ctx context.Context, task mq.Task) mq.Result {
 		fmt.Println("Handling task for queue1:", string(task.Payload))
 		return mq.Result{Payload: []byte(`{"task": 123}`), MessageID: task.ID}

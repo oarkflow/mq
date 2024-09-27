@@ -11,21 +11,25 @@ import (
 	"sync"
 	"time"
 
+	"github.com/oarkflow/xid"
+
 	"github.com/oarkflow/mq/utils"
 )
 
 type Consumer struct {
+	id         string
 	serverAddr string
 	handlers   map[string]Handler
 	queues     []string
 	conn       net.Conn
 }
 
-func NewConsumer(serverAddr string, queues ...string) *Consumer {
+func NewConsumer(id, serverAddr string, queues ...string) *Consumer {
 	return &Consumer{
 		handlers:   make(map[string]Handler),
 		serverAddr: serverAddr,
 		queues:     queues,
+		id:         id,
 	}
 }
 
@@ -35,7 +39,14 @@ func (c *Consumer) Close() error {
 
 func (c *Consumer) subscribe(queue string) error {
 	ctx := context.Background()
-	subscribe := Command{Command: SUBSCRIBE, Queue: queue}
+	subscribe := Command{
+		Command: SUBSCRIBE,
+		Queue:   queue,
+		ID:      xid.New().String(),
+		Options: map[string]any{
+			"consumer_id": c.id,
+		},
+	}
 	return utils.Write(ctx, c.conn, subscribe)
 }
 
@@ -66,6 +77,10 @@ func (c *Consumer) handleTaskMessage(ctx context.Context, msg Task) error {
 		response.Command = "completed"
 		response.MessageID = msg.ID
 	}
+	return c.sendResult(ctx, response)
+}
+
+func (c *Consumer) sendResult(ctx context.Context, response Result) error {
 	return utils.Write(ctx, c.conn, response)
 }
 
