@@ -103,12 +103,12 @@ func (dag *DAG) TaskCallback(ctx context.Context, task *Task) error {
 }
 
 func (dag *DAG) AddNode(queue string, handler Handler, firstNode ...bool) {
-	consumer := NewConsumer(dag.brokerAddr)
-	consumer.RegisterHandler(queue, handler)
+	con := NewConsumer(dag.brokerAddr)
+	con.RegisterHandler(queue, handler)
 	dag.broker.NewQueue(queue)
 	n := &node{
 		queue:    queue,
-		consumer: consumer,
+		consumer: con,
 		handler:  handler,
 	}
 	if len(firstNode) > 0 && firstNode[0] {

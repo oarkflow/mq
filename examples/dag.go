@@ -4,8 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/oarkflow/mq"
 	"time"
+
+	"github.com/oarkflow/mq"
 )
 
 func handleNode1(_ context.Context, task mq.Task) mq.Result {
@@ -40,15 +41,25 @@ func handleNode2(_ context.Context, task mq.Task) mq.Result {
 }
 
 func handleNode3(_ context.Context, task mq.Task) mq.Result {
-	result := `{"field": "node3", "item": %s}`
-	fmt.Printf("Processing task at node3: %s\n", string(task.Payload))
-	return mq.Result{Status: "completed", Payload: json.RawMessage(fmt.Sprintf(result, string(task.Payload)))}
+	var data map[string]any
+	err := json.Unmarshal(task.Payload, &data)
+	if err != nil {
+		return mq.Result{Error: err}
+	}
+	data["item"] = "Item processed in node3"
+	bt, _ := json.Marshal(data)
+	return mq.Result{Status: "completed", Payload: bt}
 }
 
 func handleNode4(_ context.Context, task mq.Task) mq.Result {
-	result := `{"field": "node4", "item": %s}`
-	fmt.Printf("Processing task at node4: %s\n", string(task.Payload))
-	return mq.Result{Status: "completed", Payload: json.RawMessage(fmt.Sprintf(result, string(task.Payload)))}
+	var data map[string]any
+	err := json.Unmarshal(task.Payload, &data)
+	if err != nil {
+		return mq.Result{Error: err}
+	}
+	data["item"] = "An Item processed in node4"
+	bt, _ := json.Marshal(data)
+	return mq.Result{Status: "completed", Payload: bt}
 }
 
 func main() {
