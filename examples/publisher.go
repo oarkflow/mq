@@ -10,16 +10,10 @@ import (
 )
 
 func main() {
-	/*// Fire-and-Forget Example
+	// Fire-and-Forget Example
 	err := publishAsync()
 	if err != nil {
 		log.Fatalf("Failed to publish async: %v", err)
-	}*/
-
-	// Request/Response Example
-	err := publishSync()
-	if err != nil {
-		log.Fatalf("Failed to publish sync: %v", err)
 	}
 }
 

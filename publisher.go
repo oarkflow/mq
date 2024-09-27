@@ -32,8 +32,6 @@ func (p *Publisher) Publish(ctx context.Context, queue string, task Task) error 
 		MessageID: task.ID,
 		Payload:   task.Payload,
 	}
-
-	// Fire and forget: No need to wait for response
 	return Write(ctx, conn, cmd)
 }
 
