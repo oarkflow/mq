@@ -10,14 +10,14 @@ import (
 )
 
 func main() {
-	// Fire-and-Forget Example
+	/*// Fire-and-Forget Example
 	err := publishAsync()
 	if err != nil {
 		log.Fatalf("Failed to publish async: %v", err)
-	}
+	}*/
 
 	// Request/Response Example
-	err = publishSync()
+	err := publishSync()
 	if err != nil {
 		log.Fatalf("Failed to publish sync: %v", err)
 	}
@@ -25,7 +25,7 @@ func main() {
 
 // publishAsync sends a task in Fire-and-Forget (async) mode
 func publishAsync() error {
-	taskPayload := map[string]string{"message": "Fire-and-Forget Task"}
+	taskPayload := map[string]string{"message": "Fire-and-Forget \n Task"}
 	payload, _ := json.Marshal(taskPayload)
 
 	task := mq.Task{
@@ -45,7 +45,7 @@ func publishAsync() error {
 
 // publishSync sends a task in Request/Response (sync) mode
 func publishSync() error {
-	taskPayload := map[string]string{"message": "Request/Response Task"}
+	taskPayload := map[string]string{"message": "Request/Response \n Task"}
 	payload, _ := json.Marshal(taskPayload)
 
 	task := mq.Task{
