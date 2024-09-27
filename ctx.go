@@ -29,7 +29,14 @@ func IsClosed(conn net.Conn) bool {
 }
 
 func SetHeaders(ctx context.Context, headers map[string]string) context.Context {
-	return context.WithValue(ctx, HeaderKey, headers)
+	hd, ok := GetHeaders(ctx)
+	if !ok {
+		hd = make(map[string]string)
+	}
+	for key, val := range headers {
+		hd[key] = val
+	}
+	return context.WithValue(ctx, HeaderKey, hd)
 }
 
 func GetHeaders(ctx context.Context) (map[string]string, bool) {

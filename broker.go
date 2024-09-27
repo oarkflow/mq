@@ -11,18 +11,57 @@ import (
 	"github.com/oarkflow/xsync"
 )
 
+type consumer struct {
+	id   string
+	conn net.Conn
+}
+
+func (p *consumer) send(ctx context.Context, cmd any) error {
+	return Write(ctx, p.conn, cmd)
+}
+
+type publisher struct {
+	id   string
+	conn net.Conn
+}
+
+func (p *publisher) send(ctx context.Context, cmd any) error {
+	return Write(ctx, p.conn, cmd)
+}
+
 type Handler func(context.Context, Task) Result
 
 type Broker struct {
-	queues       *xsync.MapOf[string, *Queue]
+	queues       xsync.IMap[string, *Queue]
 	taskCallback func(context.Context, *Task) error
+	consumers    xsync.IMap[string, *consumer]
+	publishers   xsync.IMap[string, *publisher]
 }
 
 type Queue struct {
-	name     string
-	conn     map[net.Conn]struct{}
-	messages *xsync.MapOf[string, *Task]
-	deferred *xsync.MapOf[string, *Task]
+	name      string
+	consumers xsync.IMap[string, *consumer]
+	messages  xsync.IMap[string, *Task]
+	deferred  xsync.IMap[string, *Task]
+}
+
+func newQueue(name string) *Queue {
+	return &Queue{
+		name:      name,
+		consumers: xsync.NewMap[string, *consumer](),
+		messages:  xsync.NewMap[string, *Task](),
+		deferred:  xsync.NewMap[string, *Task](),
+	}
+}
+
+func (queue *Queue) send(ctx context.Context, cmd any) {
+	queue.consumers.ForEach(func(_ string, client *consumer) bool {
+		err := client.send(ctx, cmd)
+		if err != nil {
+			return false
+		}
+		return true
+	})
 }
 
 type Task struct {
@@ -56,7 +95,9 @@ type Result struct {
 
 func NewBroker(callback ...func(context.Context, *Task) error) *Broker {
 	broker := &Broker{
-		queues: xsync.NewMap[string, *Queue](),
+		queues:     xsync.NewMap[string, *Queue](),
+		publishers: xsync.NewMap[string, *publisher](),
+		consumers:  xsync.NewMap[string, *consumer](),
 	}
 	if len(callback) > 0 {
 		broker.taskCallback = callback[0]
@@ -69,13 +110,16 @@ func (b *Broker) Send(ctx context.Context, cmd Command) error {
 	if !ok || queue == nil {
 		return errors.New("invalid queue or not exists")
 	}
-	for client := range queue.conn {
-		err := Write(ctx, client, cmd)
-		if err != nil {
-			return err
-		}
-	}
+	queue.send(ctx, cmd)
 	return nil
+}
+
+func (b *Broker) sendToPublisher(ctx context.Context, publisherID string, result Result) error {
+	pub, ok := b.publishers.Get(publisherID)
+	if !ok {
+		return nil
+	}
+	return pub.send(ctx, result)
 }
 
 func (b *Broker) Start(ctx context.Context, addr string) error {
@@ -102,27 +146,18 @@ func (b *Broker) Publish(ctx context.Context, message Task, queueName string) er
 	if err != nil {
 		return err
 	}
-	if len(queue.conn) == 0 {
+	if queue.consumers.Size() == 0 {
 		queue.deferred.Set(NewID(), &message)
-		fmt.Println("task deferred as no conn are connected", queueName)
+		fmt.Println("task deferred as no consumers are connected", queueName)
 		return nil
 	}
-	for client := range queue.conn {
-		err = Write(ctx, client, message)
-		if err != nil {
-			return err
-		}
-	}
+	queue.send(ctx, message)
 	return nil
 }
 
 func (b *Broker) NewQueue(qName string) {
 	if _, ok := b.queues.Get(qName); !ok {
-		b.queues.Set(qName, &Queue{
-			name:     qName,
-			messages: xsync.NewMap[string, *Task](),
-			deferred: xsync.NewMap[string, *Task](),
-		})
+		b.queues.Set(qName, newQueue(qName))
 	}
 }
 
@@ -143,6 +178,13 @@ func (b *Broker) AddMessageToQueue(message *Task, queueName string) (*Queue, err
 }
 
 func (b *Broker) HandleProcessedMessage(ctx context.Context, clientMsg Result) error {
+	publisherID, ok := GetPublisherID(ctx)
+	if ok && publisherID != "" {
+		err := b.sendToPublisher(ctx, publisherID, clientMsg)
+		if err != nil {
+			return err
+		}
+	}
 	if queue, ok := b.queues.Get(clientMsg.Queue); ok {
 		if msg, ok := queue.messages.Get(clientMsg.MessageID); ok {
 			msg.ProcessedAt = time.Now()
@@ -161,35 +203,48 @@ func (b *Broker) HandleProcessedMessage(ctx context.Context, clientMsg Result) e
 	return nil
 }
 
-func (b *Broker) subscribe(ctx context.Context, queueName string, conn net.Conn) {
+func (b *Broker) addConsumer(ctx context.Context, queueName string, conn net.Conn) string {
+	consumerID, ok := GetConsumerID(ctx)
 	q, ok := b.queues.Get(queueName)
 	if !ok {
-		q = &Queue{
-			conn: make(map[net.Conn]struct{}),
-		}
-		q.conn[conn] = struct{}{}
-		b.queues.Set(queueName, q)
+		b.NewQueue(queueName)
 	}
-	if q.conn == nil {
-		q.conn = make(map[net.Conn]struct{})
+	con := &consumer{id: consumerID, conn: conn}
+	b.consumers.Set(consumerID, con)
+	q.consumers.Set(consumerID, con)
+	return consumerID
+}
+
+func (b *Broker) addPublisher(ctx context.Context, queueName string, conn net.Conn) string {
+	publisherID, ok := GetPublisherID(ctx)
+	_, ok = b.queues.Get(queueName)
+	if !ok {
+		b.NewQueue(queueName)
 	}
-	q.conn[conn] = struct{}{}
+	con := &publisher{id: publisherID, conn: conn}
+	b.publishers.Set(publisherID, con)
+	return publisherID
+}
+
+func (b *Broker) subscribe(ctx context.Context, queueName string, conn net.Conn) {
+	consumerID := b.addConsumer(ctx, queueName, conn)
 	go func() {
 		select {
 		case <-ctx.Done():
-			b.removeConnection(queueName, conn)
+			b.removeConsumer(queueName, consumerID)
 		}
 	}()
 }
 
 // Removes connection from the queue and broker
-func (b *Broker) removeConnection(queueName string, conn net.Conn) {
+func (b *Broker) removeConsumer(queueName, consumerID string) {
 	if queue, ok := b.queues.Get(queueName); ok {
-		delete(queue.conn, conn)
-		if len(queue.conn) == 0 {
-			b.queues.Del(queueName)
+		con, ok := queue.consumers.Get(consumerID)
+		if ok {
+			con.conn.Close()
+			queue.consumers.Del(consumerID)
 		}
-		conn.Close()
+		b.queues.Del(queueName)
 	}
 }
 
@@ -212,6 +267,7 @@ func (b *Broker) handleTaskMessage(ctx context.Context, _ net.Conn, msg Result) 
 }
 
 func (b *Broker) publish(ctx context.Context, conn net.Conn, msg Command) error {
+	b.addPublisher(ctx, msg.Queue, conn)
 	task := Task{
 		ID:           msg.MessageID,
 		Payload:      msg.Payload,
@@ -235,6 +291,7 @@ func (b *Broker) publish(ctx context.Context, conn net.Conn, msg Command) error 
 }
 
 func (b *Broker) request(ctx context.Context, conn net.Conn, msg Command) error {
+	b.addPublisher(ctx, msg.Queue, conn)
 	task := Task{
 		ID:           msg.MessageID,
 		Payload:      msg.Payload,
@@ -269,5 +326,4 @@ func (b *Broker) handleCommandMessage(ctx context.Context, conn net.Conn, msg Co
 	default:
 		return fmt.Errorf("unknown command: %d", msg.Command)
 	}
-	return nil
 }

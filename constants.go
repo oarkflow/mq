@@ -4,8 +4,10 @@ type CMD int
 
 const (
 	SUBSCRIBE CMD = iota + 1
+	ACK
 	PUBLISH
 	REQUEST
+	RESPONSE
 	STOP
 )
 

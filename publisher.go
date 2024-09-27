@@ -60,8 +60,8 @@ func (p *Publisher) Request(ctx context.Context, queue string, task Task) (Resul
 		return result, err
 	}
 	ReadFromConn(ctx, conn, func(ctx context.Context, conn net.Conn, bytes []byte) error {
-		fmt.Println(string(bytes))
-		return nil
+		fmt.Println(string(bytes), "Here")
+		return conn.Close()
 	})
 	return result, nil
 }
