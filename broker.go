@@ -184,17 +184,23 @@ func (b *Broker) subscribe(ctx context.Context, queueName string, conn net.Conn)
 		q.conn = make(map[net.Conn]struct{})
 	}
 	q.conn[conn] = struct{}{}
-	if q.deferred == nil {
-		q.deferred = xsync.NewMap[string, *Task]()
-	}
-	q.deferred.ForEach(func(_ string, message *Task) bool {
-		err := b.Publish(ctx, *message, queueName)
-		if err != nil {
-			return false
+	go func() {
+		select {
+		case <-ctx.Done():
+			b.removeConnection(queueName, conn)
 		}
-		return true
-	})
-	q.deferred = nil
+	}()
+}
+
+// Removes connection from the queue and broker
+func (b *Broker) removeConnection(queueName string, conn net.Conn) {
+	if queue, ok := b.queues.Get(queueName); ok {
+		delete(queue.conn, conn)
+		if len(queue.conn) == 0 {
+			b.queues.Del(queueName)
+		}
+		conn.Close()
+	}
 }
 
 func (b *Broker) readMessage(ctx context.Context, conn net.Conn, message []byte) error {
@@ -222,11 +228,23 @@ func (b *Broker) handleCommandMessage(ctx context.Context, conn net.Conn, msg Co
 	case PUBLISH:
 		task := Task{
 			ID:           msg.MessageID,
-			Payload:      json.RawMessage(msg.Error), // Assuming Error field carries task payload here
+			Payload:      msg.Payload,
 			CreatedAt:    time.Now(),
 			CurrentQueue: msg.Queue,
 		}
-		return b.Publish(ctx, task, msg.Queue)
+		err := b.Publish(ctx, task, msg.Queue)
+		if err != nil {
+			return err
+		}
+		if task.ID != "" {
+			result := Result{
+				Command:   "PUBLISH",
+				MessageID: task.ID,
+				Status:    "success",
+				Queue:     msg.Queue,
+			}
+			_ = utils.Write(ctx, conn, result)
+		}
 	default:
 		return fmt.Errorf("unknown command: %d", msg.Command)
 	}
