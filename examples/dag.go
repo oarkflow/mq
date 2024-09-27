@@ -64,7 +64,7 @@ func handleNode4(_ context.Context, task mq.Task) mq.Result {
 
 func main() {
 	ctx := context.Background()
-	d := mq.NewDAG(":8082", true)
+	d := mq.NewDAG(false)
 
 	d.AddNode("node1", handleNode1, true)
 	d.AddNode("node2", handleNode2)

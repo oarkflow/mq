@@ -162,15 +162,15 @@ func (b *Broker) onError(ctx context.Context, conn net.Conn, err error) {
 	fmt.Println("Error reading from connection:", err, conn.RemoteAddr())
 }
 
-func (b *Broker) Start(ctx context.Context, addr string) error {
-	listener, err := net.Listen("tcp", addr)
+func (b *Broker) Start(ctx context.Context) error {
+	listener, err := net.Listen("tcp", b.opts.brokerAddr)
 	if err != nil {
 		return err
 	}
 	defer func() {
 		_ = listener.Close()
 	}()
-	fmt.Println("Broker server started on", addr)
+	fmt.Println("Broker server started on", b.opts.brokerAddr)
 	for {
 		conn, err := listener.Accept()
 		if err != nil {

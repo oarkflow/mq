@@ -2,7 +2,6 @@ package mq
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -43,15 +42,13 @@ type DAG struct {
 	loopEdges  [][]string
 	broker     *Broker
 	startNode  Node
-	brokerAddr string
 	conditions map[string]map[string]string
 	syncMode   bool
 }
 
-func NewDAG(brokerAddr string, syncMode bool) *DAG {
+func NewDAG(syncMode bool) *DAG {
 	dag := &DAG{
 		nodes:      xsync.NewMap[string, Node](),
-		brokerAddr: brokerAddr,
 		conditions: make(map[string]map[string]string),
 		syncMode:   syncMode,
 	}
@@ -60,50 +57,11 @@ func NewDAG(brokerAddr string, syncMode bool) *DAG {
 }
 
 func (dag *DAG) TaskCallback(ctx context.Context, task *Task) error {
-	if task.Error != nil {
-		return task.Error
-	}
-	if task.CurrentQueue == "" {
-		return errors.New("queue is empty")
-	}
-	triggerNode, ok := ctx.Value(triggerNodeKey).(string)
-	if ok {
-		fmt.Println("Triggered by node:", triggerNode)
-	}
-	for _, loopEdge := range dag.loopEdges {
-		start := loopEdge[0]
-		targets := loopEdge[1:]
-		if start != task.CurrentQueue {
-			continue
-		}
-		var items []any
-		err := json.Unmarshal(task.Result, &items)
-		if err != nil {
-			return err
-		}
-		ctx = context.WithValue(ctx, triggerNodeKey, start)
-		for _, item := range items {
-			bt, _ := json.Marshal(item)
-			dag.processEdge(ctx, task.ID, bt, targets)
-		}
-	}
-	for _, edge := range dag.edges {
-		start := edge[0]
-		targets := edge[1:]
-		if start != task.CurrentQueue {
-			continue
-		}
-		ctx = context.WithValue(ctx, triggerNodeKey, start)
-		dag.processEdge(ctx, task.ID, task.Result, targets)
-	}
-	n := dag.getConditionalNode(task.Status, task.CurrentQueue)
-	ctx = context.WithValue(ctx, triggerNodeKey, task.CurrentQueue)
-	dag.processEdge(ctx, task.ID, task.Result, []string{n})
 	return nil
 }
 
 func (dag *DAG) AddNode(queue string, handler Handler, firstNode ...bool) {
-	con := NewConsumer(dag.brokerAddr)
+	con := NewConsumer("consume-" + queue)
 	con.RegisterHandler(queue, handler)
 	dag.broker.NewQueue(queue)
 	n := &node{
@@ -149,7 +107,7 @@ func (dag *DAG) Start(ctx context.Context) error {
 	if dag.syncMode {
 		return nil
 	}
-	return dag.broker.Start(ctx, dag.brokerAddr)
+	return dag.broker.Start(ctx)
 }
 
 func (dag *DAG) Prepare(ctx context.Context) error {

@@ -14,5 +14,5 @@ func main() {
 	}))
 	b.NewQueue("queue1")
 	b.NewQueue("queue2")
-	b.Start(context.Background(), ":8080")
+	b.Start(context.Background())
 }
