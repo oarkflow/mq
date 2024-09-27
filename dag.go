@@ -55,7 +55,7 @@ func NewDAG(brokerAddr string, syncMode bool) *DAG {
 		conditions: make(map[string]map[string]string),
 		syncMode:   syncMode,
 	}
-	dag.broker = NewBroker(dag.TaskCallback)
+	dag.broker = NewBroker(WithCallback(dag.TaskCallback))
 	return dag
 }
 
@@ -103,7 +103,7 @@ func (dag *DAG) TaskCallback(ctx context.Context, task *Task) error {
 }
 
 func (dag *DAG) AddNode(queue string, handler Handler, firstNode ...bool) {
-	consumer := NewConsumer(dag.brokerAddr, queue)
+	consumer := NewConsumer(dag.brokerAddr)
 	consumer.RegisterHandler(queue, handler)
 	dag.broker.NewQueue(queue)
 	n := &node{

@@ -32,10 +32,10 @@ func (p *publisher) send(ctx context.Context, cmd any) error {
 type Handler func(context.Context, Task) Result
 
 type Broker struct {
-	queues       xsync.IMap[string, *Queue]
-	taskCallback func(context.Context, *Task) error
-	consumers    xsync.IMap[string, *consumer]
-	publishers   xsync.IMap[string, *publisher]
+	queues     xsync.IMap[string, *Queue]
+	consumers  xsync.IMap[string, *consumer]
+	publishers xsync.IMap[string, *publisher]
+	opts       Options
 }
 
 type Queue struct {
@@ -93,15 +93,29 @@ type Result struct {
 	Status    string          `json:"status"`
 }
 
-func NewBroker(callback ...func(context.Context, *Task) error) *Broker {
+func NewBroker(opts ...Option) *Broker {
+	options := defaultOptions()
+	for _, opt := range opts {
+		opt(&options)
+	}
 	broker := &Broker{
 		queues:     xsync.NewMap[string, *Queue](),
 		publishers: xsync.NewMap[string, *publisher](),
 		consumers:  xsync.NewMap[string, *consumer](),
 	}
-	if len(callback) > 0 {
-		broker.taskCallback = callback[0]
+
+	if options.messageHandler == nil {
+		options.messageHandler = broker.readMessage
 	}
+
+	if options.closeHandler == nil {
+		options.closeHandler = broker.onClose
+	}
+
+	if options.errorHandler == nil {
+		options.errorHandler = broker.onError
+	}
+	broker.opts = options
 	return broker
 }
 
@@ -163,7 +177,7 @@ func (b *Broker) Start(ctx context.Context, addr string) error {
 			fmt.Println("Error accepting connection:", err)
 			continue
 		}
-		go ReadFromConn(ctx, conn, b.readMessage, b.onClose, b.onError)
+		go ReadFromConn(ctx, conn, b.opts.messageHandler, b.opts.closeHandler, b.opts.errorHandler)
 	}
 }
 
@@ -221,8 +235,13 @@ func (b *Broker) HandleProcessedMessage(ctx context.Context, clientMsg Result) e
 			if clientMsg.Error != nil {
 				msg.Status = "error"
 			}
-			if b.taskCallback != nil {
-				return b.taskCallback(ctx, msg)
+			for _, callback := range b.opts.callback {
+				if callback != nil {
+					err := callback(ctx, msg)
+					if err != nil {
+						return err
+					}
+				}
 			}
 		}
 	}

@@ -7,26 +7,40 @@ import (
 	"fmt"
 	"math/rand"
 	"net"
-	"slices"
 	"sync"
 	"time"
 )
 
 type Consumer struct {
-	id         string
-	serverAddr string
-	handlers   map[string]Handler
-	queues     []string
-	conn       net.Conn
+	id       string
+	handlers map[string]Handler
+	conn     net.Conn
+	queues   []string
+	opts     Options
 }
 
-func NewConsumer(id, serverAddr string, queues ...string) *Consumer {
-	return &Consumer{
-		handlers:   make(map[string]Handler),
-		serverAddr: serverAddr,
-		queues:     queues,
-		id:         id,
+func NewConsumer(id string, opts ...Option) *Consumer {
+	options := defaultOptions()
+	for _, opt := range opts {
+		opt(&options)
 	}
+	con := &Consumer{
+		handlers: make(map[string]Handler),
+		id:       id,
+	}
+	if options.messageHandler == nil {
+		options.messageHandler = con.readConn
+	}
+
+	if options.closeHandler == nil {
+		options.closeHandler = con.onClose
+	}
+
+	if options.errorHandler == nil {
+		options.errorHandler = con.onError
+	}
+	con.opts = options
+	return con
 }
 
 func (c *Consumer) Close() error {
@@ -107,13 +121,13 @@ func (c *Consumer) AttemptConnect() error {
 	var err error
 	delay := initialDelay
 	for i := 0; i < maxRetries; i++ {
-		conn, err = net.Dial("tcp", c.serverAddr)
+		conn, err = net.Dial("tcp", c.opts.brokerAddr)
 		if err == nil {
 			c.conn = conn
 			return nil
 		}
 		sleepDuration := calculateJitter(delay)
-		fmt.Printf("Failed connecting to %s (attempt %d/%d): %v, Retrying in %v...\n", c.serverAddr, i+1, maxRetries, err, sleepDuration)
+		fmt.Printf("Failed connecting to %s (attempt %d/%d): %v, Retrying in %v...\n", c.opts.brokerAddr, i+1, maxRetries, err, sleepDuration)
 		time.Sleep(sleepDuration)
 		delay *= 2
 		if delay > maxBackoff {
@@ -121,7 +135,7 @@ func (c *Consumer) AttemptConnect() error {
 		}
 	}
 
-	return fmt.Errorf("could not connect to server %s after %d attempts: %w", c.serverAddr, maxRetries, err)
+	return fmt.Errorf("could not connect to server %s after %d attempts: %w", c.opts.brokerAddr, maxRetries, err)
 }
 
 func calculateJitter(baseDelay time.Duration) time.Duration {
@@ -142,7 +156,7 @@ func (c *Consumer) onError(ctx context.Context, conn net.Conn, err error) {
 	fmt.Println("Error reading from consumer connection:", err, conn.RemoteAddr())
 }
 
-func (c *Consumer) Consume(ctx context.Context, queues ...string) error {
+func (c *Consumer) Consume(ctx context.Context) error {
 	err := c.AttemptConnect()
 	if err != nil {
 		return err
@@ -151,10 +165,9 @@ func (c *Consumer) Consume(ctx context.Context, queues ...string) error {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		ReadFromConn(ctx, c.conn, c.readConn, c.onClose, c.onError)
+		ReadFromConn(ctx, c.conn, c.opts.messageHandler, c.opts.closeHandler, c.opts.errorHandler)
 		fmt.Println("Stopping consumer")
 	}()
-	c.queues = slices.Compact(append(c.queues, queues...))
 	for _, q := range c.queues {
 		if err := c.subscribe(q); err != nil {
 			return fmt.Errorf("failed to connect to server for queue %s: %v", q, err)
@@ -165,5 +178,6 @@ func (c *Consumer) Consume(ctx context.Context, queues ...string) error {
 }
 
 func (c *Consumer) RegisterHandler(queue string, handler Handler) {
+	c.queues = append(c.queues, queue)
 	c.handlers[queue] = handler
 }

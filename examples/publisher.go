@@ -4,17 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 
 	"github.com/oarkflow/mq"
 )
 
 func main() {
-	// Fire-and-Forget Example
-	err := publishAsync()
-	if err != nil {
-		log.Fatalf("Failed to publish async: %v", err)
-	}
+	publishAsync()
+	publishSync()
 }
 
 // publishAsync sends a task in Fire-and-Forget (async) mode
@@ -27,7 +23,7 @@ func publishAsync() error {
 	}
 
 	// Create publisher and send the task without waiting for a result
-	publisher := mq.NewPublisher("publish-1", ":8080")
+	publisher := mq.NewPublisher("publish-1")
 	err := publisher.Publish(context.Background(), "queue1", task)
 	if err != nil {
 		return fmt.Errorf("failed to publish async task: %w", err)
@@ -47,7 +43,7 @@ func publishSync() error {
 	}
 
 	// Create publisher and send the task, waiting for the result
-	publisher := mq.NewPublisher("publish-2", ":8080")
+	publisher := mq.NewPublisher("publish-2")
 	result, err := publisher.Request(context.Background(), "queue1", task)
 	if err != nil {
 		return fmt.Errorf("failed to publish sync task: %w", err)
