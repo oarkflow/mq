@@ -2,11 +2,10 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"sync"
 	"time"
-	
+
 	"github.com/oarkflow/mq"
 )
 
@@ -20,15 +19,19 @@ func main() {
 		log.Printf("Handling task for queue2: %s", string(task.Payload))
 		return mq.Result{Payload: []byte(`{"task": 456}`), MessageID: task.ID}
 	})
+	dag.AddNode("queue3", func(ctx context.Context, task mq.Task) mq.Result {
+		log.Printf("Handling task for queue3: %s", string(task.Payload))
+		return mq.Result{Payload: []byte(`{"task": "ASDADAS"}`), MessageID: task.ID}
+	})
 	dag.AddEdge("queue1", "queue2")
-	
-	// Start DAG processing
+	dag.AddEdge("queue2", "queue3")
+
 	go func() {
 		time.Sleep(2 * time.Second)
 		finalResult := dag.Send([]byte(`{"task": 1}`))
 		log.Printf("Final result received: %s", string(finalResult.Payload))
 	}()
-	
+
 	err := dag.Start(context.TODO())
 	if err != nil {
 		panic(err)
@@ -39,8 +42,8 @@ type DAG struct {
 	server    *mq.Broker
 	nodes     map[string]*mq.Consumer
 	edges     map[string][]string
-	taskChMap map[string]chan mq.Result // A map to store result channels for each task
-	mu        sync.Mutex                // Mutex to protect the taskChMap
+	taskChMap map[string]chan mq.Result
+	mu        sync.Mutex
 }
 
 func NewDAG(opts ...mq.Option) *DAG {
@@ -71,22 +74,22 @@ func (d *DAG) Start(ctx context.Context) error {
 	return d.server.Start(ctx)
 }
 
-func (d *DAG) PublishTask(ctx context.Context, payload []byte, queueName string) (*mq.Task, error) {
+func (d *DAG) PublishTask(ctx context.Context, payload []byte, queueName string, taskID ...string) (*mq.Task, error) {
 	task := mq.Task{
 		Payload: payload,
+	}
+	if len(taskID) > 0 {
+		task.ID = taskID[0]
 	}
 	return d.server.Publish(ctx, task, queueName)
 }
 
-// TaskCallback is the function triggered after each task completion.
 func (d *DAG) TaskCallback(ctx context.Context, task *mq.Task) error {
 	log.Printf("Callback from queue %s with result: %s", task.CurrentQueue, string(task.Result))
 	edges, exists := d.edges[task.CurrentQueue]
 	if !exists {
-		// Lock and send the result to the specific task channel
 		d.mu.Lock()
-		fmt.Println(d.taskChMap, task.ID)
-		for _, resultCh := range d.taskChMap {
+		if resultCh, ok := d.taskChMap[task.ID]; ok {
 			result := mq.Result{
 				Command:   "complete",
 				Payload:   task.Result,
@@ -95,23 +98,19 @@ func (d *DAG) TaskCallback(ctx context.Context, task *mq.Task) error {
 				Status:    "done",
 			}
 			resultCh <- result
-			delete(d.taskChMap, task.ID) // Clean up the channel
+			delete(d.taskChMap, task.ID)
 		}
 		d.mu.Unlock()
 		return nil
 	}
-	
-	// Forward the task to the next node(s)
 	for _, edge := range edges {
-		_, err := d.PublishTask(ctx, task.Result, edge)
+		_, err := d.PublishTask(ctx, task.Result, edge, task.ID)
 		if err != nil {
 			return err
 		}
 	}
 	return nil
 }
-
-// Send sends the task and waits for the final result.
 func (d *DAG) Send(payload []byte) mq.Result {
 	resultCh := make(chan mq.Result)
 	task, err := d.PublishTask(context.TODO(), payload, "queue1")

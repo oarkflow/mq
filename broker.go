@@ -207,10 +207,7 @@ func (b *Broker) NewQueue(qName string) *Queue {
 }
 
 func (b *Broker) AddMessageToQueue(message *Task, queueName string) (*Queue, *Task, error) {
-	queue, ok := b.queues.Get(queueName)
-	if !ok {
-		return nil, nil, fmt.Errorf("queue %s not found", queueName)
-	}
+	queue := b.NewQueue(queueName)
 	if message.ID == "" {
 		message.ID = NewID()
 	}
