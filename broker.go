@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"time"
 
@@ -170,7 +171,7 @@ func (b *Broker) Start(ctx context.Context) error {
 	defer func() {
 		_ = listener.Close()
 	}()
-	fmt.Println("Broker server started on", b.opts.brokerAddr)
+	log.Println("Server started on", b.opts.brokerAddr)
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
@@ -181,30 +182,34 @@ func (b *Broker) Start(ctx context.Context) error {
 	}
 }
 
-func (b *Broker) Publish(ctx context.Context, message Task, queueName string) error {
-	queue, err := b.AddMessageToQueue(&message, queueName)
+func (b *Broker) Publish(ctx context.Context, message Task, queueName string) (*Task, error) {
+	queue, task, err := b.AddMessageToQueue(&message, queueName)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if queue.consumers.Size() == 0 {
 		queue.deferred.Set(NewID(), &message)
 		fmt.Println("task deferred as no consumers are connected", queueName)
-		return nil
+		return task, nil
 	}
 	queue.send(ctx, message)
-	return nil
+	return task, nil
 }
 
-func (b *Broker) NewQueue(qName string) {
-	if _, ok := b.queues.Get(qName); !ok {
-		b.queues.Set(qName, newQueue(qName))
+func (b *Broker) NewQueue(qName string) *Queue {
+	q, ok := b.queues.Get(qName)
+	if ok {
+		return q
 	}
+	q = newQueue(qName)
+	b.queues.Set(qName, q)
+	return q
 }
 
-func (b *Broker) AddMessageToQueue(message *Task, queueName string) (*Queue, error) {
+func (b *Broker) AddMessageToQueue(message *Task, queueName string) (*Queue, *Task, error) {
 	queue, ok := b.queues.Get(queueName)
 	if !ok {
-		return nil, fmt.Errorf("queue %s not found", queueName)
+		return nil, nil, fmt.Errorf("queue %s not found", queueName)
 	}
 	if message.ID == "" {
 		message.ID = NewID()
@@ -214,7 +219,7 @@ func (b *Broker) AddMessageToQueue(message *Task, queueName string) (*Queue, err
 	}
 	message.CreatedAt = time.Now()
 	queue.messages.Set(message.ID, message)
-	return queue, nil
+	return queue, message, nil
 }
 
 func (b *Broker) HandleProcessedMessage(ctx context.Context, clientMsg Result) error {
@@ -250,9 +255,18 @@ func (b *Broker) HandleProcessedMessage(ctx context.Context, clientMsg Result) e
 
 func (b *Broker) addConsumer(ctx context.Context, queueName string, conn net.Conn) string {
 	consumerID, ok := GetConsumerID(ctx)
+	defer func() {
+		cmd := Command{
+			Command: SUBSCRIBE_ACK,
+			Queue:   queueName,
+			Error:   "",
+		}
+		Write(ctx, conn, cmd)
+		log.Printf("Consumer %s joined server on queue %s", consumerID, queueName)
+	}()
 	q, ok := b.queues.Get(queueName)
 	if !ok {
-		b.NewQueue(queueName)
+		q = b.NewQueue(queueName)
 	}
 	con := &consumer{id: consumerID, conn: conn}
 	b.consumers.Set(consumerID, con)
@@ -319,7 +333,7 @@ func (b *Broker) publish(ctx context.Context, conn net.Conn, msg Command) error 
 		CreatedAt:    time.Now(),
 		CurrentQueue: msg.Queue,
 	}
-	err := b.Publish(ctx, task, msg.Queue)
+	_, err := b.Publish(ctx, task, msg.Queue)
 	if err != nil {
 		return err
 	}
@@ -343,7 +357,7 @@ func (b *Broker) request(ctx context.Context, conn net.Conn, msg Command) error 
 		CreatedAt:    time.Now(),
 		CurrentQueue: msg.Queue,
 	}
-	err := b.Publish(ctx, task, msg.Queue)
+	_, err := b.Publish(ctx, task, msg.Queue)
 	if err != nil {
 		return err
 	}

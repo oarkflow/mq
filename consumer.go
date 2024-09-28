@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"sync"
 	"time"
@@ -74,6 +75,9 @@ func (c *Consumer) handleCommandMessage(msg Command) error {
 	switch msg.Command {
 	case STOP:
 		return c.Close()
+	case SUBSCRIBE_ACK:
+		log.Printf("Consumer %s subscribed to queue %s\n", c.id, msg.Queue)
+		return nil
 	default:
 		return fmt.Errorf("unknown command in consumer %d", msg.Command)
 	}
