@@ -2,6 +2,7 @@ package mq
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 )
@@ -17,9 +18,6 @@ func NewPublisher(id string, opts ...Option) *Publisher {
 		opt(&options)
 	}
 	pub := &Publisher{id: id}
-	if options.messageHandler == nil {
-		options.messageHandler = pub.readConn
-	}
 
 	if options.closeHandler == nil {
 		options.closeHandler = pub.onClose
@@ -52,11 +50,6 @@ func (p *Publisher) Publish(ctx context.Context, queue string, task Task) error 
 	return Write(ctx, conn, cmd)
 }
 
-func (p *Publisher) readConn(ctx context.Context, conn net.Conn, message []byte) error {
-	fmt.Println(string(message), conn.RemoteAddr())
-	return conn.Close()
-}
-
 func (p *Publisher) onClose(ctx context.Context, conn net.Conn) error {
 	fmt.Println("Publisher Connection closed", p.id, conn.RemoteAddr())
 	return nil
@@ -87,6 +80,15 @@ func (p *Publisher) Request(ctx context.Context, queue string, task Task) (Resul
 	err = Write(ctx, conn, cmd)
 	if err != nil {
 		return result, err
+	}
+	if p.opts.messageHandler == nil {
+		p.opts.messageHandler = func(ctx context.Context, conn net.Conn, message []byte) error {
+			err := json.Unmarshal(message, &result)
+			if err != nil {
+				return err
+			}
+			return conn.Close()
+		}
 	}
 	ReadFromConn(ctx, conn, p.opts.messageHandler, p.opts.closeHandler, p.opts.errorHandler)
 	return result, nil

@@ -49,6 +49,6 @@ func publishSync() error {
 		return fmt.Errorf("failed to publish sync task: %w", err)
 	}
 
-	fmt.Printf("Sync task published. Result: %v\n", result)
+	fmt.Printf("Sync task published. Result: %v\n", string(result.Payload))
 	return nil
 }
