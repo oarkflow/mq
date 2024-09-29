@@ -20,7 +20,7 @@ type Options struct {
 
 func defaultOptions() Options {
 	return Options{
-		syncMode:      true,
+		syncMode:      false,
 		brokerAddr:    ":8080",
 		maxRetries:    5,
 		initialDelay:  2 * time.Second,
