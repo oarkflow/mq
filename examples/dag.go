@@ -43,7 +43,6 @@ func main() {
 	d.AddEdge("queue1", "queue2")
 	d.AddLoop("queue2", "queue3")
 	d.AddEdge("queue2", "queue4")
-
 	go func() {
 		time.Sleep(2 * time.Second)
 		finalResult := d.Send([]byte(`[{"user_id": 1}, {"user_id": 2}]`))

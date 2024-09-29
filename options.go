@@ -6,6 +6,7 @@ import (
 )
 
 type Options struct {
+	syncMode       bool
 	brokerAddr     string
 	messageHandler MessageHandler
 	closeHandler   CloseHandler
@@ -19,6 +20,7 @@ type Options struct {
 
 func defaultOptions() Options {
 	return Options{
+		syncMode:      true,
 		brokerAddr:    ":8080",
 		maxRetries:    5,
 		initialDelay:  2 * time.Second,
@@ -34,6 +36,13 @@ type Option func(*Options)
 func WithBrokerURL(url string) Option {
 	return func(opts *Options) {
 		opts.brokerAddr = url
+	}
+}
+
+// WithSyncMode -
+func WithSyncMode(mode bool) Option {
+	return func(opts *Options) {
+		opts.syncMode = mode
 	}
 }
 

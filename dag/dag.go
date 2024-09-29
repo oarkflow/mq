@@ -3,6 +3,7 @@ package dag
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sync"
 
 	"github.com/oarkflow/mq"
@@ -17,6 +18,7 @@ type taskContext struct {
 }
 
 type DAG struct {
+	FirstNode   string
 	server      *mq.Broker
 	nodes       map[string]*mq.Consumer
 	edges       map[string][]string
@@ -39,8 +41,11 @@ func New(opts ...mq.Option) *DAG {
 	return d
 }
 
-func (d *DAG) AddNode(name string, handler mq.Handler) {
+func (d *DAG) AddNode(name string, handler mq.Handler, firstNode ...bool) {
 	con := mq.NewConsumer(name)
+	if len(firstNode) > 0 {
+		d.FirstNode = name
+	}
 	con.RegisterHandler(name, handler)
 	d.nodes[name] = con
 }
@@ -54,6 +59,15 @@ func (d *DAG) AddLoop(fromNode string, toNode ...string) {
 }
 
 func (d *DAG) Start(ctx context.Context) error {
+	if d.FirstNode == "" {
+		firstNode, ok := d.FindFirstNode()
+		if ok && firstNode != "" {
+			d.FirstNode = firstNode
+		}
+	}
+	if d.server.SyncMode() {
+		return nil
+	}
 	for _, con := range d.nodes {
 		go con.Consume(ctx)
 	}
@@ -70,11 +84,37 @@ func (d *DAG) PublishTask(ctx context.Context, payload []byte, queueName string,
 	return d.server.Publish(ctx, task, queueName)
 }
 
+func (d *DAG) FindFirstNode() (string, bool) {
+	inDegree := make(map[string]int)
+	for n, _ := range d.nodes {
+		inDegree[n] = 0
+	}
+	for _, targets := range d.edges {
+		for _, outNode := range targets {
+			inDegree[outNode]++
+		}
+	}
+	for _, targets := range d.loopEdges {
+		for _, outNode := range targets {
+			inDegree[outNode]++
+		}
+	}
+	for n, count := range inDegree {
+		if count == 0 {
+			return n, true
+		}
+	}
+	return "", false
+}
+
 func (d *DAG) Send(payload []byte) mq.Result {
+	if d.FirstNode == "" {
+		return mq.Result{Error: fmt.Errorf("initial node not defined")}
+	}
 	resultCh := make(chan mq.Result)
-	task, err := d.PublishTask(context.TODO(), payload, "queue2")
+	task, err := d.PublishTask(context.TODO(), payload, d.FirstNode)
 	if err != nil {
-		panic(err)
+		return mq.Result{Error: err}
 	}
 	d.mu.Lock()
 	d.taskChMap[task.ID] = resultCh

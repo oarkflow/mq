@@ -129,6 +129,10 @@ func (b *Broker) Send(ctx context.Context, cmd Command) error {
 	return nil
 }
 
+func (b *Broker) SyncMode() bool {
+	return b.opts.syncMode
+}
+
 func (b *Broker) sendToPublisher(ctx context.Context, publisherID string, result Result) error {
 	pub, ok := b.publishers.Get(publisherID)
 	if !ok {
