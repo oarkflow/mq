@@ -14,11 +14,9 @@ import (
 func main() {
 	d := dag.New()
 	d.AddNode("queue1", func(ctx context.Context, task mq.Task) mq.Result {
-		log.Printf("Handling task for queue1: %s", string(task.Payload))
 		return mq.Result{Payload: task.Payload, MessageID: task.ID}
 	})
 	d.AddNode("queue2", func(ctx context.Context, task mq.Task) mq.Result {
-		log.Printf("Handling task for queue2: %s", string(task.Payload))
 		return mq.Result{Payload: task.Payload, MessageID: task.ID}
 	})
 	d.AddNode("queue3", func(ctx context.Context, task mq.Task) mq.Result {
@@ -29,7 +27,6 @@ func main() {
 		}
 		data["salary"] = fmt.Sprintf("12000%v", data["user_id"])
 		bt, _ := json.Marshal(data)
-		log.Printf("Handling task for queue3: %s", string(bt))
 		return mq.Result{Payload: bt, MessageID: task.ID}
 	})
 	d.AddNode("queue4", func(ctx context.Context, task mq.Task) mq.Result {
@@ -38,7 +35,6 @@ func main() {
 		if err != nil {
 			return mq.Result{Error: err}
 		}
-		log.Printf("Handling task for queue4: %s", string(task.Payload))
 		payload := map[string]any{"storage": data}
 		bt, _ := json.Marshal(payload)
 		return mq.Result{Payload: bt, MessageID: task.ID}
