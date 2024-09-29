@@ -62,6 +62,15 @@ func GetConsumerID(ctx context.Context) (string, bool) {
 	return contentType, ok
 }
 
+func GetTriggerNode(ctx context.Context) (string, bool) {
+	headers, ok := GetHeaders(ctx)
+	if !ok {
+		return "", false
+	}
+	contentType, ok := headers[TriggerNode]
+	return contentType, ok
+}
+
 func GetPublisherID(ctx context.Context) (string, bool) {
 	headers, ok := GetHeaders(ctx)
 	if !ok {

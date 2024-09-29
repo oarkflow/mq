@@ -17,4 +17,5 @@ var (
 	ContentType  = "Content-Type"
 	TypeJson     = "application/json"
 	HeaderKey    = "headers"
+	TriggerNode  = "triggerNode"
 )
