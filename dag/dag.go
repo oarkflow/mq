@@ -72,7 +72,7 @@ func (d *DAG) PublishTask(ctx context.Context, payload []byte, queueName string,
 
 func (d *DAG) Send(payload []byte) mq.Result {
 	resultCh := make(chan mq.Result)
-	task, err := d.PublishTask(context.TODO(), payload, "queue1")
+	task, err := d.PublishTask(context.TODO(), payload, "queue2")
 	if err != nil {
 		panic(err)
 	}
@@ -111,6 +111,9 @@ func (d *DAG) TaskCallback(ctx context.Context, task *mq.Task) error {
 					result = nodeResult.result
 					nodeType = "edge"
 				}
+			}
+			if completed {
+				delete(taskResults, triggeredNode)
 			}
 		}
 	}
@@ -172,6 +175,7 @@ func (d *DAG) TaskCallback(ctx context.Context, task *mq.Task) error {
 				Status:    "done",
 			}
 			delete(d.taskChMap, task.ID)
+			delete(d.taskResults, task.ID)
 		}
 		d.mu.Unlock()
 	}
