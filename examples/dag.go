@@ -121,6 +121,19 @@ func (d *DAG) PublishTask(ctx context.Context, payload []byte, queueName string,
 	return d.server.Publish(ctx, task, queueName)
 }
 
+func (d *DAG) Send(payload []byte) mq.Result {
+	resultCh := make(chan mq.Result)
+	task, err := d.PublishTask(context.TODO(), payload, "queue1")
+	if err != nil {
+		panic(err)
+	}
+	d.mu.Lock()
+	d.taskChMap[task.ID] = resultCh
+	d.mu.Unlock()
+	finalResult := <-resultCh
+	return finalResult
+}
+
 func (d *DAG) TaskCallback(ctx context.Context, task *mq.Task) error {
 	log.Printf("Callback from queue %s with result: %s", task.CurrentQueue, string(task.Result))
 	d.mu.Lock()
@@ -219,17 +232,4 @@ func (d *DAG) waitForLoopCompletion(ctx context.Context, taskID string, currentQ
 			}
 		}
 	}
-}
-
-func (d *DAG) Send(payload []byte) mq.Result {
-	resultCh := make(chan mq.Result)
-	task, err := d.PublishTask(context.TODO(), payload, "queue1")
-	if err != nil {
-		panic(err)
-	}
-	d.mu.Lock()
-	d.taskChMap[task.ID] = resultCh
-	d.mu.Unlock()
-	finalResult := <-resultCh
-	return finalResult
 }
