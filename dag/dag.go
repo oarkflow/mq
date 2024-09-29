@@ -20,7 +20,7 @@ type DAG struct {
 	server      *mq.Broker
 	nodes       map[string]*mq.Consumer
 	edges       map[string][]string
-	loopEdges   map[string]string
+	loopEdges   map[string][]string
 	taskChMap   map[string]chan mq.Result
 	taskResults map[string]map[string]*taskContext
 	mu          sync.Mutex
@@ -30,7 +30,7 @@ func New(opts ...mq.Option) *DAG {
 	d := &DAG{
 		nodes:       make(map[string]*mq.Consumer),
 		edges:       make(map[string][]string),
-		loopEdges:   make(map[string]string),
+		loopEdges:   make(map[string][]string),
 		taskChMap:   make(map[string]chan mq.Result),
 		taskResults: make(map[string]map[string]*taskContext),
 	}
@@ -49,7 +49,7 @@ func (d *DAG) AddEdge(fromNode string, toNodes ...string) {
 	d.edges[fromNode] = toNodes
 }
 
-func (d *DAG) AddLoop(fromNode string, toNode string) {
+func (d *DAG) AddLoop(fromNode string, toNode ...string) {
 	d.loopEdges[fromNode] = toNode
 }
 
@@ -119,7 +119,7 @@ func (d *DAG) TaskCallback(ctx context.Context, task *mq.Task) error {
 	} else {
 		payload = task.Result
 	}
-	if loopNode, exists := d.loopEdges[task.CurrentQueue]; exists {
+	if loopNodes, exists := d.loopEdges[task.CurrentQueue]; exists {
 		var items []json.RawMessage
 		if err := json.Unmarshal(payload, &items); err != nil {
 			return err
@@ -132,12 +132,15 @@ func (d *DAG) TaskCallback(ctx context.Context, task *mq.Task) error {
 		}
 
 		ctx = mq.SetHeaders(ctx, map[string]string{mq.TriggerNode: task.CurrentQueue})
-		for _, item := range items {
-			_, err := d.PublishTask(ctx, item, loopNode, task.ID)
-			if err != nil {
-				return err
+		for _, loopNode := range loopNodes {
+			for _, item := range items {
+				_, err := d.PublishTask(ctx, item, loopNode, task.ID)
+				if err != nil {
+					return err
+				}
 			}
 		}
+
 		return nil
 	}
 	if nodeType == "loop" && completed {
