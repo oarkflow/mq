@@ -98,22 +98,18 @@ func (d *DAG) TaskCallback(ctx context.Context, task *mq.Task) error {
 			nodeResult, exists := taskResults[triggeredNode]
 			if exists {
 				nodeResult.completed++
+				if nodeResult.completed == nodeResult.totalItems {
+					completed = true
+				}
 				switch nodeResult.nodeType {
 				case "loop":
 					nodeResult.results = append(nodeResult.results, task.Result)
+					result = nodeResult.results
 					nodeType = "loop"
 				case "edge":
 					nodeResult.result = task.Result
+					result = nodeResult.result
 					nodeType = "edge"
-				}
-				if nodeResult.completed == nodeResult.totalItems {
-					completed = true
-					switch nodeResult.nodeType {
-					case "loop":
-						result = nodeResult.results
-					case "edge":
-						result = nodeResult.result
-					}
 				}
 			}
 		}
