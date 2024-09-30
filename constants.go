@@ -1,6 +1,6 @@
 package mq
 
-type CMD int
+type CMD byte
 
 const (
 	SUBSCRIBE CMD = iota + 1

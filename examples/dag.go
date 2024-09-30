@@ -4,11 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/oarkflow/mq"
-	"github.com/oarkflow/mq/dag"
 	"io"
 	"log"
 	"net/http"
+
+	"github.com/oarkflow/mq"
+	"github.com/oarkflow/mq/dag"
 )
 
 var d *dag.DAG
@@ -72,6 +73,7 @@ func sendTaskHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Empty request body", http.StatusBadRequest)
 		return
 	}
+	fmt.Println(string(payload))
 	finalResult := d.Send(payload)
 	w.Header().Set("Content-Type", "application/json")
 	result := map[string]any{

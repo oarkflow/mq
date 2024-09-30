@@ -123,48 +123,73 @@ func (d *DAG) Send(payload []byte) mq.Result {
 	return finalResult
 }
 
-func (d *DAG) handleTriggerNode(ctx context.Context, task *mq.Task) (bool, string, any, []byte, string) {
+func (d *DAG) TaskCallback(ctx context.Context, task *mq.Task) mq.Result {
+	if task.Error != nil {
+		return mq.Result{Error: task.Error}
+	}
 	triggeredNode, ok := mq.GetTriggerNode(ctx)
 	var result any
 	var payload []byte
 	completed := false
 	var nodeType string
-	if !(ok && triggeredNode != "") {
-		return false, nodeType, result, payload, triggeredNode
-	}
-	taskResults, ok := d.taskResults[task.ID]
-	if !ok {
-		return false, nodeType, result, payload, triggeredNode
-	}
-	nodeResult, exists := taskResults[triggeredNode]
-	if exists {
-		return false, nodeType, result, payload, triggeredNode
-	}
-	nodeResult.completed++
-	if nodeResult.completed == nodeResult.totalItems {
-		completed = true
-	}
-	switch nodeResult.nodeType {
-	case "loop":
-		nodeResult.results = append(nodeResult.results, task.Result)
-		if completed {
-			result = nodeResult.results
+	if ok && triggeredNode != "" {
+		taskResults, ok := d.taskResults[task.ID]
+		if ok {
+			nodeResult, exists := taskResults[triggeredNode]
+			if exists {
+				nodeResult.completed++
+				if nodeResult.completed == nodeResult.totalItems {
+					completed = true
+				}
+				switch nodeResult.nodeType {
+				case "loop":
+					nodeResult.results = append(nodeResult.results, task.Result)
+					result = nodeResult.results
+					nodeType = "loop"
+				case "edge":
+					nodeResult.result = task.Result
+					result = nodeResult.result
+					nodeType = "edge"
+				}
+			}
+			if completed {
+				delete(taskResults, triggeredNode)
+			}
 		}
-		nodeType = "loop"
-	case "edge":
-		nodeResult.result = task.Result
-		if completed {
-			result = nodeResult.result
-		}
-		nodeType = "edge"
 	}
 	if completed {
-		delete(taskResults, triggeredNode)
+		payload, _ = json.Marshal(result)
+	} else {
+		payload = task.Result
 	}
-	return completed, nodeType, result, payload, triggeredNode
-}
+	if loopNodes, exists := d.loopEdges[task.CurrentQueue]; exists {
+		var items []json.RawMessage
+		if err := json.Unmarshal(payload, &items); err != nil {
+			return mq.Result{Error: task.Error}
+		}
+		d.taskResults[task.ID] = map[string]*taskContext{
+			task.CurrentQueue: {
+				totalItems: len(items),
+				nodeType:   "loop",
+			},
+		}
 
-func (d *DAG) handleEdges(ctx context.Context, task *mq.Task, payload []byte, completed bool) error {
+		ctx = mq.SetHeaders(ctx, map[string]string{mq.TriggerNode: task.CurrentQueue})
+		for _, loopNode := range loopNodes {
+			for _, item := range items {
+				_, err := d.PublishTask(ctx, item, loopNode, task.ID)
+				if err != nil {
+					return mq.Result{Error: task.Error}
+				}
+			}
+		}
+
+		return mq.Result{}
+	}
+	if nodeType == "loop" && completed {
+		task.CurrentQueue = triggeredNode
+	}
+	ctx = mq.SetHeaders(ctx, map[string]string{mq.TriggerNode: task.CurrentQueue})
 	edges, exists := d.edges[task.CurrentQueue]
 	if exists {
 		d.taskResults[task.ID] = map[string]*taskContext{
@@ -176,7 +201,7 @@ func (d *DAG) handleEdges(ctx context.Context, task *mq.Task, payload []byte, co
 		for _, edge := range edges {
 			_, err := d.PublishTask(ctx, payload, edge, task.ID)
 			if err != nil {
-				return err
+				return mq.Result{Error: task.Error}
 			}
 		}
 	} else if completed {
@@ -194,49 +219,5 @@ func (d *DAG) handleEdges(ctx context.Context, task *mq.Task, payload []byte, co
 		}
 		d.mu.Unlock()
 	}
-	return nil
-
-}
-
-func (d *DAG) handleLoopEdges(ctx context.Context, task *mq.Task, payload []byte, loopNodes []string) error {
-	var items []json.RawMessage
-	if err := json.Unmarshal(payload, &items); err != nil {
-		return err
-	}
-	d.taskResults[task.ID] = map[string]*taskContext{
-		task.CurrentQueue: {
-			totalItems: len(items),
-			nodeType:   "loop",
-		},
-	}
-	ctx = mq.SetHeaders(ctx, map[string]string{mq.TriggerNode: task.CurrentQueue})
-	for _, loopNode := range loopNodes {
-		for _, item := range items {
-			_, err := d.PublishTask(ctx, item, loopNode, task.ID)
-			if err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-func (d *DAG) TaskCallback(ctx context.Context, task *mq.Task) error {
-	if task.Error != nil {
-		return task.Error
-	}
-	completed, nodeType, result, payload, triggeredNode := d.handleTriggerNode(ctx, task)
-	if completed {
-		payload, _ = json.Marshal(result)
-	} else {
-		payload = task.Result
-	}
-	if loopNodes, exists := d.loopEdges[task.CurrentQueue]; exists {
-		return d.handleLoopEdges(ctx, task, payload, loopNodes)
-	}
-	if nodeType == "loop" && completed {
-		task.CurrentQueue = triggeredNode
-	}
-	ctx = mq.SetHeaders(ctx, map[string]string{mq.TriggerNode: task.CurrentQueue})
-	return d.handleEdges(ctx, task, payload, completed)
+	return mq.Result{}
 }

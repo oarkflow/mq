@@ -243,9 +243,9 @@ func (b *Broker) HandleProcessedMessage(ctx context.Context, clientMsg Result) e
 			}
 			for _, callback := range b.opts.callback {
 				if callback != nil {
-					err := callback(ctx, msg)
-					if err != nil {
-						return err
+					result := callback(ctx, msg)
+					if result.Error != nil {
+						return result.Error
 					}
 				}
 			}
