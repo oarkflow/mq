@@ -129,34 +129,37 @@ func (d *DAG) handleTriggerNode(ctx context.Context, task *mq.Task) (bool, strin
 	var payload []byte
 	completed := false
 	var nodeType string
-	if ok && triggeredNode != "" {
-		taskResults, ok := d.taskResults[task.ID]
-		if ok {
-			nodeResult, exists := taskResults[triggeredNode]
-			if exists {
-				nodeResult.completed++
-				if nodeResult.completed == nodeResult.totalItems {
-					completed = true
-				}
-				switch nodeResult.nodeType {
-				case "loop":
-					nodeResult.results = append(nodeResult.results, task.Result)
-					if completed {
-						result = nodeResult.results
-					}
-					nodeType = "loop"
-				case "edge":
-					nodeResult.result = task.Result
-					if completed {
-						result = nodeResult.result
-					}
-					nodeType = "edge"
-				}
-			}
-			if completed {
-				delete(taskResults, triggeredNode)
-			}
+	if !(ok && triggeredNode != "") {
+		return false, nodeType, result, payload, triggeredNode
+	}
+	taskResults, ok := d.taskResults[task.ID]
+	if !ok {
+		return false, nodeType, result, payload, triggeredNode
+	}
+	nodeResult, exists := taskResults[triggeredNode]
+	if exists {
+		return false, nodeType, result, payload, triggeredNode
+	}
+	nodeResult.completed++
+	if nodeResult.completed == nodeResult.totalItems {
+		completed = true
+	}
+	switch nodeResult.nodeType {
+	case "loop":
+		nodeResult.results = append(nodeResult.results, task.Result)
+		if completed {
+			result = nodeResult.results
 		}
+		nodeType = "loop"
+	case "edge":
+		nodeResult.result = task.Result
+		if completed {
+			result = nodeResult.result
+		}
+		nodeType = "edge"
+	}
+	if completed {
+		delete(taskResults, triggeredNode)
 	}
 	return completed, nodeType, result, payload, triggeredNode
 }
@@ -206,7 +209,6 @@ func (d *DAG) handleLoopEdges(ctx context.Context, task *mq.Task, payload []byte
 			nodeType:   "loop",
 		},
 	}
-
 	ctx = mq.SetHeaders(ctx, map[string]string{mq.TriggerNode: task.CurrentQueue})
 	for _, loopNode := range loopNodes {
 		for _, item := range items {
