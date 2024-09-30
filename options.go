@@ -11,7 +11,7 @@ type Options struct {
 	messageHandler MessageHandler
 	closeHandler   CloseHandler
 	errorHandler   ErrorHandler
-	callback       []func(context.Context, *Task) Result
+	callback       []func(context.Context, Result) Result
 	maxRetries     int
 	initialDelay   time.Duration
 	maxBackoff     time.Duration
@@ -68,7 +68,7 @@ func WithMaxBackoff(val time.Duration) Option {
 }
 
 // WithCallback -
-func WithCallback(val ...func(context.Context, *Task) Result) Option {
+func WithCallback(val ...func(context.Context, Result) Result) Option {
 	return func(opts *Options) {
 		opts.callback = val
 	}

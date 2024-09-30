@@ -8,8 +8,8 @@ import (
 )
 
 func main() {
-	b := mq.NewBroker(mq.WithCallback(func(ctx context.Context, task *mq.Task) mq.Result {
-		fmt.Println("Received task", task.ID, "Payload", string(task.Payload), "Result", string(task.Result), task.Error, task.CurrentQueue)
+	b := mq.NewBroker(mq.WithCallback(func(ctx context.Context, task mq.Result) mq.Result {
+		fmt.Println("Received task", task.MessageID, "Payload", string(task.Payload), task.Error, task.Queue)
 		return mq.Result{}
 	}))
 	b.NewQueue("queue1")

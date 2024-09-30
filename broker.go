@@ -71,7 +71,6 @@ type Task struct {
 	CreatedAt    time.Time       `json:"created_at"`
 	ProcessedAt  time.Time       `json:"processed_at"`
 	CurrentQueue string          `json:"current_queue"`
-	Result       json.RawMessage `json:"result"`
 	Status       string          `json:"status"`
 	Error        error           `json:"error"`
 }
@@ -141,7 +140,7 @@ func (b *Broker) sendToPublisher(ctx context.Context, publisherID string, result
 	return pub.send(ctx, result)
 }
 
-func (b *Broker) onClose(ctx context.Context, conn net.Conn) error {
+func (b *Broker) onClose(ctx context.Context, _ net.Conn) error {
 	consumerID, ok := GetConsumerID(ctx)
 	if ok && consumerID != "" {
 		if con, exists := b.consumers.Get(consumerID); exists {
@@ -163,7 +162,7 @@ func (b *Broker) onClose(ctx context.Context, conn net.Conn) error {
 	return nil
 }
 
-func (b *Broker) onError(ctx context.Context, conn net.Conn, err error) {
+func (b *Broker) onError(_ context.Context, conn net.Conn, err error) {
 	fmt.Println("Error reading from connection:", err, conn.RemoteAddr())
 }
 
@@ -186,18 +185,24 @@ func (b *Broker) Start(ctx context.Context) error {
 	}
 }
 
-func (b *Broker) Publish(ctx context.Context, message Task, queueName string) (*Task, error) {
+func (b *Broker) Publish(ctx context.Context, message Task, queueName string) Result {
 	queue, task, err := b.AddMessageToQueue(&message, queueName)
 	if err != nil {
-		return nil, err
+		return Result{Error: err}
+	}
+	result := Result{
+		Command:   "PUBLISH",
+		Payload:   message.Payload,
+		Queue:     queueName,
+		MessageID: task.ID,
 	}
 	if queue.consumers.Size() == 0 {
 		queue.deferred.Set(NewID(), &message)
 		fmt.Println("task deferred as no consumers are connected", queueName)
-		return task, nil
+		return result
 	}
 	queue.send(ctx, message)
-	return task, nil
+	return result
 }
 
 func (b *Broker) NewQueue(qName string) *Queue {
@@ -210,44 +215,32 @@ func (b *Broker) NewQueue(qName string) *Queue {
 	return q
 }
 
-func (b *Broker) AddMessageToQueue(message *Task, queueName string) (*Queue, *Task, error) {
+func (b *Broker) AddMessageToQueue(task *Task, queueName string) (*Queue, *Task, error) {
 	queue := b.NewQueue(queueName)
-	if message.ID == "" {
-		message.ID = NewID()
+	if task.ID == "" {
+		task.ID = NewID()
 	}
 	if queueName != "" {
-		message.CurrentQueue = queueName
+		task.CurrentQueue = queueName
 	}
-	message.CreatedAt = time.Now()
-	queue.messages.Set(message.ID, message)
-	return queue, message, nil
+	task.CreatedAt = time.Now()
+	queue.messages.Set(task.ID, task)
+	return queue, task, nil
 }
 
-func (b *Broker) HandleProcessedMessage(ctx context.Context, clientMsg Result) error {
+func (b *Broker) HandleProcessedMessage(ctx context.Context, result Result) error {
 	publisherID, ok := GetPublisherID(ctx)
 	if ok && publisherID != "" {
-		err := b.sendToPublisher(ctx, publisherID, clientMsg)
+		err := b.sendToPublisher(ctx, publisherID, result)
 		if err != nil {
 			return err
 		}
 	}
-	if queue, ok := b.queues.Get(clientMsg.Queue); ok {
-		if msg, ok := queue.messages.Get(clientMsg.MessageID); ok {
-			msg.ProcessedAt = time.Now()
-			msg.Status = clientMsg.Status
-			msg.Result = clientMsg.Payload
-			msg.Error = clientMsg.Error
-			msg.CurrentQueue = clientMsg.Queue
-			if clientMsg.Error != nil {
-				msg.Status = "error"
-			}
-			for _, callback := range b.opts.callback {
-				if callback != nil {
-					result := callback(ctx, msg)
-					if result.Error != nil {
-						return result.Error
-					}
-				}
+	for _, callback := range b.opts.callback {
+		if callback != nil {
+			rs := callback(ctx, result)
+			if rs.Error != nil {
+				return rs.Error
 			}
 		}
 	}
@@ -327,6 +320,10 @@ func (b *Broker) handleTaskMessage(ctx context.Context, _ net.Conn, msg Result) 
 }
 
 func (b *Broker) publish(ctx context.Context, conn net.Conn, msg Command) error {
+	status := "PUBLISH"
+	if msg.Command == REQUEST {
+		status = "REQUEST"
+	}
 	b.addPublisher(ctx, msg.Queue, conn)
 	task := Task{
 		ID:           msg.MessageID,
@@ -334,41 +331,14 @@ func (b *Broker) publish(ctx context.Context, conn net.Conn, msg Command) error 
 		CreatedAt:    time.Now(),
 		CurrentQueue: msg.Queue,
 	}
-	_, err := b.Publish(ctx, task, msg.Queue)
-	if err != nil {
-		return err
+	result := b.Publish(ctx, task, msg.Queue)
+	if result.Error != nil {
+		return result.Error
 	}
 	if task.ID != "" {
-		result := Result{
-			Command:   "PUBLISH",
-			MessageID: task.ID,
-			Status:    "success",
-			Queue:     msg.Queue,
-		}
-		return Write(ctx, conn, result)
-	}
-	return nil
-}
-
-func (b *Broker) request(ctx context.Context, conn net.Conn, msg Command) error {
-	b.addPublisher(ctx, msg.Queue, conn)
-	task := Task{
-		ID:           msg.MessageID,
-		Payload:      msg.Payload,
-		CreatedAt:    time.Now(),
-		CurrentQueue: msg.Queue,
-	}
-	_, err := b.Publish(ctx, task, msg.Queue)
-	if err != nil {
-		return err
-	}
-	if task.ID != "" {
-		result := Result{
-			Command:   "REQUEST",
-			MessageID: task.ID,
-			Status:    "success",
-			Queue:     msg.Queue,
-		}
+		result.Status = status
+		result.MessageID = task.ID
+		result.Queue = msg.Queue
 		return Write(ctx, conn, result)
 	}
 	return nil
@@ -379,10 +349,8 @@ func (b *Broker) handleCommandMessage(ctx context.Context, conn net.Conn, msg Co
 	case SUBSCRIBE:
 		b.subscribe(ctx, msg.Queue, conn)
 		return nil
-	case PUBLISH:
+	case PUBLISH, REQUEST:
 		return b.publish(ctx, conn, msg)
-	case REQUEST:
-		return b.request(ctx, conn, msg)
 	default:
 		return fmt.Errorf("unknown command: %d", msg.Command)
 	}
