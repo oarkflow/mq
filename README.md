@@ -5,6 +5,20 @@ A simple Pub/Sub system memory based task processing. It uses centralized server
 
 ## Examples:
 
+### Run server
+
+> `go run server.go`
+
+### Run consumer
+
+> `go run consumer.go`
+
+### Run publisher
+
+> `go run publisher.go`
+
+
+
 [tasks.go](./examples/tasks/tasks.go)
 
 ```go
@@ -219,3 +233,10 @@ func requestHandler(requestType string) func(w http.ResponseWriter, r *http.Requ
 	}
 }
 ```
+
+
+## TODOS
+
+- Backend for task persistence
+- Task scheduling
+- Conditional nodes for tasks
