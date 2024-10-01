@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
+	"net/http"
 	"sync"
 
 	"github.com/oarkflow/mq"
@@ -42,7 +44,8 @@ func New(opts ...mq.Option) *DAG {
 }
 
 func (d *DAG) AddNode(name string, handler mq.Handler, firstNode ...bool) {
-	con := mq.NewConsumer(name)
+	tlsConfig := d.server.TLSConfig()
+	con := mq.NewConsumer(name, mq.WithTLS(tlsConfig.UseTLS, tlsConfig.CertPath, tlsConfig.KeyPath))
 	if len(firstNode) > 0 {
 		d.FirstNode = name
 	}
@@ -67,7 +70,7 @@ func (d *DAG) Prepare() {
 	}
 }
 
-func (d *DAG) Start(ctx context.Context) error {
+func (d *DAG) Start(ctx context.Context, addr string) error {
 	d.Prepare()
 	if d.server.SyncMode() {
 		return nil
@@ -75,7 +78,15 @@ func (d *DAG) Start(ctx context.Context) error {
 	for _, con := range d.nodes {
 		go con.Consume(ctx)
 	}
-	return d.server.Start(ctx)
+	go func() {
+		d.server.Start(ctx)
+	}()
+	log.Printf("HTTP server started on %s", addr)
+	config := d.server.TLSConfig()
+	if config.UseTLS {
+		return http.ListenAndServeTLS(addr, config.CertPath, config.KeyPath, nil)
+	}
+	return http.ListenAndServe(addr, nil)
 }
 
 func (d *DAG) PublishTask(ctx context.Context, payload []byte, queueName string, taskID ...string) mq.Result {

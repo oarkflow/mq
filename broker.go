@@ -99,25 +99,13 @@ func NewBroker(opts ...Option) *Broker {
 	for _, opt := range opts {
 		opt(&options)
 	}
-	broker := &Broker{
+	b := &Broker{
 		queues:     xsync.NewMap[string, *Queue](),
 		publishers: xsync.NewMap[string, *publisher](),
 		consumers:  xsync.NewMap[string, *consumer](),
 	}
-
-	if options.messageHandler == nil {
-		options.messageHandler = broker.readMessage
-	}
-
-	if options.closeHandler == nil {
-		options.closeHandler = broker.onClose
-	}
-
-	if options.errorHandler == nil {
-		options.errorHandler = broker.onError
-	}
-	broker.opts = options
-	return broker
+	b.opts = defaultHandlers(options, b.onMessage, b.onClose, b.onError)
+	return b
 }
 
 func (b *Broker) Send(ctx context.Context, cmd Command) error {
@@ -127,6 +115,10 @@ func (b *Broker) Send(ctx context.Context, cmd Command) error {
 	}
 	queue.send(ctx, cmd)
 	return nil
+}
+
+func (b *Broker) TLSConfig() TLSConfig {
+	return b.opts.tlsConfig
 }
 
 func (b *Broker) SyncMode() bool {
@@ -172,26 +164,20 @@ func (b *Broker) Start(ctx context.Context) error {
 	var listener net.Listener
 	var err error
 
-	if b.opts.useTLS {
-		// Load the TLS certificate and key
-		cert, err := tls.LoadX509KeyPair(b.opts.tlsCertPath, b.opts.tlsKeyPath)
+	if b.opts.tlsConfig.UseTLS {
+		cert, err := tls.LoadX509KeyPair(b.opts.tlsConfig.CertPath, b.opts.tlsConfig.KeyPath)
 		if err != nil {
 			return fmt.Errorf("failed to load TLS certificates: %v", err)
 		}
-
-		// Configure TLS
 		tlsConfig := &tls.Config{
 			Certificates: []tls.Certificate{cert},
 		}
-
-		// Start TLS listener
 		listener, err = tls.Listen("tcp", b.opts.brokerAddr, tlsConfig)
 		if err != nil {
 			return fmt.Errorf("failed to start TLS listener: %v", err)
 		}
 		log.Println("TLS server started on", b.opts.brokerAddr)
 	} else {
-		// Start plain TCP listener
 		listener, err = net.Listen("tcp", b.opts.brokerAddr)
 		if err != nil {
 			return fmt.Errorf("failed to start TCP listener: %v", err)
@@ -199,15 +185,12 @@ func (b *Broker) Start(ctx context.Context) error {
 		log.Println("TCP server started on", b.opts.brokerAddr)
 	}
 	defer listener.Close()
-
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
 			fmt.Println("Error accepting connection:", err)
 			continue
 		}
-
-		// Handle the connection (same logic as before)
 		go ReadFromConn(ctx, conn, b.opts.messageHandler, b.opts.closeHandler, b.opts.errorHandler)
 	}
 }
@@ -328,7 +311,7 @@ func (b *Broker) removeConsumer(queueName, consumerID string) {
 	}
 }
 
-func (b *Broker) readMessage(ctx context.Context, conn net.Conn, message []byte) error {
+func (b *Broker) onMessage(ctx context.Context, conn net.Conn, message []byte) error {
 	var cmdMsg Command
 	var resultMsg Result
 	err := json.Unmarshal(message, &cmdMsg)

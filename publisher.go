@@ -17,37 +17,33 @@ func NewPublisher(id string, opts ...Option) *Publisher {
 	for _, opt := range opts {
 		opt(&options)
 	}
-	pub := &Publisher{id: id}
-
-	if options.closeHandler == nil {
-		options.closeHandler = pub.onClose
-	}
-
-	if options.errorHandler == nil {
-		options.errorHandler = pub.onError
-	}
-	pub.opts = options
-	return pub
+	b := &Publisher{id: id}
+	b.opts = defaultHandlers(options, nil, b.onClose, b.onError)
+	return b
 }
 
-func (p *Publisher) Publish(ctx context.Context, queue string, task Task) error {
-	conn, err := net.Dial("tcp", p.opts.brokerAddr)
-	if err != nil {
-		return fmt.Errorf("failed to connect to broker: %w", err)
-	}
-	defer conn.Close()
+func (p *Publisher) send(ctx context.Context, queue string, task Task, conn net.Conn, command CMD) error {
 	ctx = SetHeaders(ctx, map[string]string{
 		PublisherKey: p.id,
 		ContentType:  TypeJson,
 	})
 	cmd := Command{
 		ID:        NewID(),
-		Command:   PUBLISH,
+		Command:   command,
 		Queue:     queue,
 		MessageID: task.ID,
 		Payload:   task.Payload,
 	}
 	return Write(ctx, conn, cmd)
+}
+
+func (p *Publisher) Publish(ctx context.Context, queue string, task Task) error {
+	conn, err := GetConnection(p.opts.brokerAddr, p.opts.tlsConfig)
+	if err != nil {
+		return fmt.Errorf("failed to connect to broker: %w", err)
+	}
+	defer conn.Close()
+	return p.send(ctx, queue, task, conn, PUBLISH)
 }
 
 func (p *Publisher) onClose(ctx context.Context, conn net.Conn) error {
@@ -60,24 +56,13 @@ func (p *Publisher) onError(ctx context.Context, conn net.Conn, err error) {
 }
 
 func (p *Publisher) Request(ctx context.Context, queue string, task Task) (Result, error) {
-	conn, err := net.Dial("tcp", p.opts.brokerAddr)
+	conn, err := GetConnection(p.opts.brokerAddr, p.opts.tlsConfig)
 	if err != nil {
-		return Result{}, fmt.Errorf("failed to connect to broker: %w", err)
+		return Result{Error: err}, fmt.Errorf("failed to connect to broker: %w", err)
 	}
 	defer conn.Close()
-	ctx = SetHeaders(ctx, map[string]string{
-		PublisherKey: p.id,
-		ContentType:  TypeJson,
-	})
-	cmd := Command{
-		ID:        NewID(),
-		Command:   REQUEST,
-		Queue:     queue,
-		MessageID: task.ID,
-		Payload:   task.Payload,
-	}
 	var result Result
-	err = Write(ctx, conn, cmd)
+	err = p.send(ctx, queue, task, conn, REQUEST)
 	if err != nil {
 		return result, err
 	}

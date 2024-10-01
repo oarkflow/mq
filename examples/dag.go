@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	"log"
 	"net/http"
 
 	"github.com/oarkflow/mq"
@@ -15,7 +14,7 @@ import (
 var d *dag.DAG
 
 func main() {
-	d = dag.New()
+	d = dag.New(mq.WithTLS(true, "server.crt", "server.key"), mq.WithCAPath("ca.cert"))
 	d.AddNode("queue1", tasks.Node1)
 	d.AddNode("queue2", tasks.Node2)
 	d.AddNode("queue3", tasks.Node3)
@@ -25,16 +24,12 @@ func main() {
 	d.AddLoop("queue2", "queue3")
 	d.AddEdge("queue2", "queue4")
 	d.Prepare()
-	go func() {
-		err := d.Start(context.TODO())
-		if err != nil {
-			panic(err)
-		}
-	}()
-	http.HandleFunc("/publish", requestHandler("publish"))
-	http.HandleFunc("/request", requestHandler("request"))
-	log.Println("HTTP server started on http://localhost:8083")
-	log.Fatal(http.ListenAndServe(":8083", nil))
+	http.HandleFunc("POST /publish", requestHandler("publish"))
+	http.HandleFunc("POST /request", requestHandler("request"))
+	err := d.Start(context.TODO(), ":8083")
+	if err != nil {
+		panic(err)
+	}
 }
 
 func requestHandler(requestType string) func(w http.ResponseWriter, r *http.Request) {

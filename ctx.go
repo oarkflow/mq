@@ -4,10 +4,13 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"strings"
 
 	"github.com/oarkflow/xid"
@@ -152,4 +155,38 @@ func ReadFromConn(ctx context.Context, conn net.Conn, handler MessageHandler, cl
 
 func NewID() string {
 	return xid.New().String()
+}
+
+func createTLSConnection(addr, certPath, keyPath string, caPath ...string) (net.Conn, error) {
+	cert, err := tls.LoadX509KeyPair(certPath, keyPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load client cert/key: %w", err)
+	}
+	tlsConfig := &tls.Config{
+		Certificates:       []tls.Certificate{cert},
+		InsecureSkipVerify: true,
+	}
+	if len(caPath) > 0 && caPath[0] != "" {
+		caCert, err := os.ReadFile(caPath[0])
+		if err != nil {
+			return nil, fmt.Errorf("failed to load CA cert: %w", err)
+		}
+		caCertPool := x509.NewCertPool()
+		caCertPool.AppendCertsFromPEM(caCert)
+		tlsConfig.RootCAs = caCertPool
+	}
+	conn, err := tls.Dial("tcp", addr, tlsConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to dial TLS connection: %w", err)
+	}
+
+	return conn, nil
+}
+
+func GetConnection(addr string, config TLSConfig) (net.Conn, error) {
+	if config.UseTLS {
+		return createTLSConnection(addr, config.CertPath, config.KeyPath, config.CAPath)
+	} else {
+		return net.Dial("tcp", addr)
+	}
 }

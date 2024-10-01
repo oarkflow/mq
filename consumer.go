@@ -2,7 +2,6 @@ package mq
 
 import (
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -29,21 +28,12 @@ func NewConsumer(id string, opts ...Option) *Consumer {
 	for _, opt := range opts {
 		opt(&options)
 	}
-	con := &Consumer{
+	b := &Consumer{
 		handlers: make(map[string]Handler),
 		id:       id,
 	}
-	if options.messageHandler == nil {
-		options.messageHandler = con.readConn
-	}
-	if options.closeHandler == nil {
-		options.closeHandler = con.onClose
-	}
-	if options.errorHandler == nil {
-		options.errorHandler = con.onError
-	}
-	con.opts = options
-	return con
+	b.opts = defaultHandlers(options, b.onMessage, b.onClose, b.onError)
+	return b
 }
 
 // Close closes the consumer's connection.
@@ -124,19 +114,11 @@ func (c *Consumer) readMessage(ctx context.Context, message []byte) error {
 
 // AttemptConnect tries to establish a connection to the server, with TLS or without, based on the configuration.
 func (c *Consumer) AttemptConnect() error {
-	var conn net.Conn
 	var err error
 	delay := c.opts.initialDelay
 
 	for i := 0; i < c.opts.maxRetries; i++ {
-		if c.opts.useTLS {
-			// Create TLS connection
-			conn, err = c.createTLSConnection()
-		} else {
-			// Create regular TCP connection
-			conn, err = net.Dial("tcp", c.opts.brokerAddr)
-		}
-
+		conn, err := GetConnection(c.opts.brokerAddr, c.opts.tlsConfig)
 		if err == nil {
 			c.conn = conn
 			return nil
@@ -154,40 +136,8 @@ func (c *Consumer) AttemptConnect() error {
 	return fmt.Errorf("could not connect to server %s after %d attempts: %w", c.opts.brokerAddr, c.opts.maxRetries, err)
 }
 
-// createTLSConnection creates a TLS connection to the server.
-func (c *Consumer) createTLSConnection() (net.Conn, error) {
-	// Load the client cert
-	cert, err := tls.LoadX509KeyPair(c.opts.tlsCertPath, c.opts.tlsKeyPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load client cert/key: %w", err)
-	}
-	/*
-		// Load CA cert for server verification
-		caCert, err := os.ReadFile(c.opts.tlsCAPath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to load CA cert: %w", err)
-		}
-		caCertPool := x509.NewCertPool()
-		caCertPool.AppendCertsFromPEM(caCert)
-	*/
-	// Configure TLS
-	tlsConfig := &tls.Config{
-		Certificates: []tls.Certificate{cert},
-		// RootCAs:            caCertPool,
-		InsecureSkipVerify: true, // Enforce server certificate validation
-	}
-
-	// Establish TLS connection
-	conn, err := tls.Dial("tcp", c.opts.brokerAddr, tlsConfig)
-	if err != nil {
-		return nil, fmt.Errorf("failed to dial TLS connection: %w", err)
-	}
-
-	return conn, nil
-}
-
-// readConn reads incoming messages from the connection.
-func (c *Consumer) readConn(ctx context.Context, conn net.Conn, message []byte) error {
+// onMessage reads incoming messages from the connection.
+func (c *Consumer) onMessage(ctx context.Context, conn net.Conn, message []byte) error {
 	return c.readMessage(ctx, message)
 }
 
