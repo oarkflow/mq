@@ -2,6 +2,8 @@ package mq
 
 type CMD byte
 
+func (c CMD) IsValid() bool { return SUBSCRIBE < c && c < STOP }
+
 const (
 	SUBSCRIBE CMD = iota + 1
 	SUBSCRIBE_ACK
