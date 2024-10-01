@@ -2,6 +2,7 @@ package mq
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -166,21 +167,47 @@ func (b *Broker) onError(_ context.Context, conn net.Conn, err error) {
 	fmt.Println("Error reading from connection:", err, conn.RemoteAddr())
 }
 
+// Start the broker server with optional TLS support
 func (b *Broker) Start(ctx context.Context) error {
-	listener, err := net.Listen("tcp", b.opts.brokerAddr)
-	if err != nil {
-		return err
+	var listener net.Listener
+	var err error
+
+	if b.opts.useTLS {
+		// Load the TLS certificate and key
+		cert, err := tls.LoadX509KeyPair(b.opts.tlsCertPath, b.opts.tlsKeyPath)
+		if err != nil {
+			return fmt.Errorf("failed to load TLS certificates: %v", err)
+		}
+
+		// Configure TLS
+		tlsConfig := &tls.Config{
+			Certificates: []tls.Certificate{cert},
+		}
+
+		// Start TLS listener
+		listener, err = tls.Listen("tcp", b.opts.brokerAddr, tlsConfig)
+		if err != nil {
+			return fmt.Errorf("failed to start TLS listener: %v", err)
+		}
+		log.Println("TLS server started on", b.opts.brokerAddr)
+	} else {
+		// Start plain TCP listener
+		listener, err = net.Listen("tcp", b.opts.brokerAddr)
+		if err != nil {
+			return fmt.Errorf("failed to start TCP listener: %v", err)
+		}
+		log.Println("TCP server started on", b.opts.brokerAddr)
 	}
-	defer func() {
-		_ = listener.Close()
-	}()
-	log.Println("Server started on", b.opts.brokerAddr)
+	defer listener.Close()
+
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
 			fmt.Println("Error accepting connection:", err)
 			continue
 		}
+
+		// Handle the connection (same logic as before)
 		go ReadFromConn(ctx, conn, b.opts.messageHandler, b.opts.closeHandler, b.opts.errorHandler)
 	}
 }

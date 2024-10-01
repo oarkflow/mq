@@ -16,6 +16,10 @@ type Options struct {
 	initialDelay   time.Duration
 	maxBackoff     time.Duration
 	jitterPercent  float64
+	useTLS         bool   // Add a flag to enable/disable TLS
+	tlsCertPath    string // Path to TLS certificate
+	tlsKeyPath     string // Path to TLS private key
+	tlsCAPath      string // Path to the Certificate Authority (optional)
 }
 
 func defaultOptions() Options {
@@ -36,6 +40,16 @@ type Option func(*Options)
 func WithBrokerURL(url string) Option {
 	return func(opts *Options) {
 		opts.brokerAddr = url
+	}
+}
+
+// Option to enable/disable TLS
+func WithTLS(enableTLS bool, certPath, keyPath, caPath string) Option {
+	return func(o *Options) {
+		o.useTLS = enableTLS
+		o.tlsCertPath = certPath
+		o.tlsKeyPath = keyPath
+		o.tlsCAPath = caPath
 	}
 }
 
