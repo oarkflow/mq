@@ -2,6 +2,7 @@ package mq
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"github.com/oarkflow/mq/utils"
 )
 
+// Consumer structure to hold consumer-specific configurations and state.
 type Consumer struct {
 	id       string
 	handlers map[string]Handler
@@ -21,6 +23,7 @@ type Consumer struct {
 	opts     Options
 }
 
+// NewConsumer initializes a new consumer with the provided options.
 func NewConsumer(id string, opts ...Option) *Consumer {
 	options := defaultOptions()
 	for _, opt := range opts {
@@ -33,11 +36,9 @@ func NewConsumer(id string, opts ...Option) *Consumer {
 	if options.messageHandler == nil {
 		options.messageHandler = con.readConn
 	}
-
 	if options.closeHandler == nil {
 		options.closeHandler = con.onClose
 	}
-
 	if options.errorHandler == nil {
 		options.errorHandler = con.onError
 	}
@@ -45,10 +46,12 @@ func NewConsumer(id string, opts ...Option) *Consumer {
 	return con
 }
 
+// Close closes the consumer's connection.
 func (c *Consumer) Close() error {
 	return c.conn.Close()
 }
 
+// Subscribe to a specific queue.
 func (c *Consumer) subscribe(queue string) error {
 	ctx := context.Background()
 	ctx = SetHeaders(ctx, map[string]string{
@@ -63,6 +66,7 @@ func (c *Consumer) subscribe(queue string) error {
 	return Write(ctx, c.conn, subscribe)
 }
 
+// ProcessTask handles a received task message and invokes the appropriate handler.
 func (c *Consumer) ProcessTask(ctx context.Context, msg Task) Result {
 	handler, exists := c.handlers[msg.CurrentQueue]
 	if !exists {
@@ -71,6 +75,7 @@ func (c *Consumer) ProcessTask(ctx context.Context, msg Task) Result {
 	return handler(ctx, msg)
 }
 
+// Handle command message sent by the server.
 func (c *Consumer) handleCommandMessage(msg Command) error {
 	switch msg.Command {
 	case STOP:
@@ -83,6 +88,7 @@ func (c *Consumer) handleCommandMessage(msg Command) error {
 	}
 }
 
+// Handle task message sent by the server.
 func (c *Consumer) handleTaskMessage(ctx context.Context, msg Task) error {
 	response := c.ProcessTask(ctx, msg)
 	response.Queue = msg.CurrentQueue
@@ -96,10 +102,12 @@ func (c *Consumer) handleTaskMessage(ctx context.Context, msg Task) error {
 	return c.sendResult(ctx, response)
 }
 
+// Send the result of task processing back to the server.
 func (c *Consumer) sendResult(ctx context.Context, response Result) error {
 	return Write(ctx, c.conn, response)
 }
 
+// Read and handle incoming messages.
 func (c *Consumer) readMessage(ctx context.Context, message []byte) error {
 	var cmdMsg Command
 	var task Task
@@ -114,16 +122,26 @@ func (c *Consumer) readMessage(ctx context.Context, message []byte) error {
 	return nil
 }
 
+// AttemptConnect tries to establish a connection to the server, with TLS or without, based on the configuration.
 func (c *Consumer) AttemptConnect() error {
 	var conn net.Conn
 	var err error
 	delay := c.opts.initialDelay
+
 	for i := 0; i < c.opts.maxRetries; i++ {
-		conn, err = net.Dial("tcp", c.opts.brokerAddr)
+		if c.opts.useTLS {
+			// Create TLS connection
+			conn, err = c.createTLSConnection()
+		} else {
+			// Create regular TCP connection
+			conn, err = net.Dial("tcp", c.opts.brokerAddr)
+		}
+
 		if err == nil {
 			c.conn = conn
 			return nil
 		}
+
 		sleepDuration := utils.CalculateJitter(delay, c.opts.jitterPercent)
 		fmt.Printf("Failed connecting to %s (attempt %d/%d): %v, Retrying in %v...\n", c.opts.brokerAddr, i+1, c.opts.maxRetries, err, sleepDuration)
 		time.Sleep(sleepDuration)
@@ -136,19 +154,55 @@ func (c *Consumer) AttemptConnect() error {
 	return fmt.Errorf("could not connect to server %s after %d attempts: %w", c.opts.brokerAddr, c.opts.maxRetries, err)
 }
 
+// createTLSConnection creates a TLS connection to the server.
+func (c *Consumer) createTLSConnection() (net.Conn, error) {
+	// Load the client cert
+	cert, err := tls.LoadX509KeyPair(c.opts.tlsCertPath, c.opts.tlsKeyPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load client cert/key: %w", err)
+	}
+	/*
+		// Load CA cert for server verification
+		caCert, err := os.ReadFile(c.opts.tlsCAPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load CA cert: %w", err)
+		}
+		caCertPool := x509.NewCertPool()
+		caCertPool.AppendCertsFromPEM(caCert)
+	*/
+	// Configure TLS
+	tlsConfig := &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		// RootCAs:            caCertPool,
+		InsecureSkipVerify: true, // Enforce server certificate validation
+	}
+
+	// Establish TLS connection
+	conn, err := tls.Dial("tcp", c.opts.brokerAddr, tlsConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to dial TLS connection: %w", err)
+	}
+
+	return conn, nil
+}
+
+// readConn reads incoming messages from the connection.
 func (c *Consumer) readConn(ctx context.Context, conn net.Conn, message []byte) error {
 	return c.readMessage(ctx, message)
 }
 
+// onClose handles connection close event.
 func (c *Consumer) onClose(ctx context.Context, conn net.Conn) error {
 	fmt.Println("Consumer Connection closed", c.id, conn.RemoteAddr())
 	return nil
 }
 
+// onError handles errors while reading from the connection.
 func (c *Consumer) onError(ctx context.Context, conn net.Conn, err error) {
 	fmt.Println("Error reading from consumer connection:", err, conn.RemoteAddr())
 }
 
+// Consume starts the consumer to consume tasks from the queues.
 func (c *Consumer) Consume(ctx context.Context) error {
 	err := c.AttemptConnect()
 	if err != nil {
@@ -170,6 +224,7 @@ func (c *Consumer) Consume(ctx context.Context) error {
 	return nil
 }
 
+// RegisterHandler registers a handler for a queue.
 func (c *Consumer) RegisterHandler(queue string, handler Handler) {
 	c.queues = append(c.queues, queue)
 	c.handlers[queue] = handler

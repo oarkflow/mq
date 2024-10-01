@@ -43,12 +43,18 @@ func WithBrokerURL(url string) Option {
 	}
 }
 
-// Option to enable/disable TLS
-func WithTLS(enableTLS bool, certPath, keyPath, caPath string) Option {
+// WithTLS - Option to enable/disable TLS
+func WithTLS(enableTLS bool, certPath, keyPath string) Option {
 	return func(o *Options) {
 		o.useTLS = enableTLS
 		o.tlsCertPath = certPath
 		o.tlsKeyPath = keyPath
+	}
+}
+
+// WithCAPath - Option to enable/disable TLS
+func WithCAPath(caPath string) Option {
+	return func(o *Options) {
 		o.tlsCAPath = caPath
 	}
 }

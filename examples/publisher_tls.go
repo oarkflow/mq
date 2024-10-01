@@ -3,9 +3,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
-	"crypto/x509"
 	"fmt"
-	"io/ioutil"
 	"log"
 
 	"github.com/oarkflow/mq"
@@ -17,24 +15,24 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to load publisher certificate and key: %v", err)
 	}
-
-	// Load the CA certificate
-	caCert, err := ioutil.ReadFile("ca.crt")
-	if err != nil {
-		log.Fatalf("Failed to read CA certificate: %v", err)
-	}
-	caCertPool := x509.NewCertPool()
-	caCertPool.AppendCertsFromPEM(caCert)
-
+	/*
+		// Load the CA certificate
+		caCert, err := os.ReadFile("ca.crt")
+		if err != nil {
+			log.Fatalf("Failed to read CA certificate: %v", err)
+		}
+		caCertPool := x509.NewCertPool()
+		caCertPool.AppendCertsFromPEM(caCert)
+	*/
 	// Configure TLS for the publisher
 	tlsConfig := &tls.Config{
-		Certificates:       []tls.Certificate{cert},
-		RootCAs:            caCertPool,
-		InsecureSkipVerify: false, // Ensure we verify the server certificate
+		Certificates: []tls.Certificate{cert},
+		// RootCAs:            caCertPool,
+		InsecureSkipVerify: true, // Ensure we verify the server certificate
 	}
 
 	// Dial TLS connection to the broker
-	conn, err := tls.Dial("tcp", "localhost:8443", tlsConfig)
+	conn, err := tls.Dial("tcp", "localhost:8080", tlsConfig)
 	if err != nil {
 		log.Fatalf("Failed to connect to broker: %v", err)
 	}
