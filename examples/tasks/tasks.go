@@ -38,3 +38,8 @@ func Node4(ctx context.Context, task mq.Task) mq.Result {
 	bt, _ := json.Marshal(payload)
 	return mq.Result{Payload: bt, MessageID: task.ID}
 }
+
+func Callback(ctx context.Context, task mq.Result) mq.Result {
+	fmt.Println("Received task", task.MessageID, "Payload", string(task.Payload), task.Error, task.Queue)
+	return mq.Result{}
+}
