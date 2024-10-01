@@ -164,6 +164,7 @@ func createTLSConnection(addr, certPath, keyPath string, caPath ...string) (net.
 	}
 	tlsConfig := &tls.Config{
 		Certificates:       []tls.Certificate{cert},
+		ClientAuth:         tls.RequireAndVerifyClientCert,
 		InsecureSkipVerify: true,
 	}
 	if len(caPath) > 0 && caPath[0] != "" {
@@ -174,6 +175,7 @@ func createTLSConnection(addr, certPath, keyPath string, caPath ...string) (net.
 		caCertPool := x509.NewCertPool()
 		caCertPool.AppendCertsFromPEM(caCert)
 		tlsConfig.RootCAs = caCertPool
+		tlsConfig.ClientCAs = caCertPool
 	}
 	conn, err := tls.Dial("tcp", addr, tlsConfig)
 	if err != nil {

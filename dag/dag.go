@@ -45,7 +45,7 @@ func New(opts ...mq.Option) *DAG {
 
 func (d *DAG) AddNode(name string, handler mq.Handler, firstNode ...bool) {
 	tlsConfig := d.server.TLSConfig()
-	con := mq.NewConsumer(name, mq.WithTLS(tlsConfig.UseTLS, tlsConfig.CertPath, tlsConfig.KeyPath))
+	con := mq.NewConsumer(name, mq.WithTLS(tlsConfig.UseTLS, tlsConfig.CertPath, tlsConfig.KeyPath), mq.WithCAPath(tlsConfig.CAPath))
 	if len(firstNode) > 0 {
 		d.FirstNode = name
 	}

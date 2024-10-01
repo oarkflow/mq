@@ -14,7 +14,7 @@ import (
 var d *dag.DAG
 
 func main() {
-	d = dag.New(mq.WithTLS(true, "server.crt", "server.key"), mq.WithCAPath("ca.cert"))
+	d = dag.New(mq.WithTLS(true, "server.crt", "server.key"), mq.WithCAPath("ca.crt"))
 	d.AddNode("queue1", tasks.Node1)
 	d.AddNode("queue2", tasks.Node2)
 	d.AddNode("queue3", tasks.Node3)
