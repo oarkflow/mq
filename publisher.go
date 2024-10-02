@@ -75,6 +75,10 @@ func (p *Publisher) Request(ctx context.Context, queue string, task Task) (Resul
 			return conn.Close()
 		}
 	}
-	ReadFromConn(ctx, conn, p.opts.messageHandler, p.opts.closeHandler, p.opts.errorHandler)
+	ReadFromConn(ctx, conn, Handlers{
+		MessageHandler: p.opts.messageHandler,
+		CloseHandler:   p.opts.closeHandler,
+		ErrorHandler:   p.opts.errorHandler,
+	})
 	return result, nil
 }

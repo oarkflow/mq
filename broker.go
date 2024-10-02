@@ -191,7 +191,11 @@ func (b *Broker) Start(ctx context.Context) error {
 			fmt.Println("Error accepting connection:", err)
 			continue
 		}
-		go ReadFromConn(ctx, conn, b.opts.messageHandler, b.opts.closeHandler, b.opts.errorHandler)
+		go ReadFromConn(ctx, conn, Handlers{
+			MessageHandler: b.opts.messageHandler,
+			CloseHandler:   b.opts.closeHandler,
+			ErrorHandler:   b.opts.errorHandler,
+		})
 	}
 }
 

@@ -162,7 +162,11 @@ func (c *Consumer) Consume(ctx context.Context) error {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		ReadFromConn(ctx, c.conn, c.opts.messageHandler, c.opts.closeHandler, c.opts.errorHandler)
+		ReadFromConn(ctx, c.conn, Handlers{
+			MessageHandler: c.opts.messageHandler,
+			CloseHandler:   c.opts.closeHandler,
+			ErrorHandler:   c.opts.errorHandler,
+		})
 		fmt.Println("Stopping consumer")
 	}()
 	for _, q := range c.queues {

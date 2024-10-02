@@ -13,6 +13,7 @@ func main() {
 		Payload: payload,
 	}
 	publisher := mq.NewPublisher("publish-1")
+	// publisher := mq.NewPublisher("publish-1", mq.WithTLS(true, "./certs/server.crt", "./certs/server.key"))
 	err := publisher.Publish(context.Background(), "queue1", task)
 	if err != nil {
 		panic(err)

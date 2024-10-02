@@ -21,6 +21,18 @@ type Message struct {
 	Data    json.RawMessage   `json:"data"`
 }
 
+type MessageHandler func(context.Context, net.Conn, []byte) error
+
+type CloseHandler func(context.Context, net.Conn) error
+
+type ErrorHandler func(context.Context, net.Conn, error)
+
+type Handlers struct {
+	MessageHandler MessageHandler
+	CloseHandler   CloseHandler
+	ErrorHandler   ErrorHandler
+}
+
 func IsClosed(conn net.Conn) bool {
 	_, err := conn.Read(make([]byte, 1))
 	if err != nil {
@@ -101,16 +113,10 @@ func Write(ctx context.Context, conn net.Conn, data any) error {
 	return err
 }
 
-type MessageHandler func(context.Context, net.Conn, []byte) error
-
-type CloseHandler func(context.Context, net.Conn) error
-
-type ErrorHandler func(context.Context, net.Conn, error)
-
-func ReadFromConn(ctx context.Context, conn net.Conn, handler MessageHandler, closeHandler CloseHandler, errorHandler ErrorHandler) {
+func ReadFromConn(ctx context.Context, conn net.Conn, handlers Handlers) {
 	defer func() {
-		if closeHandler != nil {
-			if err := closeHandler(ctx, conn); err != nil {
+		if handlers.CloseHandler != nil {
+			if err := handlers.CloseHandler(ctx, conn); err != nil {
 				fmt.Println("Error in close handler:", err)
 			}
 		}
@@ -123,8 +129,8 @@ func ReadFromConn(ctx context.Context, conn net.Conn, handler MessageHandler, cl
 			if err == io.EOF || IsClosed(conn) || strings.Contains(err.Error(), "closed network connection") {
 				break
 			}
-			if errorHandler != nil {
-				errorHandler(ctx, conn, err)
+			if handlers.ErrorHandler != nil {
+				handlers.ErrorHandler(ctx, conn, err)
 			}
 			continue
 		}
@@ -135,17 +141,17 @@ func ReadFromConn(ctx context.Context, conn net.Conn, handler MessageHandler, cl
 		var msg Message
 		err = json.Unmarshal(messageBytes, &msg)
 		if err != nil {
-			if errorHandler != nil {
-				errorHandler(ctx, conn, err)
+			if handlers.ErrorHandler != nil {
+				handlers.ErrorHandler(ctx, conn, err)
 			}
 			continue
 		}
 		ctx = SetHeaders(ctx, msg.Headers)
-		if handler != nil {
-			err = handler(ctx, conn, msg.Data)
+		if handlers.MessageHandler != nil {
+			err = handlers.MessageHandler(ctx, conn, msg.Data)
 			if err != nil {
-				if errorHandler != nil {
-					errorHandler(ctx, conn, err)
+				if handlers.ErrorHandler != nil {
+					handlers.ErrorHandler(ctx, conn, err)
 				}
 				continue
 			}
