@@ -14,6 +14,8 @@ import (
 	"strings"
 
 	"github.com/oarkflow/xid"
+
+	"github.com/oarkflow/mq/consts"
 )
 
 type Message struct {
@@ -51,11 +53,11 @@ func SetHeaders(ctx context.Context, headers map[string]string) context.Context 
 	for key, val := range headers {
 		hd[key] = val
 	}
-	return context.WithValue(ctx, HeaderKey, hd)
+	return context.WithValue(ctx, consts.HeaderKey, hd)
 }
 
 func GetHeaders(ctx context.Context) (map[string]string, bool) {
-	headers, ok := ctx.Value(HeaderKey).(map[string]string)
+	headers, ok := ctx.Value(consts.HeaderKey).(map[string]string)
 	return headers, ok
 }
 
@@ -64,7 +66,7 @@ func GetContentType(ctx context.Context) (string, bool) {
 	if !ok {
 		return "", false
 	}
-	contentType, ok := headers[ContentType]
+	contentType, ok := headers[consts.ContentType]
 	return contentType, ok
 }
 
@@ -73,7 +75,7 @@ func GetConsumerID(ctx context.Context) (string, bool) {
 	if !ok {
 		return "", false
 	}
-	contentType, ok := headers[ConsumerKey]
+	contentType, ok := headers[consts.ConsumerKey]
 	return contentType, ok
 }
 
@@ -82,7 +84,7 @@ func GetTriggerNode(ctx context.Context) (string, bool) {
 	if !ok {
 		return "", false
 	}
-	contentType, ok := headers[TriggerNode]
+	contentType, ok := headers[consts.TriggerNode]
 	return contentType, ok
 }
 
@@ -91,7 +93,7 @@ func GetPublisherID(ctx context.Context) (string, bool) {
 	if !ok {
 		return "", false
 	}
-	contentType, ok := headers[PublisherKey]
+	contentType, ok := headers[consts.PublisherKey]
 	return contentType, ok
 }
 

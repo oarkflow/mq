@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/oarkflow/mq/consts"
 	"github.com/oarkflow/mq/utils"
 )
 
@@ -45,11 +46,11 @@ func (c *Consumer) Close() error {
 func (c *Consumer) subscribe(queue string) error {
 	ctx := context.Background()
 	ctx = SetHeaders(ctx, map[string]string{
-		ConsumerKey: c.id,
-		ContentType: TypeJson,
+		consts.ConsumerKey: c.id,
+		consts.ContentType: consts.TypeJson,
 	})
 	subscribe := Command{
-		Command: SUBSCRIBE,
+		Command: consts.SUBSCRIBE,
 		Queue:   queue,
 		ID:      NewID(),
 	}
@@ -68,9 +69,9 @@ func (c *Consumer) ProcessTask(ctx context.Context, msg Task) Result {
 // Handle command message sent by the server.
 func (c *Consumer) handleCommandMessage(msg Command) error {
 	switch msg.Command {
-	case STOP:
+	case consts.STOP:
 		return c.Close()
-	case SUBSCRIBE_ACK:
+	case consts.SUBSCRIBE_ACK:
 		log.Printf("Consumer %s subscribed to queue %s\n", c.id, msg.Queue)
 		return nil
 	default:

@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/oarkflow/xsync"
+
+	"github.com/oarkflow/mq/consts"
 )
 
 type consumer struct {
@@ -78,7 +80,7 @@ type Task struct {
 
 type Command struct {
 	ID        string          `json:"id"`
-	Command   CMD             `json:"command"`
+	Command   consts.CMD      `json:"command"`
 	Queue     string          `json:"queue"`
 	MessageID string          `json:"message_id"`
 	Payload   json.RawMessage `json:"payload,omitempty"` // Used for carrying the task payload
@@ -265,7 +267,7 @@ func (b *Broker) addConsumer(ctx context.Context, queueName string, conn net.Con
 	consumerID, ok := GetConsumerID(ctx)
 	defer func() {
 		cmd := Command{
-			Command: SUBSCRIBE_ACK,
+			Command: consts.SUBSCRIBE_ACK,
 			Queue:   queueName,
 			Error:   "",
 		}
@@ -335,7 +337,7 @@ func (b *Broker) handleTaskMessage(ctx context.Context, _ net.Conn, msg Result) 
 
 func (b *Broker) publish(ctx context.Context, conn net.Conn, msg Command) error {
 	status := "PUBLISH"
-	if msg.Command == REQUEST {
+	if msg.Command == consts.REQUEST {
 		status = "REQUEST"
 	}
 	b.addPublisher(ctx, msg.Queue, conn)
@@ -360,10 +362,10 @@ func (b *Broker) publish(ctx context.Context, conn net.Conn, msg Command) error 
 
 func (b *Broker) handleCommandMessage(ctx context.Context, conn net.Conn, msg Command) error {
 	switch msg.Command {
-	case SUBSCRIBE:
+	case consts.SUBSCRIBE:
 		b.subscribe(ctx, msg.Queue, conn)
 		return nil
-	case PUBLISH, REQUEST:
+	case consts.PUBLISH, consts.REQUEST:
 		return b.publish(ctx, conn, msg)
 	default:
 		return fmt.Errorf("unknown command: %d", msg.Command)

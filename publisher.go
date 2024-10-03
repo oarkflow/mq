@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+
+	"github.com/oarkflow/mq/consts"
 )
 
 type Publisher struct {
@@ -22,10 +24,10 @@ func NewPublisher(id string, opts ...Option) *Publisher {
 	return b
 }
 
-func (p *Publisher) send(ctx context.Context, queue string, task Task, conn net.Conn, command CMD) error {
+func (p *Publisher) send(ctx context.Context, queue string, task Task, conn net.Conn, command consts.CMD) error {
 	ctx = SetHeaders(ctx, map[string]string{
-		PublisherKey: p.id,
-		ContentType:  TypeJson,
+		consts.PublisherKey: p.id,
+		consts.ContentType:  consts.TypeJson,
 	})
 	cmd := Command{
 		ID:        NewID(),
@@ -43,7 +45,7 @@ func (p *Publisher) Publish(ctx context.Context, queue string, task Task) error 
 		return fmt.Errorf("failed to connect to broker: %w", err)
 	}
 	defer conn.Close()
-	return p.send(ctx, queue, task, conn, PUBLISH)
+	return p.send(ctx, queue, task, conn, consts.PUBLISH)
 }
 
 func (p *Publisher) onClose(ctx context.Context, conn net.Conn) error {
@@ -62,7 +64,7 @@ func (p *Publisher) Request(ctx context.Context, queue string, task Task) (Resul
 	}
 	defer conn.Close()
 	var result Result
-	err = p.send(ctx, queue, task, conn, REQUEST)
+	err = p.send(ctx, queue, task, conn, consts.REQUEST)
 	if err != nil {
 		return result, err
 	}

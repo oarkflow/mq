@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/oarkflow/mq"
+	"github.com/oarkflow/mq/consts"
 )
 
 type taskContext struct {
@@ -260,7 +261,7 @@ func (d *DAG) TaskCallback(ctx context.Context, task mq.Result) mq.Result {
 			},
 		}
 
-		ctx = mq.SetHeaders(ctx, map[string]string{mq.TriggerNode: task.Queue})
+		ctx = mq.SetHeaders(ctx, map[string]string{consts.TriggerNode: task.Queue})
 		for _, loopNode := range loopNodes {
 			for _, item := range items {
 				rs := d.PublishTask(ctx, item, loopNode, task.MessageID)
@@ -275,7 +276,7 @@ func (d *DAG) TaskCallback(ctx context.Context, task mq.Result) mq.Result {
 	if multipleResults && completed {
 		task.Queue = triggeredNode
 	}
-	ctx = mq.SetHeaders(ctx, map[string]string{mq.TriggerNode: task.Queue})
+	ctx = mq.SetHeaders(ctx, map[string]string{consts.TriggerNode: task.Queue})
 	edge, exists := d.edges[task.Queue]
 	if exists {
 		d.taskResults[task.MessageID] = map[string]*taskContext{
