@@ -9,6 +9,7 @@ const (
 	SUBSCRIBE
 	SUBSCRIBE_ACK
 	PUBLISH
+	PUBLISH_ACK
 	REQUEST
 	RESPONSE
 	STOP
@@ -20,8 +21,16 @@ func (c CMD) String() string {
 		return "PING"
 	case SUBSCRIBE:
 		return "SUBSCRIBE"
+	case SUBSCRIBE_ACK:
+		return "SUBSCRIBE_ACK"
+	case PUBLISH:
+		return "PUBLISH"
+	case PUBLISH_ACK:
+		return "PUBLISH_ACK"
 	case STOP:
 		return "STOP"
+	case RESPONSE:
+		return "RESPONSE"
 	default:
 		return "UNKNOWN"
 	}

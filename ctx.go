@@ -15,13 +15,9 @@ import (
 
 	"github.com/oarkflow/xid"
 
+	"github.com/oarkflow/mq/codec"
 	"github.com/oarkflow/mq/consts"
 )
-
-type Message struct {
-	Headers map[string]string `json:"headers"`
-	Data    json.RawMessage   `json:"data"`
-}
 
 type MessageHandler func(context.Context, net.Conn, []byte) error
 
@@ -98,7 +94,7 @@ func GetPublisherID(ctx context.Context) (string, bool) {
 }
 
 func Write(ctx context.Context, conn net.Conn, data any) error {
-	msg := Message{Headers: make(map[string]string)}
+	msg := codec.Message{Headers: make(map[string]string)}
 	if headers, ok := GetHeaders(ctx); ok {
 		msg.Headers = headers
 	}
@@ -106,7 +102,7 @@ func Write(ctx context.Context, conn net.Conn, data any) error {
 	if err != nil {
 		return err
 	}
-	msg.Data = dataBytes
+	msg.Payload = dataBytes
 	messageBytes, err := json.Marshal(msg)
 	if err != nil {
 		return err
@@ -140,7 +136,7 @@ func ReadFromConn(ctx context.Context, conn net.Conn, handlers Handlers) {
 		if len(messageBytes) == 0 {
 			continue
 		}
-		var msg Message
+		var msg codec.Message
 		err = json.Unmarshal(messageBytes, &msg)
 		if err != nil {
 			if handlers.ErrorHandler != nil {
@@ -150,7 +146,7 @@ func ReadFromConn(ctx context.Context, conn net.Conn, handlers Handlers) {
 		}
 		ctx = SetHeaders(ctx, msg.Headers)
 		if handlers.MessageHandler != nil {
-			err = handlers.MessageHandler(ctx, conn, msg.Data)
+			err = handlers.MessageHandler(ctx, conn, msg.Payload)
 			if err != nil {
 				if handlers.ErrorHandler != nil {
 					handlers.ErrorHandler(ctx, conn, err)
