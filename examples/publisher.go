@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/oarkflow/mq"
+	mq "github.com/oarkflow/mq/v2"
 )
 
 func main() {
@@ -23,9 +23,9 @@ func main() {
 	task = mq.Task{
 		Payload: payload,
 	}
-	result, err := publisher.Request(context.Background(), "queue1", task)
-	if err != nil {
-		panic(err)
+	result := publisher.Request(context.Background(), "queue1", task)
+	if result.Error != nil {
+		panic(result.Error)
 	}
 	fmt.Printf("Sync task published. Result: %v\n", string(result.Payload))
 }

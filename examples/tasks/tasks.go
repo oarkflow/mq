@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/oarkflow/mq"
+	mq "github.com/oarkflow/mq/v2"
 )
 
 func Node1(ctx context.Context, task mq.Task) mq.Result {

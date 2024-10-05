@@ -49,6 +49,14 @@ func defaultOptions() Options {
 // Option defines a function type for setting options.
 type Option func(*Options)
 
+func setupOptions(opts ...Option) Options {
+	options := defaultOptions()
+	for _, opt := range opts {
+		opt(&options)
+	}
+	return options
+}
+
 func WithEncryption(aesKey, hmacKey json.RawMessage, enableEncryption bool) Option {
 	return func(opts *Options) {
 		opts.aesKey = aesKey

@@ -27,16 +27,12 @@ type Consumer struct {
 
 // NewConsumer initializes a new consumer with the provided options.
 func NewConsumer(id string, opts ...Option) *Consumer {
-	options := defaultOptions()
-	for _, opt := range opts {
-		opt(&options)
-	}
-	b := &Consumer{
+	options := setupOptions(opts...)
+	return &Consumer{
 		handlers: make(map[string]Handler),
 		id:       id,
 		opts:     options,
 	}
-	return b
 }
 
 func (c *Consumer) send(conn net.Conn, msg *codec.Message) error {
@@ -127,7 +123,7 @@ func (c *Consumer) AttemptConnect() error {
 			return nil
 		}
 		sleepDuration := utils.CalculateJitter(delay, c.opts.jitterPercent)
-		fmt.Printf("Failed connecting to %s (attempt %d/%d): %v, Retrying in %v...\n", c.opts.brokerAddr, i+1, c.opts.maxRetries, err, sleepDuration)
+		log.Printf("CONSUMER - SUBSCRIBE ~> Failed connecting to %s (attempt %d/%d): %v, Retrying in %v...\n", c.opts.brokerAddr, i+1, c.opts.maxRetries, err, sleepDuration)
 		time.Sleep(sleepDuration)
 		delay *= 2
 		if delay > c.opts.maxBackoff {

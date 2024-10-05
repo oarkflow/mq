@@ -32,17 +32,13 @@ type Broker struct {
 }
 
 func NewBroker(opts ...Option) *Broker {
-	options := defaultOptions()
-	for _, opt := range opts {
-		opt(&options)
-	}
-	b := &Broker{
+	options := setupOptions(opts...)
+	return &Broker{
 		queues:     xsync.NewMap[string, *Queue](),
 		publishers: xsync.NewMap[string, *publisher](),
 		consumers:  xsync.NewMap[string, *consumer](),
 		opts:       options,
 	}
-	return b
 }
 
 func (b *Broker) OnClose(ctx context.Context, _ net.Conn) error {
@@ -90,10 +86,12 @@ func (b *Broker) MessageAck(ctx context.Context, msg *codec.Message) {
 }
 
 func (b *Broker) MessageResponseHandler(ctx context.Context, msg *codec.Message) {
+	msg.Command = consts.RESPONSE
 	headers, ok := GetHeaders(ctx)
 	if !ok {
 		return
 	}
+	b.HandleCallback(ctx, msg)
 	awaitResponse, ok := headers[consts.AwaitResponseKey]
 	if !(ok && awaitResponse == "true") {
 		return
@@ -106,7 +104,6 @@ func (b *Broker) MessageResponseHandler(ctx context.Context, msg *codec.Message)
 	if !ok {
 		return
 	}
-	msg.Command = consts.RESPONSE
 	err := b.send(con.conn, msg)
 	if err != nil {
 		panic(err)
@@ -115,7 +112,7 @@ func (b *Broker) MessageResponseHandler(ctx context.Context, msg *codec.Message)
 
 func (b *Broker) PublishHandler(ctx context.Context, conn net.Conn, msg *codec.Message) {
 	pub := b.addPublisher(ctx, msg.Queue, conn)
-	log.Printf("BROKER - PUBLISH ~> from %s on %s", pub.id, msg.Queue)
+	log.Printf("BROKER - PUBLISH ~> received from %s on %s", pub.id, msg.Queue)
 	ack := codec.NewMessage(consts.PUBLISH_ACK, nil, msg.Queue, msg.Headers)
 	if err := b.send(conn, ack); err != nil {
 		log.Printf("Error sending PUBLISH_ACK: %v\n", err)

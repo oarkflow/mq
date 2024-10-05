@@ -3,8 +3,8 @@ package main
 import (
 	"context"
 
-	"github.com/oarkflow/mq"
 	"github.com/oarkflow/mq/examples/tasks"
+	mq "github.com/oarkflow/mq/v2"
 )
 
 func main() {

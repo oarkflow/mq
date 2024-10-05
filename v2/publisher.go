@@ -18,12 +18,8 @@ type Publisher struct {
 }
 
 func NewPublisher(id string, opts ...Option) *Publisher {
-	options := defaultOptions()
-	for _, opt := range opts {
-		opt(&options)
-	}
-	b := &Publisher{id: id, opts: options}
-	return b
+	options := setupOptions(opts...)
+	return &Publisher{id: id, opts: options}
 }
 
 func (p *Publisher) send(ctx context.Context, queue string, task Task, conn net.Conn, command consts.CMD) error {
