@@ -8,7 +8,6 @@ import (
 )
 
 func Node1(ctx context.Context, task mq2.Task) mq2.Result {
-	fmt.Println("Processing queue1", task.ID)
 	return mq2.Result{Payload: task.Payload, MessageID: task.ID}
 }
 

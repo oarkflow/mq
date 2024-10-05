@@ -3,6 +3,7 @@ package dag
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"github.com/oarkflow/mq/consts"
 	"log"
 	"net/http"
@@ -84,10 +85,7 @@ func (d *DAG) Start(ctx context.Context, addr string) error {
 	}()
 	for _, con := range d.nodes {
 		go func(con *mq.Consumer) {
-			err := con.Consume(ctx)
-			if err != nil {
-				panic(err)
-			}
+			con.Consume(ctx)
 		}(con)
 	}
 	log.Printf("HTTP server started on %s", addr)
@@ -96,6 +94,33 @@ func (d *DAG) Start(ctx context.Context, addr string) error {
 		return http.ListenAndServeTLS(addr, config.CertPath, config.KeyPath, nil)
 	}
 	return http.ListenAndServe(addr, nil)
+}
+
+func (d *DAG) PublishTask(ctx context.Context, payload json.RawMessage, taskID ...string) mq.Result {
+	queue, ok := mq.GetQueue(ctx)
+	if !ok {
+		queue = d.FirstNode
+	}
+	var id string
+	if len(taskID) > 0 {
+		id = taskID[0]
+	} else {
+		id = mq.NewID()
+	}
+	task := mq.Task{
+		ID:        id,
+		Payload:   payload,
+		CreatedAt: time.Now(),
+	}
+	err := d.server.Publish(ctx, task, queue)
+	if err != nil {
+		return mq.Result{Error: err}
+	}
+	return mq.Result{
+		Payload:   payload,
+		Queue:     queue,
+		MessageID: id,
+	}
 }
 
 func (d *DAG) FindFirstNode() (string, bool) {
@@ -119,23 +144,92 @@ func (d *DAG) FindFirstNode() (string, bool) {
 	return "", false
 }
 
-func (d *DAG) PublishTask(ctx context.Context, payload json.RawMessage, taskID ...string) error {
-	queue, ok := mq.GetQueue(ctx)
-	if !ok {
-		queue = d.FirstNode
+func (d *DAG) Request(ctx context.Context, payload []byte) mq.Result {
+	return d.sendSync(ctx, mq.Result{Payload: payload})
+}
+
+func (d *DAG) Send(ctx context.Context, payload []byte) mq.Result {
+	if d.FirstNode == "" {
+		return mq.Result{Error: fmt.Errorf("initial node not defined")}
 	}
-	var id string
-	if len(taskID) > 0 {
-		id = taskID[0]
-	} else {
-		id = mq.NewID()
+	if d.server.SyncMode() {
+		return d.sendSync(ctx, mq.Result{Payload: payload})
 	}
-	task := mq.Task{
-		ID:        id,
-		Payload:   payload,
-		CreatedAt: time.Now(),
+	resultCh := make(chan mq.Result)
+	result := d.PublishTask(ctx, payload, d.FirstNode)
+	if result.Error != nil {
+		return result
 	}
-	return d.server.Publish(ctx, task, queue)
+	d.mu.Lock()
+	d.taskChMap[result.MessageID] = resultCh
+	d.mu.Unlock()
+	finalResult := <-resultCh
+	return finalResult
+}
+
+func (d *DAG) processNode(ctx context.Context, task mq.Result) mq.Result {
+	if con, ok := d.nodes[task.Queue]; ok {
+		return con.ProcessTask(ctx, mq.Task{
+			ID:      task.MessageID,
+			Payload: task.Payload,
+		})
+	}
+	return mq.Result{Error: fmt.Errorf("no consumer to process %s", task.Queue)}
+}
+
+func (d *DAG) sendSync(ctx context.Context, task mq.Result) mq.Result {
+	if task.MessageID == "" {
+		task.MessageID = mq.NewID()
+	}
+	if task.Queue == "" {
+		task.Queue = d.FirstNode
+	}
+	ctx = mq.SetHeaders(ctx, map[string]string{
+		consts.QueueKey: task.Queue,
+	})
+	result := d.processNode(ctx, task)
+	if result.Error != nil {
+		return result
+	}
+	for _, target := range d.loopEdges[task.Queue] {
+		var items, results []json.RawMessage
+		if err := json.Unmarshal(result.Payload, &items); err != nil {
+			return mq.Result{Error: err}
+		}
+		for _, item := range items {
+			ctx = mq.SetHeaders(ctx, map[string]string{
+				consts.QueueKey: target,
+			})
+			result = d.sendSync(ctx, mq.Result{
+				Payload:   item,
+				Queue:     target,
+				MessageID: result.MessageID,
+			})
+			if result.Error != nil {
+				return result
+			}
+			results = append(results, result.Payload)
+		}
+		bt, err := json.Marshal(results)
+		if err != nil {
+			return mq.Result{Error: err}
+		}
+		result.Payload = bt
+	}
+	if target, ok := d.edges[task.Queue]; ok {
+		ctx = mq.SetHeaders(ctx, map[string]string{
+			consts.QueueKey: target,
+		})
+		result = d.sendSync(ctx, mq.Result{
+			Payload:   result.Payload,
+			Queue:     target,
+			MessageID: result.MessageID,
+		})
+		if result.Error != nil {
+			return result
+		}
+	}
+	return result
 }
 
 func (d *DAG) getCompletedResults(task mq.Result, ok bool, triggeredNode string) ([]byte, bool, bool) {
@@ -202,9 +296,9 @@ func (d *DAG) TaskCallback(ctx context.Context, task mq.Result) mq.Result {
 				ctx = mq.SetHeaders(ctx, map[string]string{
 					consts.QueueKey: loopNode,
 				})
-				err := d.PublishTask(ctx, item, task.MessageID)
-				if err != nil {
-					return mq.Result{Error: err}
+				result := d.PublishTask(ctx, item, task.MessageID)
+				if result.Error != nil {
+					return result
 				}
 			}
 		}
@@ -222,9 +316,12 @@ func (d *DAG) TaskCallback(ctx context.Context, task mq.Result) mq.Result {
 				totalItems: 1,
 			},
 		}
-		err := d.PublishTask(ctx, payload, edge, task.MessageID)
-		if err != nil {
-			return mq.Result{Error: err}
+		ctx = mq.SetHeaders(ctx, map[string]string{
+			consts.QueueKey: edge,
+		})
+		result := d.PublishTask(ctx, payload, task.MessageID)
+		if result.Error != nil {
+			return result
 		}
 	} else if completed {
 		d.mu.Lock()
