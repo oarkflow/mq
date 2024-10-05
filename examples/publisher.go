@@ -3,17 +3,16 @@ package main
 import (
 	"context"
 	"fmt"
+	mq2 "github.com/oarkflow/mq"
 	"time"
-
-	mq "github.com/oarkflow/mq/v2"
 )
 
 func main() {
 	payload := []byte(`{"message":"Message Publisher \n Task"}`)
-	task := mq.Task{
+	task := mq2.Task{
 		Payload: payload,
 	}
-	publisher := mq.NewPublisher("publish-1")
+	publisher := mq2.NewPublisher("publish-1")
 	// publisher := mq.NewPublisher("publish-1", mq.WithTLS(true, "./certs/server.crt", "./certs/server.key"))
 	err := publisher.Publish(context.Background(), task, "queue1")
 	if err != nil {
@@ -21,7 +20,7 @@ func main() {
 	}
 	fmt.Println("Async task published successfully")
 	payload = []byte(`{"message":"Fire-and-Forget \n Task"}`)
-	task = mq.Task{
+	task = mq2.Task{
 		Payload: payload,
 	}
 	for i := 0; i < 100; i++ {

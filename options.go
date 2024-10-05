@@ -2,8 +2,17 @@ package mq
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 )
+
+type Result struct {
+	Payload   json.RawMessage `json:"payload"`
+	Queue     string          `json:"queue"`
+	MessageID string          `json:"message_id"`
+	Error     error           `json:"error,omitempty"`
+	Status    string          `json:"status"`
+}
 
 type TLSConfig struct {
 	UseTLS   bool
@@ -13,17 +22,18 @@ type TLSConfig struct {
 }
 
 type Options struct {
-	syncMode       bool
-	brokerAddr     string
-	messageHandler MessageHandler
-	closeHandler   CloseHandler
-	errorHandler   ErrorHandler
-	callback       []func(context.Context, Result) Result
-	maxRetries     int
-	initialDelay   time.Duration
-	maxBackoff     time.Duration
-	jitterPercent  float64
-	tlsConfig      TLSConfig
+	syncMode         bool
+	brokerAddr       string
+	callback         []func(context.Context, Result) Result
+	maxRetries       int
+	initialDelay     time.Duration
+	maxBackoff       time.Duration
+	jitterPercent    float64
+	tlsConfig        TLSConfig
+	aesKey           json.RawMessage
+	hmacKey          json.RawMessage
+	enableEncryption bool
+	queueSize        int
 }
 
 func defaultOptions() Options {
@@ -34,26 +44,28 @@ func defaultOptions() Options {
 		initialDelay:  2 * time.Second,
 		maxBackoff:    20 * time.Second,
 		jitterPercent: 0.5,
+		queueSize:     100,
 	}
-}
-
-func defaultHandlers(options Options, onMessage MessageHandler, onClose CloseHandler, onError ErrorHandler) Options {
-	if options.messageHandler == nil {
-		options.messageHandler = onMessage
-	}
-
-	if options.closeHandler == nil {
-		options.closeHandler = onClose
-	}
-
-	if options.errorHandler == nil {
-		options.errorHandler = onError
-	}
-	return options
 }
 
 // Option defines a function type for setting options.
 type Option func(*Options)
+
+func setupOptions(opts ...Option) Options {
+	options := defaultOptions()
+	for _, opt := range opts {
+		opt(&options)
+	}
+	return options
+}
+
+func WithEncryption(aesKey, hmacKey json.RawMessage, enableEncryption bool) Option {
+	return func(opts *Options) {
+		opts.aesKey = aesKey
+		opts.hmacKey = hmacKey
+		opts.enableEncryption = enableEncryption
+	}
+}
 
 // WithBrokerURL -
 func WithBrokerURL(url string) Option {
@@ -117,26 +129,5 @@ func WithCallback(val ...func(context.Context, Result) Result) Option {
 func WithJitterPercent(val float64) Option {
 	return func(opts *Options) {
 		opts.jitterPercent = val
-	}
-}
-
-// WithMessageHandler sets a custom MessageHandler.
-func WithMessageHandler(handler MessageHandler) Option {
-	return func(opts *Options) {
-		opts.messageHandler = handler
-	}
-}
-
-// WithErrorHandler sets a custom ErrorHandler.
-func WithErrorHandler(handler ErrorHandler) Option {
-	return func(opts *Options) {
-		opts.errorHandler = handler
-	}
-}
-
-// WithCloseHandler sets a custom CloseHandler.
-func WithCloseHandler(handler CloseHandler) Option {
-	return func(opts *Options) {
-		opts.closeHandler = handler
 	}
 }

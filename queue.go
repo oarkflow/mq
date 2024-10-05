@@ -1,4 +1,4 @@
-package v2
+package mq
 
 import (
 	"github.com/oarkflow/xsync"
