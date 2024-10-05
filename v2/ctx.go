@@ -4,14 +4,27 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"fmt"
 	"net"
 	"os"
+	"time"
 
 	"github.com/oarkflow/xid"
 
 	"github.com/oarkflow/mq/consts"
 )
+
+type Task struct {
+	ID          string          `json:"id"`
+	Payload     json.RawMessage `json:"payload"`
+	CreatedAt   time.Time       `json:"created_at"`
+	ProcessedAt time.Time       `json:"processed_at"`
+	Status      string          `json:"status"`
+	Error       error           `json:"error"`
+}
+
+type Handler func(context.Context, Task) Result
 
 func IsClosed(conn net.Conn) bool {
 	_, err := conn.Read(make([]byte, 1))

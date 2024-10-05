@@ -53,7 +53,7 @@ func (p *Publisher) waitForAck(conn net.Conn) error {
 		return err
 	}
 	if msg.Command == consts.PUBLISH_ACK {
-		log.Println("Received PUBLISH_ACK: Message published successfully")
+		log.Printf("PUBLISHER - PUBLISH_ACK ~> from %s on %s", p.id, msg.Queue)
 		return nil
 	}
 	return fmt.Errorf("expected PUBLISH_ACK, got: %v", msg.Command)

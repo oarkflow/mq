@@ -39,6 +39,14 @@ func NewConsumer(id string, opts ...Option) *Consumer {
 	return b
 }
 
+func (c *Consumer) send(conn net.Conn, msg *codec.Message) error {
+	return codec.SendMessage(conn, msg, c.opts.aesKey, c.opts.hmacKey, c.opts.enableEncryption)
+}
+
+func (c *Consumer) receive(conn net.Conn) (*codec.Message, error) {
+	return codec.ReadMessage(conn, c.opts.aesKey, c.opts.hmacKey, c.opts.enableEncryption)
+}
+
 // Close closes the consumer's connection.
 func (c *Consumer) Close() error {
 	return c.conn.Close()
@@ -51,7 +59,7 @@ func (c *Consumer) subscribe(ctx context.Context, queue string) error {
 		consts.ContentType: consts.TypeJson,
 	})
 	msg := codec.NewMessage(consts.SUBSCRIBE, nil, queue, headers)
-	if err := codec.SendMessage(c.conn, msg, c.opts.aesKey, c.opts.hmacKey, c.opts.enableEncryption); err != nil {
+	if err := c.send(c.conn, msg); err != nil {
 		return err
 	}
 
@@ -73,7 +81,7 @@ func (c *Consumer) OnMessage(ctx context.Context, msg *codec.Message, conn net.C
 		consts.ContentType: consts.TypeJson,
 	})
 	reply := codec.NewMessage(consts.MESSAGE_ACK, nil, msg.Queue, headers)
-	if err := codec.SendMessage(conn, reply, c.opts.aesKey, c.opts.hmacKey, c.opts.enableEncryption); err != nil {
+	if err := c.send(conn, reply); err != nil {
 		fmt.Printf("failed to send MESSAGE_ACK for queue %s: %v", msg.Queue, err)
 	}
 	var task Task
@@ -93,7 +101,7 @@ func (c *Consumer) OnMessage(ctx context.Context, msg *codec.Message, conn net.C
 	}
 	bt, _ := json.Marshal(result)
 	reply = codec.NewMessage(consts.MESSAGE_RESPONSE, bt, msg.Queue, headers)
-	if err := codec.SendMessage(conn, reply, c.opts.aesKey, c.opts.hmacKey, c.opts.enableEncryption); err != nil {
+	if err := c.send(conn, reply); err != nil {
 		fmt.Printf("failed to send MESSAGE_RESPONSE for queue %s: %v", msg.Queue, err)
 	}
 }
@@ -131,7 +139,7 @@ func (c *Consumer) AttemptConnect() error {
 }
 
 func (c *Consumer) readMessage(ctx context.Context, conn net.Conn) error {
-	msg, err := codec.ReadMessage(conn, c.opts.aesKey, c.opts.hmacKey, c.opts.enableEncryption)
+	msg, err := c.receive(conn)
 	if err == nil {
 		ctx = SetHeaders(ctx, msg.Headers)
 		c.OnMessage(ctx, msg, conn)
@@ -173,12 +181,12 @@ func (c *Consumer) Consume(ctx context.Context) error {
 }
 
 func (c *Consumer) waitForAck(conn net.Conn) error {
-	msg, err := codec.ReadMessage(conn, c.opts.aesKey, c.opts.hmacKey, c.opts.enableEncryption)
+	msg, err := c.receive(conn)
 	if err != nil {
 		return err
 	}
 	if msg.Command == consts.SUBSCRIBE_ACK {
-		log.Println("Received SUBSCRIBE_ACK: Subscribed successfully")
+		log.Printf("CONSUMER - SUBSCRIBE_ACK ~> %s on %s", c.id, msg.Queue)
 		return nil
 	}
 	return fmt.Errorf("expected SUBSCRIBE_ACK, got: %v", msg.Command)
