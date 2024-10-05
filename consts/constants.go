@@ -16,8 +16,6 @@ const (
 
 	PUBLISH
 	PUBLISH_ACK
-
-	REQUEST
 	RESPONSE
 	STOP
 )

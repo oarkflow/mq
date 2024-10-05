@@ -102,5 +102,11 @@ func (p *Publisher) Request(ctx context.Context, queue string, task Task) Result
 	}
 	defer conn.Close()
 	err = p.send(ctx, queue, task, conn, consts.PUBLISH)
-	return p.waitForResponse(conn)
+	resultCh := make(chan Result)
+	go func() {
+		defer close(resultCh)
+		resultCh <- p.waitForResponse(conn)
+	}()
+	finalResult := <-resultCh
+	return finalResult
 }
