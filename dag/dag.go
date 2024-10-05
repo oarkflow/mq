@@ -26,6 +26,7 @@ type DAG struct {
 	server      *mq.Broker
 	nodes       map[string]*mq.Consumer
 	edges       map[string]string
+	conditions  map[string]map[string]string
 	loopEdges   map[string][]string
 	taskChMap   map[string]chan mq.Result
 	taskResults map[string]map[string]*taskContext
@@ -36,6 +37,7 @@ func New(opts ...mq.Option) *DAG {
 	d := &DAG{
 		nodes:       make(map[string]*mq.Consumer),
 		edges:       make(map[string]string),
+		conditions:  make(map[string]map[string]string),
 		loopEdges:   make(map[string][]string),
 		taskChMap:   make(map[string]chan mq.Result),
 		taskResults: make(map[string]map[string]*taskContext),
@@ -53,6 +55,10 @@ func (d *DAG) AddNode(name string, handler mq.Handler, firstNode ...bool) {
 	}
 	con.RegisterHandler(name, handler)
 	d.nodes[name] = con
+}
+
+func (d *DAG) AddCondition(fromNode string, conditions map[string]string) {
+	d.conditions[fromNode] = conditions
 }
 
 func (d *DAG) AddEdge(fromNode string, toNodes string) {
@@ -156,7 +162,7 @@ func (d *DAG) Send(ctx context.Context, payload []byte) mq.Result {
 		return d.sendSync(ctx, mq.Result{Payload: payload})
 	}
 	resultCh := make(chan mq.Result)
-	result := d.PublishTask(ctx, payload, d.FirstNode)
+	result := d.PublishTask(ctx, payload)
 	if result.Error != nil {
 		return result
 	}
@@ -215,6 +221,21 @@ func (d *DAG) sendSync(ctx context.Context, task mq.Result) mq.Result {
 			return mq.Result{Error: err}
 		}
 		result.Payload = bt
+	}
+	if conditions, ok := d.conditions[task.Queue]; ok {
+		if target, exists := conditions[result.Status]; exists {
+			ctx = mq.SetHeaders(ctx, map[string]string{
+				consts.QueueKey: target,
+			})
+			result = d.sendSync(ctx, mq.Result{
+				Payload:   result.Payload,
+				Queue:     target,
+				MessageID: result.MessageID,
+			})
+			if result.Error != nil {
+				return result
+			}
+		}
 	}
 	if target, ok := d.edges[task.Queue]; ok {
 		ctx = mq.SetHeaders(ctx, map[string]string{
@@ -277,6 +298,7 @@ func (d *DAG) TaskCallback(ctx context.Context, task mq.Result) mq.Result {
 		return mq.Result{Error: task.Error}
 	}
 	triggeredNode, ok := mq.GetTriggerNode(ctx)
+	fmt.Println(task.Queue, triggeredNode, ok)
 	payload, completed, multipleResults := d.getCompletedResults(task, ok, triggeredNode)
 	if loopNodes, exists := d.loopEdges[task.Queue]; exists {
 		var items []json.RawMessage
@@ -308,34 +330,48 @@ func (d *DAG) TaskCallback(ctx context.Context, task mq.Result) mq.Result {
 	if multipleResults && completed {
 		task.Queue = triggeredNode
 	}
-	ctx = mq.SetHeaders(ctx, map[string]string{consts.TriggerNode: task.Queue})
-	edge, exists := d.edges[task.Queue]
-	if exists {
-		d.taskResults[task.MessageID] = map[string]*taskContext{
-			task.Queue: {
-				totalItems: 1,
-			},
-		}
-		ctx = mq.SetHeaders(ctx, map[string]string{
-			consts.QueueKey: edge,
-		})
-		result := d.PublishTask(ctx, payload, task.MessageID)
-		if result.Error != nil {
-			return result
-		}
-	} else if completed {
-		d.mu.Lock()
-		if resultCh, ok := d.taskChMap[task.MessageID]; ok {
-			resultCh <- mq.Result{
-				Payload:   payload,
-				Queue:     task.Queue,
-				MessageID: task.MessageID,
-				Status:    "done",
+	if conditions, ok := d.conditions[task.Queue]; ok {
+		if target, exists := conditions[task.Status]; exists {
+			ctx = mq.SetHeaders(ctx, map[string]string{
+				consts.QueueKey:    target,
+				consts.TriggerNode: task.Queue,
+			})
+			result := d.PublishTask(ctx, payload, task.MessageID)
+			if result.Error != nil {
+				return result
 			}
-			delete(d.taskChMap, task.MessageID)
-			delete(d.taskResults, task.MessageID)
 		}
-		d.mu.Unlock()
+	} else {
+		ctx = mq.SetHeaders(ctx, map[string]string{consts.TriggerNode: task.Queue})
+		edge, exists := d.edges[task.Queue]
+		if exists {
+			d.taskResults[task.MessageID] = map[string]*taskContext{
+				task.Queue: {
+					totalItems: 1,
+				},
+			}
+			ctx = mq.SetHeaders(ctx, map[string]string{
+				consts.QueueKey: edge,
+			})
+			result := d.PublishTask(ctx, payload, task.MessageID)
+			if result.Error != nil {
+				return result
+			}
+		} else if completed {
+			d.mu.Lock()
+			if resultCh, ok := d.taskChMap[task.MessageID]; ok {
+				resultCh <- mq.Result{
+					Payload:   payload,
+					Queue:     task.Queue,
+					MessageID: task.MessageID,
+					Status:    "done",
+				}
+				delete(d.taskChMap, task.MessageID)
+				delete(d.taskResults, task.MessageID)
+			}
+			d.mu.Unlock()
+		}
 	}
+
 	return task
 }

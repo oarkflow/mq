@@ -122,7 +122,10 @@ func (b *Broker) MessageResponseHandler(ctx context.Context, msg *codec.Message)
 
 func (b *Broker) Publish(ctx context.Context, task Task, queue string) error {
 	headers, _ := GetHeaders(ctx)
-	payload, _ := json.Marshal(task)
+	payload, err := json.Marshal(task)
+	if err != nil {
+		return err
+	}
 	msg := codec.NewMessage(consts.PUBLISH, payload, queue, headers)
 	b.broadcastToConsumers(ctx, msg)
 	return nil

@@ -92,10 +92,12 @@ func (c *Consumer) OnMessage(ctx context.Context, msg *codec.Message, conn net.C
 	result := c.ProcessTask(ctx, task)
 	result.MessageID = task.ID
 	result.Queue = msg.Queue
-	if result.Error != nil {
-		result.Status = "FAILED"
-	} else {
-		result.Status = "SUCCESS"
+	if result.Status == "" {
+		if result.Error != nil {
+			result.Status = "FAILED"
+		} else {
+			result.Status = "SUCCESS"
+		}
 	}
 	bt, _ := json.Marshal(result)
 	reply = codec.NewMessage(consts.MESSAGE_RESPONSE, bt, msg.Queue, headers)
