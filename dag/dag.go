@@ -4,11 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/oarkflow/mq/consts"
 	"log"
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/oarkflow/mq/consts"
 
 	"github.com/oarkflow/mq"
 )
@@ -298,7 +299,6 @@ func (d *DAG) TaskCallback(ctx context.Context, task mq.Result) mq.Result {
 		return mq.Result{Error: task.Error}
 	}
 	triggeredNode, ok := mq.GetTriggerNode(ctx)
-	fmt.Println(task.Queue, triggeredNode, ok)
 	payload, completed, multipleResults := d.getCompletedResults(task, ok, triggeredNode)
 	if loopNodes, exists := d.loopEdges[task.Queue]; exists {
 		var items []json.RawMessage
@@ -332,6 +332,11 @@ func (d *DAG) TaskCallback(ctx context.Context, task mq.Result) mq.Result {
 	}
 	if conditions, ok := d.conditions[task.Queue]; ok {
 		if target, exists := conditions[task.Status]; exists {
+			d.taskResults[task.MessageID] = map[string]*taskContext{
+				task.Queue: {
+					totalItems: 1,
+				},
+			}
 			ctx = mq.SetHeaders(ctx, map[string]string{
 				consts.QueueKey:    target,
 				consts.TriggerNode: task.Queue,
