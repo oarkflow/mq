@@ -33,6 +33,7 @@ type Options struct {
 	aesKey           json.RawMessage
 	hmacKey          json.RawMessage
 	enableEncryption bool
+	queueSize        int
 }
 
 func defaultOptions() Options {
@@ -43,6 +44,7 @@ func defaultOptions() Options {
 		initialDelay:  2 * time.Second,
 		maxBackoff:    20 * time.Second,
 		jitterPercent: 0.5,
+		queueSize:     100,
 	}
 }
 

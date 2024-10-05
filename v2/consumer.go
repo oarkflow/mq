@@ -13,6 +13,7 @@ import (
 
 	"github.com/oarkflow/mq/codec"
 	"github.com/oarkflow/mq/consts"
+	"github.com/oarkflow/mq/jsonparser"
 	"github.com/oarkflow/mq/utils"
 )
 
@@ -76,7 +77,8 @@ func (c *Consumer) OnMessage(ctx context.Context, msg *codec.Message, conn net.C
 		consts.ConsumerKey: c.id,
 		consts.ContentType: consts.TypeJson,
 	})
-	reply := codec.NewMessage(consts.MESSAGE_ACK, nil, msg.Queue, headers)
+	taskID, _ := jsonparser.GetString(msg.Payload, "id")
+	reply := codec.NewMessage(consts.MESSAGE_ACK, []byte(fmt.Sprintf(`{"id":"%s"}`, taskID)), msg.Queue, headers)
 	if err := c.send(conn, reply); err != nil {
 		fmt.Printf("failed to send MESSAGE_ACK for queue %s: %v", msg.Queue, err)
 	}

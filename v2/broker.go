@@ -7,12 +7,20 @@ import (
 	"log"
 	"net"
 	"strings"
+	"time"
 
 	"github.com/oarkflow/xsync"
 
 	"github.com/oarkflow/mq/codec"
 	"github.com/oarkflow/mq/consts"
+	"github.com/oarkflow/mq/jsonparser"
+	"github.com/oarkflow/mq/utils"
 )
+
+type QueuedTask struct {
+	Message    *codec.Message
+	RetryCount int
+}
 
 type consumer struct {
 	id   string
@@ -82,7 +90,8 @@ func (b *Broker) OnMessage(ctx context.Context, msg *codec.Message, conn net.Con
 
 func (b *Broker) MessageAck(ctx context.Context, msg *codec.Message) {
 	consumerID, _ := GetConsumerID(ctx)
-	log.Printf("BROKER - MESSAGE_ACK ~> %s on %s", consumerID, msg.Queue)
+	taskID, _ := jsonparser.GetString(msg.Payload, "id")
+	log.Printf("BROKER - MESSAGE_ACK ~> %s on %s for Task %s", consumerID, msg.Queue, taskID)
 }
 
 func (b *Broker) MessageResponseHandler(ctx context.Context, msg *codec.Message) {
@@ -110,10 +119,19 @@ func (b *Broker) MessageResponseHandler(ctx context.Context, msg *codec.Message)
 	}
 }
 
+func (b *Broker) Publish(ctx context.Context, task Task, queue string) error {
+	headers, _ := GetHeaders(ctx)
+	msg := codec.NewMessage(consts.PUBLISH, task.Payload, queue, headers)
+	b.broadcastToConsumers(ctx, msg)
+	return nil
+}
+
 func (b *Broker) PublishHandler(ctx context.Context, conn net.Conn, msg *codec.Message) {
 	pub := b.addPublisher(ctx, msg.Queue, conn)
-	log.Printf("BROKER - PUBLISH ~> received from %s on %s", pub.id, msg.Queue)
-	ack := codec.NewMessage(consts.PUBLISH_ACK, nil, msg.Queue, msg.Headers)
+	taskID, _ := jsonparser.GetString(msg.Payload, "id")
+	log.Printf("BROKER - PUBLISH ~> received from %s on %s for Task %s", pub.id, msg.Queue, taskID)
+
+	ack := codec.NewMessage(consts.PUBLISH_ACK, []byte(fmt.Sprintf(`{"id":"%s"}`, taskID)), msg.Queue, msg.Headers)
 	if err := b.send(conn, ack); err != nil {
 		log.Printf("Error sending PUBLISH_ACK: %v\n", err)
 	}
@@ -193,13 +211,9 @@ func (b *Broker) receive(c net.Conn) (*codec.Message, error) {
 
 func (b *Broker) broadcastToConsumers(ctx context.Context, msg *codec.Message) {
 	if queue, ok := b.queues.Get(msg.Queue); ok {
-		queue.consumers.ForEach(func(_ string, con *consumer) bool {
-			msg.Command = consts.MESSAGE_SEND
-			if err := b.send(con.conn, msg); err != nil {
-				log.Printf("Error sending Message: %v\n", err)
-			}
-			return true
-		})
+		task := &QueuedTask{Message: msg, RetryCount: 0}
+		queue.tasks <- task
+		log.Printf("Task enqueued for queue %s", msg.Queue)
 	}
 }
 
@@ -263,4 +277,47 @@ func (b *Broker) readMessage(ctx context.Context, c net.Conn) error {
 	}
 	b.OnError(ctx, c, err)
 	return err
+}
+
+func (b *Broker) dispatchWorker(queue *Queue) {
+	delay := b.opts.initialDelay
+	for task := range queue.tasks {
+		success := false
+		for !success && task.RetryCount <= b.opts.maxRetries {
+			if b.dispatchTaskToConsumer(queue, task) {
+				success = true
+			} else {
+				task.RetryCount++
+				delay = b.backoffRetry(queue, task, delay)
+			}
+		}
+	}
+}
+
+func (b *Broker) dispatchTaskToConsumer(queue *Queue, task *QueuedTask) bool {
+	var consumerFound bool
+	queue.consumers.ForEach(func(_ string, con *consumer) bool {
+		if err := b.send(con.conn, task.Message); err == nil {
+			consumerFound = true
+			log.Printf("Task dispatched to consumer %s on queue %s", con.id, queue.name)
+			return false // break the loop once a consumer is found
+		}
+		return true
+	})
+	if !consumerFound {
+		log.Printf("No available consumers for queue %s, retrying...", queue.name)
+	}
+	return consumerFound
+}
+
+func (b *Broker) backoffRetry(queue *Queue, task *QueuedTask, delay time.Duration) time.Duration {
+	backoffDuration := utils.CalculateJitter(delay, b.opts.jitterPercent)
+	log.Printf("Backing off for %v before retrying task for queue %s", backoffDuration, task.Message.Queue)
+	time.Sleep(backoffDuration)
+	queue.tasks <- task
+	delay *= 2
+	if delay > b.opts.maxBackoff {
+		delay = b.opts.maxBackoff
+	}
+	return delay
 }

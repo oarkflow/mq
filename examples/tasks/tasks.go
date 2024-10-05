@@ -9,7 +9,7 @@ import (
 )
 
 func Node1(ctx context.Context, task mq.Task) mq.Result {
-	fmt.Println("Processing queue1")
+	fmt.Println("Processing queue1", task.ID)
 	return mq.Result{Payload: task.Payload, MessageID: task.ID}
 }
 

@@ -10,6 +10,7 @@ import (
 
 	"github.com/oarkflow/mq/codec"
 	"github.com/oarkflow/mq/consts"
+	"github.com/oarkflow/mq/jsonparser"
 )
 
 type Publisher struct {
@@ -49,7 +50,8 @@ func (p *Publisher) waitForAck(conn net.Conn) error {
 		return err
 	}
 	if msg.Command == consts.PUBLISH_ACK {
-		log.Printf("PUBLISHER - PUBLISH_ACK ~> from %s on %s", p.id, msg.Queue)
+		taskID, _ := jsonparser.GetString(msg.Payload, "id")
+		log.Printf("PUBLISHER - PUBLISH_ACK ~> from %s on %s for Task %s", p.id, msg.Queue, taskID)
 		return nil
 	}
 	return fmt.Errorf("expected PUBLISH_ACK, got: %v", msg.Command)
@@ -69,7 +71,7 @@ func (p *Publisher) waitForResponse(conn net.Conn) Result {
 	return Result{Error: err}
 }
 
-func (p *Publisher) Publish(ctx context.Context, queue string, task Task) error {
+func (p *Publisher) Publish(ctx context.Context, task Task, queue string) error {
 	conn, err := GetConnection(p.opts.brokerAddr, p.opts.tlsConfig)
 	if err != nil {
 		return fmt.Errorf("failed to connect to broker: %w", err)

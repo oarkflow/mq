@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"time"
 
 	mq "github.com/oarkflow/mq/v2"
 )
@@ -14,7 +15,7 @@ func main() {
 	}
 	publisher := mq.NewPublisher("publish-1")
 	// publisher := mq.NewPublisher("publish-1", mq.WithTLS(true, "./certs/server.crt", "./certs/server.key"))
-	err := publisher.Publish(context.Background(), "queue1", task)
+	err := publisher.Publish(context.Background(), task, "queue1")
 	if err != nil {
 		panic(err)
 	}
@@ -23,9 +24,11 @@ func main() {
 	task = mq.Task{
 		Payload: payload,
 	}
-	result := publisher.Request(context.Background(), "queue1", task)
-	if result.Error != nil {
-		panic(result.Error)
+	for i := 0; i < 100; i++ {
+		time.Sleep(500 * time.Millisecond)
+		err := publisher.Publish(context.Background(), task, "queue1")
+		if err != nil {
+			panic(err)
+		}
 	}
-	fmt.Printf("Sync task published. Result: %v\n", string(result.Payload))
 }
