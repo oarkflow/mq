@@ -3,15 +3,17 @@ package main
 import (
 	"context"
 	"fmt"
+	"time"
+
+	"github.com/oarkflow/mq"
 	"github.com/oarkflow/mq/dag"
 	"github.com/oarkflow/mq/examples/tasks"
-	"time"
 )
 
 var d *dag.DAG
 
 func main() {
-	d = dag.New()
+	d = dag.New(mq.WithSyncMode(false))
 	d.AddNode("queue1", tasks.CheckCondition, true)
 	d.AddNode("queue2", tasks.Pass)
 	d.AddNode("queue3", tasks.Fail)
