@@ -9,9 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/oarkflow/mq/consts"
-
 	"github.com/oarkflow/mq"
+	"github.com/oarkflow/mq/consts"
 )
 
 type taskContext struct {
@@ -43,7 +42,7 @@ func New(opts ...mq.Option) *DAG {
 		taskChMap:   make(map[string]chan mq.Result),
 		taskResults: make(map[string]map[string]*taskContext),
 	}
-	opts = append(opts, mq.WithCallback(d.TaskCallback))
+	opts = append(opts, mq.WithCallback(d.taskCallback))
 	d.server = mq.NewBroker(opts...)
 	return d
 }
@@ -155,7 +154,7 @@ func (d *DAG) Request(ctx context.Context, payload []byte) mq.Result {
 	if d.FirstNode == "" {
 		d.Prepare()
 	}
-	return d.sendSync(ctx, mq.Result{Payload: payload, Queue: d.FirstNode})
+	return d.taskCallback(ctx, mq.Result{Payload: payload, Queue: d.FirstNode})
 }
 
 func (d *DAG) Send(ctx context.Context, payload []byte) mq.Result {
@@ -163,7 +162,7 @@ func (d *DAG) Send(ctx context.Context, payload []byte) mq.Result {
 		d.Prepare()
 	}
 	if d.server.SyncMode() {
-		return d.sendSync(ctx, mq.Result{Payload: payload, Queue: d.FirstNode})
+		return d.taskCallback(ctx, mq.Result{Payload: payload, Queue: d.FirstNode})
 	}
 	resultCh := make(chan mq.Result)
 	result := d.PublishTask(ctx, payload)
@@ -190,53 +189,77 @@ func (d *DAG) processNode(ctx context.Context, task mq.Result) mq.Result {
 func (d *DAG) processTask(ctx context.Context, payload []byte, triggerNode, queue, messageID string) mq.Result {
 	ctx = setTaskHeader(ctx, triggerNode, queue)
 	if d.server.SyncMode() {
-		return d.sendSync(ctx, mq.Result{Payload: payload, Queue: queue, MessageID: messageID})
+		return d.taskCallback(ctx, mq.Result{Payload: payload, Queue: queue, MessageID: messageID})
 	}
 	return d.PublishTask(ctx, payload, messageID)
 }
 
-func (d *DAG) sendSync(ctx context.Context, task mq.Result) mq.Result {
+func (d *DAG) taskCallback(ctx context.Context, task mq.Result) mq.Result {
 	if task.Error != nil {
 		return d.respond(task)
 	}
 	if task.MessageID == "" {
 		task.MessageID = mq.NewID()
 	}
-	ctx = setTaskHeader(ctx, "", task.Queue)
-	result := d.processNode(ctx, task)
-	if result.Error != nil {
-		return d.respond(result)
+	result := task
+	triggeredNode, ok := mq.GetTriggerNode(ctx)
+	if d.server.SyncMode() {
+		ctx = setTaskHeader(ctx, triggeredNode, task.Queue)
+		result = d.processNode(ctx, task)
+		if result.Error != nil {
+			return d.respond(result)
+		}
+		result.MessageID = task.MessageID
+		result.Queue = task.Queue
 	}
-	for _, target := range d.loopEdges[task.Queue] {
+	payload, completed, multipleResults := d.getCompletedResults(result, ok, triggeredNode)
+	if loopNodes, exists := d.loopEdges[result.Queue]; exists {
 		var items, results []json.RawMessage
 		if err := json.Unmarshal(result.Payload, &items); err != nil {
 			return d.respond(mq.Result{Error: err})
 		}
-		for _, item := range items {
-			result = d.processTask(ctx, item, task.Queue, target, task.MessageID)
-			if result.Error != nil {
-				return d.respond(result)
+		d.processTaskResult(result.Queue, result.MessageID, len(items), true)
+		for _, loopNode := range loopNodes {
+			for _, item := range items {
+				result = d.processTask(ctx, item, result.Queue, loopNode, result.MessageID)
+				if result.Error != nil {
+					return d.respond(result)
+				}
+				results = append(results, result.Payload)
 			}
-			results = append(results, result.Payload)
 		}
 		bt, err := json.Marshal(results)
 		if err != nil {
 			return d.respond(mq.Result{Error: err})
 		}
 		result.Payload = bt
+		if !d.server.SyncMode() {
+			return result
+		}
 	}
-	if conditions, ok := d.conditions[task.Queue]; ok {
+	if multipleResults && completed {
+		result.Queue = triggeredNode
+	}
+	if conditions, ok := d.conditions[result.Queue]; ok {
 		if target, exists := conditions[result.Status]; exists {
-			result = d.processTask(ctx, result.Payload, task.Queue, target, task.MessageID)
+			d.processTaskResult(result.Queue, result.MessageID, 1, false)
+			result = d.processTask(ctx, payload, result.Queue, target, result.MessageID)
 			if result.Error != nil {
 				return d.respond(result)
 			}
 		}
-	}
-	if target, ok := d.edges[task.Queue]; ok {
-		result = d.processTask(ctx, result.Payload, task.Queue, target, task.MessageID)
-		if result.Error != nil {
-			return result
+	} else {
+		ctx = mq.SetHeaders(ctx, map[string]string{consts.TriggerNode: result.Queue})
+		edge, exists := d.edges[result.Queue]
+		if exists {
+			d.processTaskResult(result.Queue, result.MessageID, 1, false)
+			result = d.processTask(ctx, payload, result.Queue, edge, result.MessageID)
+			if result.Error != nil {
+				return d.respond(result)
+			}
+		} else if completed {
+			result.Payload = payload
+			return d.respond(result)
 		}
 	}
 	return result
@@ -300,56 +323,4 @@ func (d *DAG) processTaskResult(queue, taskID string, totalItems int, multipleRe
 			multipleResults: multipleResults,
 		},
 	}
-}
-
-func (d *DAG) TaskCallback(ctx context.Context, task mq.Result) mq.Result {
-	if task.Error != nil {
-		return d.respond(task)
-	}
-	result := task
-	triggeredNode, ok := mq.GetTriggerNode(ctx)
-	payload, completed, multipleResults := d.getCompletedResults(task, ok, triggeredNode)
-	if loopNodes, exists := d.loopEdges[task.Queue]; exists {
-		var items []json.RawMessage
-		if err := json.Unmarshal(payload, &items); err != nil {
-			return d.respond(task)
-		}
-		d.processTaskResult(task.Queue, task.MessageID, len(items), true)
-		for _, loopNode := range loopNodes {
-			for _, item := range items {
-				result = d.processTask(ctx, item, task.Queue, loopNode, task.MessageID)
-				if result.Error != nil {
-					return d.respond(result)
-				}
-			}
-		}
-
-		return task
-	}
-	if multipleResults && completed {
-		task.Queue = triggeredNode
-	}
-	if conditions, ok := d.conditions[task.Queue]; ok {
-		if target, exists := conditions[task.Status]; exists {
-			d.processTaskResult(task.Queue, task.MessageID, 1, false)
-			result = d.processTask(ctx, payload, task.Queue, target, task.MessageID)
-			if result.Error != nil {
-				return d.respond(result)
-			}
-		}
-	} else {
-		ctx = mq.SetHeaders(ctx, map[string]string{consts.TriggerNode: task.Queue})
-		edge, exists := d.edges[task.Queue]
-		if exists {
-			d.processTaskResult(task.Queue, task.MessageID, 1, false)
-			result = d.processTask(ctx, payload, task.Queue, edge, task.MessageID)
-			if result.Error != nil {
-				return d.respond(result)
-			}
-		} else if completed {
-			task.Payload = payload
-			return d.respond(task)
-		}
-	}
-	return task
 }
