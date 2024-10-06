@@ -334,7 +334,7 @@ func (d *DAG) TaskCallback(ctx context.Context, task mq.Result) mq.Result {
 		if target, exists := conditions[task.Status]; exists {
 			d.taskResults[task.MessageID] = map[string]*taskContext{
 				task.Queue: {
-					totalItems: 1,
+					totalItems: len(conditions),
 				},
 			}
 			ctx = mq.SetHeaders(ctx, map[string]string{
