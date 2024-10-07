@@ -2,8 +2,8 @@ package main
 
 import (
 	"context"
-
 	"github.com/oarkflow/mq"
+
 	"github.com/oarkflow/mq/examples/tasks"
 )
 

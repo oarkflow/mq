@@ -1,39 +1,30 @@
 package mq
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net"
 	"os"
-	"strings"
+	"time"
 
 	"github.com/oarkflow/xid"
 
 	"github.com/oarkflow/mq/consts"
 )
 
-type Message struct {
-	Headers map[string]string `json:"headers"`
-	Data    json.RawMessage   `json:"data"`
+type Task struct {
+	ID          string          `json:"id"`
+	Payload     json.RawMessage `json:"payload"`
+	CreatedAt   time.Time       `json:"created_at"`
+	ProcessedAt time.Time       `json:"processed_at"`
+	Status      string          `json:"status"`
+	Error       error           `json:"error"`
 }
 
-type MessageHandler func(context.Context, net.Conn, []byte) error
-
-type CloseHandler func(context.Context, net.Conn) error
-
-type ErrorHandler func(context.Context, net.Conn, error)
-
-type Handlers struct {
-	MessageHandler MessageHandler
-	CloseHandler   CloseHandler
-	ErrorHandler   ErrorHandler
-}
+type Handler func(context.Context, Task) Result
 
 func IsClosed(conn net.Conn) bool {
 	_, err := conn.Read(make([]byte, 1))
@@ -56,9 +47,29 @@ func SetHeaders(ctx context.Context, headers map[string]string) context.Context 
 	return context.WithValue(ctx, consts.HeaderKey, hd)
 }
 
+func WithHeaders(ctx context.Context, headers map[string]string) map[string]string {
+	hd, ok := GetHeaders(ctx)
+	if !ok {
+		hd = make(map[string]string)
+	}
+	for key, val := range headers {
+		hd[key] = val
+	}
+	return hd
+}
+
 func GetHeaders(ctx context.Context) (map[string]string, bool) {
 	headers, ok := ctx.Value(consts.HeaderKey).(map[string]string)
 	return headers, ok
+}
+
+func GetHeader(ctx context.Context, key string) (string, bool) {
+	headers, ok := ctx.Value(consts.HeaderKey).(map[string]string)
+	if !ok {
+		return "", false
+	}
+	val, ok := headers[key]
+	return val, ok
 }
 
 func GetContentType(ctx context.Context) (string, bool) {
@@ -67,6 +78,15 @@ func GetContentType(ctx context.Context) (string, bool) {
 		return "", false
 	}
 	contentType, ok := headers[consts.ContentType]
+	return contentType, ok
+}
+
+func GetQueue(ctx context.Context) (string, bool) {
+	headers, ok := GetHeaders(ctx)
+	if !ok {
+		return "", false
+	}
+	contentType, ok := headers[consts.QueueKey]
 	return contentType, ok
 }
 
@@ -95,70 +115,6 @@ func GetPublisherID(ctx context.Context) (string, bool) {
 	}
 	contentType, ok := headers[consts.PublisherKey]
 	return contentType, ok
-}
-
-func Write(ctx context.Context, conn net.Conn, data any) error {
-	msg := Message{Headers: make(map[string]string)}
-	if headers, ok := GetHeaders(ctx); ok {
-		msg.Headers = headers
-	}
-	dataBytes, err := json.Marshal(data)
-	if err != nil {
-		return err
-	}
-	msg.Data = dataBytes
-	messageBytes, err := json.Marshal(msg)
-	if err != nil {
-		return err
-	}
-	_, err = conn.Write(append(messageBytes, '\n'))
-	return err
-}
-
-func ReadFromConn(ctx context.Context, conn net.Conn, handlers Handlers) {
-	defer func() {
-		if handlers.CloseHandler != nil {
-			if err := handlers.CloseHandler(ctx, conn); err != nil {
-				fmt.Println("Error in close handler:", err)
-			}
-		}
-		conn.Close()
-	}()
-	reader := bufio.NewReader(conn)
-	for {
-		messageBytes, err := reader.ReadBytes('\n')
-		if err != nil {
-			if err == io.EOF || IsClosed(conn) || strings.Contains(err.Error(), "closed network connection") {
-				break
-			}
-			if handlers.ErrorHandler != nil {
-				handlers.ErrorHandler(ctx, conn, err)
-			}
-			continue
-		}
-		messageBytes = bytes.TrimSpace(messageBytes)
-		if len(messageBytes) == 0 {
-			continue
-		}
-		var msg Message
-		err = json.Unmarshal(messageBytes, &msg)
-		if err != nil {
-			if handlers.ErrorHandler != nil {
-				handlers.ErrorHandler(ctx, conn, err)
-			}
-			continue
-		}
-		ctx = SetHeaders(ctx, msg.Headers)
-		if handlers.MessageHandler != nil {
-			err = handlers.MessageHandler(ctx, conn, msg.Data)
-			if err != nil {
-				if handlers.ErrorHandler != nil {
-					handlers.ErrorHandler(ctx, conn, err)
-				}
-				continue
-			}
-		}
-	}
 }
 
 func NewID() string {
