@@ -18,6 +18,7 @@ type TaskManager struct {
 	results     []mq.Result
 	nodeResults map[string]mq.Result
 	done        chan struct{}
+	finalResult chan mq.Result // Channel to collect final results
 }
 
 func NewTaskManager(d *DAG, taskID string) *TaskManager {
@@ -27,6 +28,7 @@ func NewTaskManager(d *DAG, taskID string) *TaskManager {
 		results:     make([]mq.Result, 0),
 		done:        make(chan struct{}),
 		taskID:      taskID,
+		finalResult: make(chan mq.Result), // Initialize finalResult channel
 	}
 }
 
@@ -36,7 +38,7 @@ func (tm *TaskManager) processTask(ctx context.Context, nodeID string, task *mq.
 		return mq.Result{Error: fmt.Errorf("nodeID %s not found", nodeID)}
 	}
 	tm.wg.Add(1)
-	go tm.processNode(ctx, node, task, nil)
+	go tm.processNode(ctx, node, task)
 	go func() {
 		tm.wg.Wait()
 		close(tm.done)
@@ -55,7 +57,6 @@ func (tm *TaskManager) processTask(ctx context.Context, nodeID string, task *mq.
 }
 
 func (tm *TaskManager) handleCallback(ctx context.Context, result mq.Result) mq.Result {
-	fmt.Println(string(result.Payload), result.Topic, result.TaskID)
 	return mq.Result{}
 }
 
@@ -101,7 +102,7 @@ func (tm *TaskManager) appendFinalResult(result mq.Result) {
 	tm.mutex.Unlock()
 }
 
-func (tm *TaskManager) processNode(ctx context.Context, node *Node, task *mq.Task, parentNode *Node) {
+func (tm *TaskManager) processNode(ctx context.Context, node *Node, task *mq.Task) {
 	defer tm.wg.Done()
 	var result mq.Result
 	select {
@@ -141,9 +142,7 @@ func (tm *TaskManager) processNode(ctx context.Context, node *Node, task *mq.Tas
 		}
 	}
 	if len(edges) == 0 {
-		if parentNode != nil {
-			tm.appendFinalResult(result)
-		}
+		tm.appendFinalResult(result)
 		return
 	}
 	for _, edge := range edges {
@@ -159,16 +158,14 @@ func (tm *TaskManager) processNode(ctx context.Context, node *Node, task *mq.Tas
 				loopTask := NewTask(task.ID, item, edge.From.Key, task.Results)
 				tm.wg.Add(1)
 				ctx = mq.SetHeaders(ctx, map[string]string{consts.QueueKey: edge.To.Key})
-				go tm.processNode(ctx, edge.To, loopTask, node)
+				go tm.processNode(ctx, edge.To, loopTask)
 			}
 		case SimpleEdge:
 			if edge.To != nil {
 				tm.wg.Add(1)
 				t := NewTask(task.ID, result.Payload, edge.From.Key, task.Results)
 				ctx = mq.SetHeaders(ctx, map[string]string{consts.QueueKey: edge.To.Key})
-				go tm.processNode(ctx, edge.To, t, node)
-			} else if parentNode != nil {
-				tm.appendFinalResult(result)
+				go tm.processNode(ctx, edge.To, t)
 			}
 		}
 	}
