@@ -63,7 +63,7 @@ func NewDAG(opts ...mq.Option) *DAG {
 }
 
 func (tm *DAG) onTaskCallback(ctx context.Context, result mq.Result) mq.Result {
-	if taskContext, ok := tm.taskContext[result.TaskID]; ok {
+	if taskContext, ok := tm.taskContext[result.TaskID]; ok && result.Topic != "" {
 		return taskContext.handleCallback(ctx, result)
 	}
 	return mq.Result{}
