@@ -18,9 +18,10 @@ type TaskManager struct {
 
 func NewTaskManager(d *DAG) *TaskManager {
 	return &TaskManager{
-		dag:     d,
-		results: make([]Result, 0),
-		done:    make(chan struct{}),
+		dag:         d,
+		nodeResults: make(map[string]Result),
+		results:     make([]Result, 0),
+		done:        make(chan struct{}),
 	}
 }
 
