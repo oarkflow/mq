@@ -78,14 +78,19 @@ func main() {
 		{"user_id": 1, "age": 12},
 		{"user_id": 2, "age": 34},
 	})
-	rs := d.ProcessTask(context.Background(), "A", initialPayload)
-	fmt.Println(string(rs.Payload))
-	http.HandleFunc("POST /publish", requestHandler("publish"))
+	for i := 0; i < 100; i++ {
+		rs := d.ProcessTask(context.Background(), "A", initialPayload)
+		if rs.Error != nil {
+			panic(rs.Error)
+		}
+		fmt.Println(string(rs.Payload))
+	}
+	/*http.HandleFunc("POST /publish", requestHandler("publish"))
 	http.HandleFunc("POST /request", requestHandler("request"))
 	err := d.Start(context.TODO(), ":8083")
 	if err != nil {
 		panic(err)
-	}
+	}*/
 }
 
 func requestHandler(requestType string) func(w http.ResponseWriter, r *http.Request) {

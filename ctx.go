@@ -37,91 +37,94 @@ func IsClosed(conn net.Conn) bool {
 		}
 	}
 	return false
+} // HeaderMap wraps a map and a mutex for thread-safe access
+type HeaderMap struct {
+	mu      sync.RWMutex
+	headers map[string]string
 }
 
-var m = sync.RWMutex{}
+// NewHeaderMap initializes a new HeaderMap
+func NewHeaderMap() *HeaderMap {
+	return &HeaderMap{
+		headers: make(map[string]string),
+	}
+}
 
 func SetHeaders(ctx context.Context, headers map[string]string) context.Context {
-	m.Lock()
-	defer m.Unlock()
-	hd, ok := GetHeaders(ctx)
-	if !ok {
-		hd = make(map[string]string)
+	hd, _ := GetHeaders(ctx)
+	if hd == nil {
+		hd = NewHeaderMap()
 	}
+	hd.mu.Lock()
+	defer hd.mu.Unlock()
 	for key, val := range headers {
-		hd[key] = val
+		hd.headers[key] = val
 	}
 	return context.WithValue(ctx, consts.HeaderKey, hd)
 }
 
 func WithHeaders(ctx context.Context, headers map[string]string) map[string]string {
-	hd, ok := GetHeaders(ctx)
-	if !ok {
-		hd = make(map[string]string)
+	hd, _ := GetHeaders(ctx)
+	if hd == nil {
+		hd = NewHeaderMap()
 	}
+	hd.mu.Lock()
+	defer hd.mu.Unlock()
 	for key, val := range headers {
-		hd[key] = val
+		hd.headers[key] = val
 	}
-	return hd
+	return getMapAsRegularMap(hd)
 }
 
-func GetHeaders(ctx context.Context) (map[string]string, bool) {
-	headers, ok := ctx.Value(consts.HeaderKey).(map[string]string)
+func GetHeaders(ctx context.Context) (*HeaderMap, bool) {
+	headers, ok := ctx.Value(consts.HeaderKey).(*HeaderMap)
 	return headers, ok
 }
 
 func GetHeader(ctx context.Context, key string) (string, bool) {
-	headers, ok := ctx.Value(consts.HeaderKey).(map[string]string)
+	headers, ok := GetHeaders(ctx)
 	if !ok {
 		return "", false
 	}
-	val, ok := headers[key]
+	headers.mu.RLock()
+	defer headers.mu.RUnlock()
+	val, ok := headers.headers[key]
 	return val, ok
 }
 
 func GetContentType(ctx context.Context) (string, bool) {
-	headers, ok := GetHeaders(ctx)
-	if !ok {
-		return "", false
-	}
-	contentType, ok := headers[consts.ContentType]
-	return contentType, ok
+	return GetHeader(ctx, consts.ContentType)
 }
 
 func GetQueue(ctx context.Context) (string, bool) {
-	headers, ok := GetHeaders(ctx)
-	if !ok {
-		return "", false
-	}
-	contentType, ok := headers[consts.QueueKey]
-	return contentType, ok
+	return GetHeader(ctx, consts.QueueKey)
 }
 
 func GetConsumerID(ctx context.Context) (string, bool) {
-	headers, ok := GetHeaders(ctx)
-	if !ok {
-		return "", false
-	}
-	contentType, ok := headers[consts.ConsumerKey]
-	return contentType, ok
+	return GetHeader(ctx, consts.ConsumerKey)
 }
 
 func GetTriggerNode(ctx context.Context) (string, bool) {
-	headers, ok := GetHeaders(ctx)
-	if !ok {
-		return "", false
-	}
-	contentType, ok := headers[consts.TriggerNode]
-	return contentType, ok
+	return GetHeader(ctx, consts.TriggerNode)
+}
+
+func GetAwaitResponse(ctx context.Context) (string, bool) {
+	return GetHeader(ctx, consts.AwaitResponseKey)
 }
 
 func GetPublisherID(ctx context.Context) (string, bool) {
-	headers, ok := GetHeaders(ctx)
-	if !ok {
-		return "", false
+	return GetHeader(ctx, consts.PublisherKey)
+}
+
+// Helper function to convert HeaderMap to a regular map
+func getMapAsRegularMap(hd *HeaderMap) map[string]string {
+	result := make(map[string]string)
+	hd.mu.RLock()
+	defer hd.mu.RUnlock()
+	for key, value := range hd.headers {
+		result[key] = value
 	}
-	contentType, ok := headers[consts.PublisherKey]
-	return contentType, ok
+	return result
 }
 
 func NewID() string {

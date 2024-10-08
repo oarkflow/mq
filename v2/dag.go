@@ -96,8 +96,7 @@ func (tm *DAG) Start(ctx context.Context, addr string) error {
 func (tm *DAG) AddNode(key string, handler mq.Handler) {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
-	con := mq.NewConsumer(key)
-	con.RegisterHandler(key, handler)
+	con := mq.NewConsumer(key, key, handler)
 	tm.Nodes[key] = &Node{
 		Key:      key,
 		consumer: con,
@@ -133,7 +132,7 @@ func (tm *DAG) ProcessTask(ctx context.Context, node string, payload []byte) mq.
 	defer tm.mu.Unlock()
 	taskID := xid.New().String()
 	task := NewTask(taskID, payload, node, make(map[string]mq.Result))
-	manager := NewTaskManager(tm)
+	manager := NewTaskManager(tm, taskID)
 	tm.taskContext[taskID] = manager
 	return manager.processTask(ctx, node, task)
 }

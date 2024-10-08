@@ -11,6 +11,7 @@ import (
 )
 
 type TaskManager struct {
+	taskID      string
 	dag         *DAG
 	wg          sync.WaitGroup
 	mutex       sync.Mutex
@@ -19,12 +20,13 @@ type TaskManager struct {
 	done        chan struct{}
 }
 
-func NewTaskManager(d *DAG) *TaskManager {
+func NewTaskManager(d *DAG, taskID string) *TaskManager {
 	return &TaskManager{
 		dag:         d,
 		nodeResults: make(map[string]mq.Result),
 		results:     make([]mq.Result, 0),
 		done:        make(chan struct{}),
+		taskID:      taskID,
 	}
 }
 
@@ -66,6 +68,9 @@ func (tm *TaskManager) handleResult(ctx context.Context, results any) mq.Result 
 			if i == 0 {
 				rs.TaskID = result.TaskID
 				rs.Status = result.Status
+			}
+			if result.Error != nil {
+				return mq.HandleError(ctx, result.Error)
 			}
 			var item json.RawMessage
 			err := json.Unmarshal(result.Payload, &item)

@@ -3,7 +3,6 @@ package mq
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -19,20 +18,21 @@ import (
 
 // Consumer structure to hold consumer-specific configurations and state.
 type Consumer struct {
-	id       string
-	handlers map[string]Handler
-	conn     net.Conn
-	queues   []string
-	opts     Options
+	id      string
+	handler Handler
+	conn    net.Conn
+	queue   string
+	opts    Options
 }
 
 // NewConsumer initializes a new consumer with the provided options.
-func NewConsumer(id string, opts ...Option) *Consumer {
+func NewConsumer(id string, queue string, handler Handler, opts ...Option) *Consumer {
 	options := setupOptions(opts...)
 	return &Consumer{
-		handlers: make(map[string]Handler),
-		id:       id,
-		opts:     options,
+		id:      id,
+		opts:    options,
+		queue:   queue,
+		handler: handler,
 	}
 }
 
@@ -108,12 +108,7 @@ func (c *Consumer) OnMessage(ctx context.Context, msg *codec.Message, conn net.C
 
 // ProcessTask handles a received task message and invokes the appropriate handler.
 func (c *Consumer) ProcessTask(ctx context.Context, msg *Task) Result {
-	queue, _ := GetQueue(ctx)
-	handler, exists := c.handlers[queue]
-	if !exists {
-		return Result{Error: errors.New("No handler for queue " + queue)}
-	}
-	return handler(ctx, msg)
+	return c.handler(ctx, msg)
 }
 
 // AttemptConnect tries to establish a connection to the server, with TLS or without, based on the configuration.
@@ -159,10 +154,8 @@ func (c *Consumer) Consume(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	for _, q := range c.queues {
-		if err := c.subscribe(ctx, q); err != nil {
-			return fmt.Errorf("failed to connect to server for queue %s: %v", q, err)
-		}
+	if err := c.subscribe(ctx, c.queue); err != nil {
+		return fmt.Errorf("failed to connect to server for queue %s: %v", c.queue, err)
 	}
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -190,10 +183,4 @@ func (c *Consumer) waitForAck(conn net.Conn) error {
 		return nil
 	}
 	return fmt.Errorf("expected SUBSCRIBE_ACK, got: %v", msg.Command)
-}
-
-// RegisterHandler registers a handler for a queue.
-func (c *Consumer) RegisterHandler(queue string, handler Handler) {
-	c.queues = append(c.queues, queue)
-	c.handlers[queue] = handler
 }
