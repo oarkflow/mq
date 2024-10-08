@@ -54,7 +54,7 @@ var (
 	PublisherKey     = "Publisher-Key"
 	ContentType      = "Content-Type"
 	AwaitResponseKey = "Await-Response"
-	QueueKey         = "Queue"
+	QueueKey         = "Topic"
 	TypeJson         = "application/json"
 	HeaderKey        = "headers"
 	TriggerNode      = "triggerNode"

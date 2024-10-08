@@ -16,15 +16,17 @@ import (
 )
 
 type Task struct {
-	ID          string          `json:"id"`
-	Payload     json.RawMessage `json:"payload"`
-	CreatedAt   time.Time       `json:"created_at"`
-	ProcessedAt time.Time       `json:"processed_at"`
-	Status      string          `json:"status"`
-	Error       error           `json:"error"`
+	ID          string            `json:"id"`
+	Results     map[string]Result `json:"results"`
+	Topic       string            `json:"topic"`
+	Payload     json.RawMessage   `json:"payload"`
+	CreatedAt   time.Time         `json:"created_at"`
+	ProcessedAt time.Time         `json:"processed_at"`
+	Status      string            `json:"status"`
+	Error       error             `json:"error"`
 }
 
-type Handler func(context.Context, Task) Result
+type Handler func(context.Context, *Task) Result
 
 func IsClosed(conn net.Conn) bool {
 	_, err := conn.Read(make([]byte, 1))

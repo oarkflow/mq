@@ -82,7 +82,7 @@ func requestHandler(requestType string) func(w http.ResponseWriter, r *http.Requ
 		}
 		w.Header().Set("Content-Type", "application/json")
 		result := map[string]any{
-			"message_id": rs.MessageID,
+			"message_id": rs.TaskID,
 			"payload":    string(rs.Payload),
 			"error":      rs.Error,
 		}

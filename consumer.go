@@ -89,9 +89,9 @@ func (c *Consumer) OnMessage(ctx context.Context, msg *codec.Message, conn net.C
 		return
 	}
 	ctx = SetHeaders(ctx, map[string]string{consts.QueueKey: msg.Queue})
-	result := c.ProcessTask(ctx, task)
-	result.MessageID = task.ID
-	result.Queue = msg.Queue
+	result := c.ProcessTask(ctx, &task)
+	result.TaskID = task.ID
+	result.Topic = msg.Queue
 	if result.Status == "" {
 		if result.Error != nil {
 			result.Status = "FAILED"
@@ -107,7 +107,7 @@ func (c *Consumer) OnMessage(ctx context.Context, msg *codec.Message, conn net.C
 }
 
 // ProcessTask handles a received task message and invokes the appropriate handler.
-func (c *Consumer) ProcessTask(ctx context.Context, msg Task) Result {
+func (c *Consumer) ProcessTask(ctx context.Context, msg *Task) Result {
 	queue, _ := GetQueue(ctx)
 	handler, exists := c.handlers[queue]
 	if !exists {

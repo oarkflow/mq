@@ -7,11 +7,11 @@ import (
 )
 
 type Result struct {
-	Payload   json.RawMessage `json:"payload"`
-	Queue     string          `json:"queue"`
-	MessageID string          `json:"message_id"`
-	Error     error           `json:"error,omitempty"`
-	Status    string          `json:"status"`
+	Payload json.RawMessage `json:"payload"`
+	Topic   string          `json:"topic"`
+	TaskID  string          `json:"task_id"`
+	Error   error           `json:"error,omitempty"`
+	Status  string          `json:"status"`
 }
 
 type TLSConfig struct {
