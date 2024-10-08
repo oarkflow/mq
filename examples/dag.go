@@ -7,7 +7,7 @@ import (
 	"net/http"
 
 	"github.com/oarkflow/mq"
-	"github.com/oarkflow/mq/v2"
+	"github.com/oarkflow/mq/dag"
 )
 
 func handler1(ctx context.Context, task *mq.Task) mq.Result {
@@ -57,7 +57,8 @@ func handler6(ctx context.Context, task *mq.Task) mq.Result {
 }
 
 var (
-	d = v2.NewDAG(mq.WithSyncMode(true))
+	d = dag.NewDAG(mq.WithSyncMode(true))
+	// d = dag.NewDAG(mq.WithSyncMode(true), mq.WithTLS(true, "./certs/server.crt", "./certs/server.key"), mq.WithCAPath("./certs/ca.cert"))
 )
 
 func main() {
@@ -67,7 +68,7 @@ func main() {
 	d.AddNode("D", handler4)
 	d.AddNode("E", handler5)
 	d.AddNode("F", handler6)
-	d.AddEdge("A", "B", v2.LoopEdge)
+	d.AddEdge("A", "B", dag.LoopEdge)
 	d.AddCondition("C", map[string]string{"PASS": "D", "FAIL": "E"})
 	d.AddEdge("B", "C")
 	d.AddEdge("D", "F")
