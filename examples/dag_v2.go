@@ -8,13 +8,13 @@ import (
 )
 
 func handler1(ctx context.Context, task *v2.Task) v2.Result {
-	return v2.Result{TaskID: task.ID, NodeKey: "A", Payload: task.Payload}
+	return v2.Result{TaskID: task.ID, Payload: task.Payload}
 }
 
 func handler2(ctx context.Context, task *v2.Task) v2.Result {
 	var user map[string]any
 	json.Unmarshal(task.Payload, &user)
-	return v2.Result{TaskID: task.ID, NodeKey: "B", Payload: task.Payload}
+	return v2.Result{TaskID: task.ID, Payload: task.Payload}
 }
 
 func handler3(ctx context.Context, task *v2.Task) v2.Result {
@@ -27,7 +27,7 @@ func handler3(ctx context.Context, task *v2.Task) v2.Result {
 	}
 	user["status"] = status
 	resultPayload, _ := json.Marshal(user)
-	return v2.Result{TaskID: task.ID, NodeKey: "C", Payload: resultPayload, Status: status}
+	return v2.Result{TaskID: task.ID, Payload: resultPayload, Status: status}
 }
 
 func handler4(ctx context.Context, task *v2.Task) v2.Result {
@@ -35,7 +35,7 @@ func handler4(ctx context.Context, task *v2.Task) v2.Result {
 	json.Unmarshal(task.Payload, &user)
 	user["final"] = "D"
 	resultPayload, _ := json.Marshal(user)
-	return v2.Result{TaskID: task.ID, NodeKey: "D", Payload: resultPayload}
+	return v2.Result{TaskID: task.ID, Payload: resultPayload}
 }
 
 func handler5(ctx context.Context, task *v2.Task) v2.Result {
@@ -43,14 +43,14 @@ func handler5(ctx context.Context, task *v2.Task) v2.Result {
 	json.Unmarshal(task.Payload, &user)
 	user["salary"] = "E"
 	resultPayload, _ := json.Marshal(user)
-	return v2.Result{TaskID: task.ID, NodeKey: "E", Payload: resultPayload}
+	return v2.Result{TaskID: task.ID, Payload: resultPayload}
 }
 
 func handler6(ctx context.Context, task *v2.Task) v2.Result {
 	var user map[string]any
 	json.Unmarshal(task.Payload, &user)
 	resultPayload, _ := json.Marshal(map[string]any{"storage": user})
-	return v2.Result{TaskID: task.ID, NodeKey: "F", Payload: resultPayload}
+	return v2.Result{TaskID: task.ID, Payload: resultPayload}
 }
 
 func main() {

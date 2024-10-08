@@ -12,10 +12,10 @@ type Handler func(ctx context.Context, task *Task) Result
 
 type Result struct {
 	TaskID  string          `json:"task_id"`
-	NodeKey string          `json:"node_key"`
 	Payload json.RawMessage `json:"payload"`
 	Status  string          `json:"status"`
 	Error   error           `json:"error"`
+	nodeKey string
 }
 
 type Task struct {

@@ -93,7 +93,7 @@ func (tm *TaskManager) callback(results any) Result {
 func (tm *TaskManager) appendFinalResult(result Result) {
 	tm.mutex.Lock()
 	tm.results = append(tm.results, result)
-	tm.nodeResults[result.NodeKey] = result
+	tm.nodeResults[result.nodeKey] = result
 	tm.mutex.Unlock()
 }
 
@@ -102,11 +102,12 @@ func (tm *TaskManager) processNode(ctx context.Context, node *Node, task *Task, 
 	var result Result
 	select {
 	case <-ctx.Done():
-		result = Result{TaskID: task.ID, NodeKey: node.Key, Error: ctx.Err()}
+		result = Result{TaskID: task.ID, nodeKey: node.Key, Error: ctx.Err()}
 		tm.appendFinalResult(result)
 		return
 	default:
 		result = node.handler(ctx, task)
+		result.nodeKey = node.Key
 		if result.Error != nil {
 			tm.appendFinalResult(result)
 			return
@@ -119,7 +120,7 @@ func (tm *TaskManager) processNode(ctx context.Context, node *Node, task *Task, 
 	edges := make([]Edge, len(node.Edges))
 	copy(edges, node.Edges)
 	if result.Status != "" {
-		if conditions, ok := tm.dag.conditions[result.NodeKey]; ok {
+		if conditions, ok := tm.dag.conditions[result.nodeKey]; ok {
 			if targetNodeKey, ok := conditions[result.Status]; ok {
 				if targetNode, ok := tm.dag.Nodes[targetNodeKey]; ok {
 					edges = append(edges, Edge{
@@ -143,7 +144,7 @@ func (tm *TaskManager) processNode(ctx context.Context, node *Node, task *Task, 
 			var items []json.RawMessage
 			err := json.Unmarshal(result.Payload, &items)
 			if err != nil {
-				tm.appendFinalResult(Result{TaskID: task.ID, NodeKey: node.Key, Error: err})
+				tm.appendFinalResult(Result{TaskID: task.ID, nodeKey: node.Key, Error: err})
 				return
 			}
 			for _, item := range items {
