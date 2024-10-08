@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/oarkflow/xid"
 
@@ -78,6 +79,7 @@ func (tm *DAG) Start(ctx context.Context, addr string) error {
 	}()
 	for _, con := range tm.Nodes {
 		go func(con *Node) {
+			time.Sleep(1 * time.Second)
 			con.consumer.Consume(ctx)
 		}(con)
 	}

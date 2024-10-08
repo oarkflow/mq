@@ -118,8 +118,6 @@ func GetPublisherID(ctx context.Context) (string, bool) {
 // Helper function to convert HeaderMap to a regular map
 func getMapAsRegularMap(hd *HeaderMap) map[string]string {
 	result := make(map[string]string)
-	hd.mu.RLock()
-	defer hd.mu.RUnlock()
 	for key, value := range hd.headers {
 		result[key] = value
 	}

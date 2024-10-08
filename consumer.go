@@ -154,6 +154,7 @@ func (c *Consumer) Consume(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+
 	if err := c.subscribe(ctx, c.queue); err != nil {
 		return fmt.Errorf("failed to connect to server for queue %s: %v", c.queue, err)
 	}

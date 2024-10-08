@@ -1,53 +1,79 @@
 package main
 
-/*
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
-	"time"
 
 	"github.com/oarkflow/mq"
-	"github.com/oarkflow/mq/dag"
-	"github.com/oarkflow/mq/examples/tasks"
+	"github.com/oarkflow/mq/v2"
 )
 
-var d *dag.DAG
+func handler1(ctx context.Context, task *mq.Task) mq.Result {
+	return mq.Result{Payload: task.Payload}
+}
+
+func handler2(ctx context.Context, task *mq.Task) mq.Result {
+	var user map[string]any
+	json.Unmarshal(task.Payload, &user)
+	return mq.Result{Payload: task.Payload}
+}
+
+func handler3(ctx context.Context, task *mq.Task) mq.Result {
+	var user map[string]any
+	json.Unmarshal(task.Payload, &user)
+	age := int(user["age"].(float64))
+	status := "FAIL"
+	if age > 20 {
+		status = "PASS"
+	}
+	user["status"] = status
+	resultPayload, _ := json.Marshal(user)
+	return mq.Result{Payload: resultPayload, Status: status}
+}
+
+func handler4(ctx context.Context, task *mq.Task) mq.Result {
+	var user map[string]any
+	json.Unmarshal(task.Payload, &user)
+	user["final"] = "D"
+	resultPayload, _ := json.Marshal(user)
+	return mq.Result{Payload: resultPayload}
+}
+
+func handler5(ctx context.Context, task *mq.Task) mq.Result {
+	var user map[string]any
+	json.Unmarshal(task.Payload, &user)
+	user["salary"] = "E"
+	resultPayload, _ := json.Marshal(user)
+	return mq.Result{Payload: resultPayload}
+}
+
+func handler6(ctx context.Context, task *mq.Task) mq.Result {
+	var user map[string]any
+	json.Unmarshal(task.Payload, &user)
+	resultPayload, _ := json.Marshal(map[string]any{"storage": user})
+	return mq.Result{Payload: resultPayload}
+}
+
+var (
+	d = v2.NewDAG(mq.WithSyncMode(false))
+)
 
 func main() {
-	d = dag.New(mq.WithSyncMode(true), mq.WithTLS(true, "./certs/server.crt", "./certs/server.key"), mq.WithCAPath("./certs/ca.crt"))
-	d.AddNode("queue1", tasks.Node1, true)
-	d.AddNode("queue2", tasks.Node2)
-	d.AddNode("queue3", tasks.Node3)
-	d.AddNode("queue4", tasks.Node4)
+	d.AddNode("A", handler1)
+	d.AddNode("B", handler2)
+	d.AddNode("C", handler3)
+	d.AddNode("D", handler4)
+	d.AddNode("E", handler5)
+	d.AddNode("F", handler6)
+	d.AddEdge("A", "B", v2.LoopEdge)
+	d.AddCondition("C", map[string]string{"PASS": "D", "FAIL": "E"})
+	d.AddEdge("B", "C")
+	d.AddEdge("D", "F")
+	d.AddEdge("E", "F")
 
-	d.AddNode("queue5", tasks.CheckCondition)
-	d.AddNode("queue6", tasks.Pass)
-	d.AddNode("queue7", tasks.Fail)
-
-	d.AddCondition("queue5", map[string]string{"pass": "queue6", "fail": "queue7"})
-	d.AddEdge("queue1", "queue2")
-	d.AddEdge("queue2", "queue4")
-	d.AddEdge("queue3", "queue5")
-
-	d.AddLoop("queue2", "queue3")
-	d.Prepare()
-	go func() {
-		d.Start(context.Background(), ":8081")
-	}()
-	go func() {
-		time.Sleep(3 * time.Second)
-		result := d.Send(context.Background(), []byte(`[{"user_id": 1}, {"user_id": 2}]`))
-		if result.Error != nil {
-			panic(result.Error)
-		}
-		fmt.Println("Response", string(result.Payload))
-	}()
-
-	time.Sleep(10 * time.Second)
-	d.Prepare()
+	// fmt.Println(rs.TaskID, "Task", string(rs.Payload))
 	http.HandleFunc("POST /publish", requestHandler("publish"))
 	http.HandleFunc("POST /request", requestHandler("request"))
 	err := d.Start(context.TODO(), ":8083")
@@ -75,19 +101,13 @@ func requestHandler(requestType string) func(w http.ResponseWriter, r *http.Requ
 			http.Error(w, "Empty request body", http.StatusBadRequest)
 			return
 		}
-		var rs mq.Result
-		if requestType == "request" {
-			rs = d.Request(context.Background(), payload)
-		} else {
-			rs = d.Send(context.Background(), payload)
-		}
+		rs := d.ProcessTask(context.Background(), "A", payload)
 		w.Header().Set("Content-Type", "application/json")
 		result := map[string]any{
 			"message_id": rs.TaskID,
-			"payload":    string(rs.Payload),
+			"payload":    rs.Payload,
 			"error":      rs.Error,
 		}
 		json.NewEncoder(w).Encode(result)
 	}
 }
-*/
