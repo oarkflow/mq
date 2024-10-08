@@ -5,20 +5,21 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/oarkflow/mq"
 	"github.com/oarkflow/mq/v2"
 )
 
-func handler1(ctx context.Context, task *v2.Task) v2.Result {
-	return v2.Result{Payload: task.Payload, Ctx: ctx}
+func handler1(ctx context.Context, task *mq.Task) mq.Result {
+	return mq.Result{Payload: task.Payload, Ctx: ctx}
 }
 
-func handler2(ctx context.Context, task *v2.Task) v2.Result {
+func handler2(ctx context.Context, task *mq.Task) mq.Result {
 	var user map[string]any
 	json.Unmarshal(task.Payload, &user)
-	return v2.Result{Payload: task.Payload, Ctx: ctx}
+	return mq.Result{Payload: task.Payload, Ctx: ctx}
 }
 
-func handler3(ctx context.Context, task *v2.Task) v2.Result {
+func handler3(ctx context.Context, task *mq.Task) mq.Result {
 	var user map[string]any
 	json.Unmarshal(task.Payload, &user)
 	age := int(user["age"].(float64))
@@ -28,30 +29,30 @@ func handler3(ctx context.Context, task *v2.Task) v2.Result {
 	}
 	user["status"] = status
 	resultPayload, _ := json.Marshal(user)
-	return v2.Result{Payload: resultPayload, Status: status, Ctx: ctx}
+	return mq.Result{Payload: resultPayload, Status: status, Ctx: ctx}
 }
 
-func handler4(ctx context.Context, task *v2.Task) v2.Result {
+func handler4(ctx context.Context, task *mq.Task) mq.Result {
 	var user map[string]any
 	json.Unmarshal(task.Payload, &user)
 	user["final"] = "D"
 	resultPayload, _ := json.Marshal(user)
-	return v2.Result{Payload: resultPayload, Ctx: ctx}
+	return mq.Result{Payload: resultPayload, Ctx: ctx}
 }
 
-func handler5(ctx context.Context, task *v2.Task) v2.Result {
+func handler5(ctx context.Context, task *mq.Task) mq.Result {
 	var user map[string]any
 	json.Unmarshal(task.Payload, &user)
 	user["salary"] = "E"
 	resultPayload, _ := json.Marshal(user)
-	return v2.Result{Payload: resultPayload, Ctx: ctx}
+	return mq.Result{Payload: resultPayload, Ctx: ctx}
 }
 
-func handler6(ctx context.Context, task *v2.Task) v2.Result {
+func handler6(ctx context.Context, task *mq.Task) mq.Result {
 	var user map[string]any
 	json.Unmarshal(task.Payload, &user)
 	resultPayload, _ := json.Marshal(map[string]any{"storage": user})
-	return v2.Result{Payload: resultPayload, Ctx: ctx}
+	return mq.Result{Payload: resultPayload, Ctx: ctx}
 }
 
 func main() {

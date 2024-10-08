@@ -3,15 +3,55 @@ package mq
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 )
 
 type Result struct {
+	Ctx     context.Context
 	Payload json.RawMessage `json:"payload"`
 	Topic   string          `json:"topic"`
 	TaskID  string          `json:"task_id"`
 	Error   error           `json:"error,omitempty"`
 	Status  string          `json:"status"`
+}
+
+func (r Result) Unmarshal(data any) error {
+	if r.Payload == nil {
+		return fmt.Errorf("payload is nil")
+	}
+	return json.Unmarshal(r.Payload, data)
+}
+
+func (r Result) String() string {
+	return string(r.Payload)
+}
+
+func HandleError(ctx context.Context, err error, status ...string) Result {
+	st := "Failed"
+	if len(status) > 0 {
+		st = status[0]
+	}
+	if err == nil {
+		return Result{}
+	}
+	return Result{
+		Status: st,
+		Error:  err,
+		Ctx:    ctx,
+	}
+}
+
+func (r Result) WithData(status string, data []byte) Result {
+	if r.Error != nil {
+		return r
+	}
+	return Result{
+		Status:  status,
+		Payload: data,
+		Error:   nil,
+		Ctx:     r.Ctx,
+	}
 }
 
 type TLSConfig struct {

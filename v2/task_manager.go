@@ -5,30 +5,32 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
+
+	"github.com/oarkflow/mq"
 )
 
 type TaskManager struct {
 	dag         *DAG
 	wg          sync.WaitGroup
 	mutex       sync.Mutex
-	results     []Result
-	nodeResults map[string]Result
+	results     []mq.Result
+	nodeResults map[string]mq.Result
 	done        chan struct{}
 }
 
 func NewTaskManager(d *DAG) *TaskManager {
 	return &TaskManager{
 		dag:         d,
-		nodeResults: make(map[string]Result),
-		results:     make([]Result, 0),
+		nodeResults: make(map[string]mq.Result),
+		results:     make([]mq.Result, 0),
 		done:        make(chan struct{}),
 	}
 }
 
-func (tm *TaskManager) processTask(ctx context.Context, nodeID string, task *Task) Result {
+func (tm *TaskManager) processTask(ctx context.Context, nodeID string, task *mq.Task) mq.Result {
 	node, ok := tm.dag.Nodes[nodeID]
 	if !ok {
-		return Result{Error: fmt.Errorf("nodeID %s not found", nodeID)}
+		return mq.Result{Error: fmt.Errorf("nodeID %s not found", nodeID)}
 	}
 	tm.wg.Add(1)
 	go tm.processNode(ctx, node, task, nil)
@@ -38,7 +40,7 @@ func (tm *TaskManager) processTask(ctx context.Context, nodeID string, task *Tas
 	}()
 	select {
 	case <-ctx.Done():
-		return Result{Error: ctx.Err()}
+		return mq.Result{Error: ctx.Err()}
 	case <-tm.done:
 		tm.mutex.Lock()
 		defer tm.mutex.Unlock()
@@ -49,10 +51,10 @@ func (tm *TaskManager) processTask(ctx context.Context, nodeID string, task *Tas
 	}
 }
 
-func (tm *TaskManager) callback(ctx context.Context, results any) Result {
-	var rs Result
+func (tm *TaskManager) callback(ctx context.Context, results any) mq.Result {
+	var rs mq.Result
 	switch res := results.(type) {
-	case []Result:
+	case []mq.Result:
 		aggregatedOutput := make([]json.RawMessage, 0)
 		for i, result := range res {
 			if i == 0 {
@@ -62,43 +64,43 @@ func (tm *TaskManager) callback(ctx context.Context, results any) Result {
 			var item json.RawMessage
 			err := json.Unmarshal(result.Payload, &item)
 			if err != nil {
-				return HandleError(ctx, err)
+				return mq.HandleError(ctx, err)
 			}
 			aggregatedOutput = append(aggregatedOutput, item)
 		}
 		finalOutput, err := json.Marshal(aggregatedOutput)
-		return HandleError(ctx, err).WithData(rs.Status, finalOutput)
-	case Result:
+		return mq.HandleError(ctx, err).WithData(rs.Status, finalOutput)
+	case mq.Result:
 		rs.TaskID = res.TaskID
 		var item json.RawMessage
 		err := json.Unmarshal(res.Payload, &item)
 		if err != nil {
-			return HandleError(ctx, err)
+			return mq.HandleError(ctx, err)
 		}
 		finalOutput, err := json.Marshal(item)
-		return HandleError(ctx, err).WithData(res.Status, finalOutput)
+		return mq.HandleError(ctx, err).WithData(res.Status, finalOutput)
 	}
 	return rs
 }
 
-func (tm *TaskManager) appendFinalResult(result Result) {
+func (tm *TaskManager) appendFinalResult(result mq.Result) {
 	tm.mutex.Lock()
 	tm.results = append(tm.results, result)
-	tm.nodeResults[result.nodeKey] = result
+	tm.nodeResults[result.Topic] = result
 	tm.mutex.Unlock()
 }
 
-func (tm *TaskManager) processNode(ctx context.Context, node *Node, task *Task, parentNode *Node) {
+func (tm *TaskManager) processNode(ctx context.Context, node *Node, task *mq.Task, parentNode *Node) {
 	defer tm.wg.Done()
-	var result Result
+	var result mq.Result
 	select {
 	case <-ctx.Done():
-		result = Result{TaskID: task.ID, nodeKey: node.Key, Error: ctx.Err()}
+		result = mq.Result{TaskID: task.ID, Topic: node.Key, Error: ctx.Err()}
 		tm.appendFinalResult(result)
 		return
 	default:
 		result = node.handler(ctx, task)
-		result.nodeKey = node.Key
+		result.Topic = node.Key
 		if result.Error != nil {
 			tm.appendFinalResult(result)
 			return
@@ -113,7 +115,7 @@ func (tm *TaskManager) processNode(ctx context.Context, node *Node, task *Task, 
 	edges := make([]Edge, len(node.Edges))
 	copy(edges, node.Edges)
 	if result.Status != "" {
-		if conditions, ok := tm.dag.conditions[result.nodeKey]; ok {
+		if conditions, ok := tm.dag.conditions[result.Topic]; ok {
 			if targetNodeKey, ok := conditions[result.Status]; ok {
 				if targetNode, ok := tm.dag.Nodes[targetNodeKey]; ok {
 					edges = append(edges, Edge{From: node, To: targetNode})
@@ -133,7 +135,7 @@ func (tm *TaskManager) processNode(ctx context.Context, node *Node, task *Task, 
 			var items []json.RawMessage
 			err := json.Unmarshal(result.Payload, &items)
 			if err != nil {
-				tm.appendFinalResult(Result{TaskID: task.ID, nodeKey: node.Key, Error: err})
+				tm.appendFinalResult(mq.Result{TaskID: task.ID, Topic: node.Key, Error: err})
 				return
 			}
 			for _, item := range items {
