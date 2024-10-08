@@ -36,19 +36,18 @@ type EdgeType int
 const (
 	SimpleEdge EdgeType = iota
 	LoopEdge
-	ConditionEdge
 )
 
 type Edge struct {
-	From      *Node
-	To        *Node
-	Type      EdgeType
-	Condition func(result Result) bool
+	From *Node
+	To   *Node
+	Type EdgeType
 }
 
 type DAG struct {
 	Nodes       map[string]*Node
 	taskContext map[string]*TaskManager
+	conditions  map[string]map[string]string
 	mu          sync.RWMutex
 }
 
@@ -56,6 +55,7 @@ func NewDAG() *DAG {
 	return &DAG{
 		Nodes:       make(map[string]*Node),
 		taskContext: make(map[string]*TaskManager),
+		conditions:  make(map[string]map[string]string),
 	}
 }
 
@@ -66,6 +66,12 @@ func (tm *DAG) AddNode(key string, handler Handler) {
 		Key:     key,
 		handler: handler,
 	}
+}
+
+func (tm *DAG) AddCondition(fromNode string, conditions map[string]string) {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+	tm.conditions[fromNode] = conditions
 }
 
 func (tm *DAG) AddEdge(from, to string, edgeType EdgeType) {

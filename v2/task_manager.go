@@ -12,7 +12,7 @@ type TaskManager struct {
 	wg          sync.WaitGroup
 	mutex       sync.Mutex
 	results     []Result
-	nodeResults map[string]Result // Store results per node for future reference
+	nodeResults map[string]Result
 	done        chan struct{}
 }
 
@@ -93,7 +93,7 @@ func (tm *TaskManager) callback(results any) Result {
 func (tm *TaskManager) appendFinalResult(result Result) {
 	tm.mutex.Lock()
 	tm.results = append(tm.results, result)
-	tm.nodeResults[result.NodeKey] = result // Store result by node key
+	tm.nodeResults[result.NodeKey] = result
 	tm.mutex.Unlock()
 }
 
@@ -107,25 +107,41 @@ func (tm *TaskManager) processNode(ctx context.Context, node *Node, task *Task, 
 		return
 	default:
 		result = node.handler(ctx, task)
-		if result.Error != nil { // Exit the flow on error
+		if result.Error != nil {
 			tm.appendFinalResult(result)
 			return
 		}
 	}
 	tm.mutex.Lock()
-	task.Results[node.Key] = result // Store intermediate results
+	task.Results[node.Key] = result
 	tm.mutex.Unlock()
-	if len(node.Edges) == 0 {
+
+	edges := make([]Edge, len(node.Edges))
+	copy(edges, node.Edges)
+	if result.Status != "" {
+		if conditions, ok := tm.dag.conditions[result.NodeKey]; ok {
+			if targetNodeKey, ok := conditions[result.Status]; ok {
+				if targetNode, ok := tm.dag.Nodes[targetNodeKey]; ok {
+					edges = append(edges, Edge{
+						From: node,
+						To:   targetNode,
+						Type: SimpleEdge,
+					})
+				}
+			}
+		}
+	}
+	if len(edges) == 0 {
 		if parentNode != nil {
 			tm.appendFinalResult(result)
 		}
 		return
 	}
-	for _, edge := range node.Edges {
+	for _, edge := range edges {
 		switch edge.Type {
 		case LoopEdge:
 			var items []json.RawMessage
-			err := json.Unmarshal(task.Payload, &items)
+			err := json.Unmarshal(result.Payload, &items)
 			if err != nil {
 				tm.appendFinalResult(Result{TaskID: task.ID, NodeKey: node.Key, Error: err})
 				return
@@ -140,17 +156,16 @@ func (tm *TaskManager) processNode(ctx context.Context, node *Node, task *Task, 
 				tm.wg.Add(1)
 				go tm.processNode(ctx, edge.To, loopTask, node)
 			}
-		case ConditionEdge:
-			if edge.Condition(result) && edge.To != nil {
-				tm.wg.Add(1)
-				go tm.processNode(ctx, edge.To, task, node)
-			} else if parentNode != nil {
-				tm.appendFinalResult(result)
-			}
 		case SimpleEdge:
 			if edge.To != nil {
 				tm.wg.Add(1)
-				go tm.processNode(ctx, edge.To, task, node)
+				t := &Task{
+					ID:      task.ID,
+					NodeKey: edge.From.Key,
+					Payload: result.Payload,
+					Results: task.Results,
+				}
+				go tm.processNode(ctx, edge.To, t, node)
 			} else if parentNode != nil {
 				tm.appendFinalResult(result)
 			}
