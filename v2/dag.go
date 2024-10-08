@@ -3,6 +3,7 @@ package v2
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sync"
 
 	"github.com/oarkflow/xid"
@@ -11,11 +12,50 @@ import (
 type Handler func(ctx context.Context, task *Task) Result
 
 type Result struct {
+	Ctx     context.Context
 	TaskID  string          `json:"task_id"`
 	Payload json.RawMessage `json:"payload"`
 	Status  string          `json:"status"`
 	Error   error           `json:"error"`
 	nodeKey string
+}
+
+func (r Result) Unmarshal(data any) error {
+	if r.Payload == nil {
+		return fmt.Errorf("payload is nil")
+	}
+	return json.Unmarshal(r.Payload, data)
+}
+
+func (r Result) String() string {
+	return string(r.Payload)
+}
+
+func HandleError(ctx context.Context, err error, status ...string) Result {
+	st := "Failed"
+	if len(status) > 0 {
+		st = status[0]
+	}
+	if err == nil {
+		return Result{}
+	}
+	return Result{
+		Status: st,
+		Error:  err,
+		Ctx:    ctx,
+	}
+}
+
+func (r Result) WithData(status string, data []byte) Result {
+	if r.Error != nil {
+		return r
+	}
+	return Result{
+		Status:  status,
+		Payload: data,
+		Error:   nil,
+		Ctx:     r.Ctx,
+	}
 }
 
 type Task struct {
@@ -25,6 +65,17 @@ type Task struct {
 	Results map[string]Result `json:"results"`
 }
 
+func NewTask(id string, payload json.RawMessage, nodeKey string, results ...map[string]Result) *Task {
+	if id == "" {
+		id = xid.New().String()
+	}
+	result := make(map[string]Result)
+	if len(results) > 0 && results[0] != nil {
+		result = results[0]
+	}
+	return &Task{ID: id, Payload: payload, NodeKey: nodeKey, Results: result}
+}
+
 type Node struct {
 	Key     string
 	Edges   []Edge
@@ -32,6 +83,8 @@ type Node struct {
 }
 
 type EdgeType int
+
+func (c EdgeType) IsValid() bool { return c >= SimpleEdge && c <= LoopEdge }
 
 const (
 	SimpleEdge EdgeType = iota
@@ -74,7 +127,7 @@ func (tm *DAG) AddCondition(fromNode string, conditions map[string]string) {
 	tm.conditions[fromNode] = conditions
 }
 
-func (tm *DAG) AddEdge(from, to string, edgeType EdgeType) {
+func (tm *DAG) AddEdge(from, to string, edgeTypes ...EdgeType) {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 	fromNode, ok := tm.Nodes[from]
@@ -85,23 +138,18 @@ func (tm *DAG) AddEdge(from, to string, edgeType EdgeType) {
 	if !ok {
 		return
 	}
-	fromNode.Edges = append(fromNode.Edges, Edge{
-		From: fromNode,
-		To:   toNode,
-		Type: edgeType,
-	})
+	edge := Edge{From: fromNode, To: toNode}
+	if len(edgeTypes) > 0 && edgeTypes[0].IsValid() {
+		edge.Type = edgeTypes[0]
+	}
+	fromNode.Edges = append(fromNode.Edges, edge)
 }
 
 func (tm *DAG) ProcessTask(ctx context.Context, node string, payload []byte) Result {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 	taskID := xid.New().String()
-	task := &Task{
-		ID:      taskID,
-		NodeKey: node,
-		Payload: payload,
-		Results: make(map[string]Result),
-	}
+	task := NewTask(taskID, payload, node, make(map[string]Result))
 	manager := NewTaskManager(tm)
 	tm.taskContext[taskID] = manager
 	return manager.processTask(ctx, node, task)

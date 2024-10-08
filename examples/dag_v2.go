@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	v2 "github.com/oarkflow/mq/v2"
+	"github.com/oarkflow/mq/v2"
 )
 
 func handler1(ctx context.Context, task *v2.Task) v2.Result {
@@ -63,16 +63,14 @@ func main() {
 	dag.AddNode("F", handler6)
 	dag.AddEdge("A", "B", v2.LoopEdge)
 	dag.AddCondition("C", map[string]string{"PASS": "D", "FAIL": "E"})
-	dag.AddEdge("B", "C", v2.SimpleEdge)
-	dag.AddEdge("D", "F", v2.SimpleEdge)
-	dag.AddEdge("E", "F", v2.SimpleEdge)
+	dag.AddEdge("B", "C")
+	dag.AddEdge("D", "F")
+	dag.AddEdge("E", "F")
 
 	initialPayload, _ := json.Marshal([]map[string]any{
 		{"user_id": 1, "age": 12},
 		{"user_id": 2, "age": 34},
 	})
 	rs := dag.ProcessTask(context.Background(), "A", initialPayload)
-	fmt.Println(string(rs.Payload))
-	rs = dag.ProcessTask(context.Background(), "A", initialPayload)
 	fmt.Println(string(rs.Payload))
 }

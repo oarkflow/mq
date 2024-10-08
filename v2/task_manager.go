@@ -43,13 +43,13 @@ func (tm *TaskManager) processTask(ctx context.Context, nodeID string, task *Tas
 		tm.mutex.Lock()
 		defer tm.mutex.Unlock()
 		if len(tm.results) == 1 {
-			return tm.callback(tm.results[0])
+			return tm.callback(ctx, tm.results[0])
 		}
-		return tm.callback(tm.results)
+		return tm.callback(ctx, tm.results)
 	}
 }
 
-func (tm *TaskManager) callback(results any) Result {
+func (tm *TaskManager) callback(ctx context.Context, results any) Result {
 	var rs Result
 	switch res := results.(type) {
 	case []Result:
@@ -57,35 +57,26 @@ func (tm *TaskManager) callback(results any) Result {
 		for i, result := range res {
 			if i == 0 {
 				rs.TaskID = result.TaskID
+				rs.Status = result.Status
 			}
 			var item json.RawMessage
 			err := json.Unmarshal(result.Payload, &item)
 			if err != nil {
-				rs.Error = err
-				return rs
+				return HandleError(ctx, err)
 			}
 			aggregatedOutput = append(aggregatedOutput, item)
 		}
 		finalOutput, err := json.Marshal(aggregatedOutput)
-		if err != nil {
-			rs.Error = err
-			return rs
-		}
-		rs.Payload = finalOutput
+		return HandleError(ctx, err).WithData(rs.Status, finalOutput)
 	case Result:
 		rs.TaskID = res.TaskID
 		var item json.RawMessage
 		err := json.Unmarshal(res.Payload, &item)
 		if err != nil {
-			rs.Error = err
-			return rs
+			return HandleError(ctx, err)
 		}
 		finalOutput, err := json.Marshal(item)
-		if err != nil {
-			rs.Error = err
-			return rs
-		}
-		rs.Payload = finalOutput
+		return HandleError(ctx, err).WithData(res.Status, finalOutput)
 	}
 	return rs
 }
@@ -116,18 +107,13 @@ func (tm *TaskManager) processNode(ctx context.Context, node *Node, task *Task, 
 	tm.mutex.Lock()
 	task.Results[node.Key] = result
 	tm.mutex.Unlock()
-
 	edges := make([]Edge, len(node.Edges))
 	copy(edges, node.Edges)
 	if result.Status != "" {
 		if conditions, ok := tm.dag.conditions[result.nodeKey]; ok {
 			if targetNodeKey, ok := conditions[result.Status]; ok {
 				if targetNode, ok := tm.dag.Nodes[targetNodeKey]; ok {
-					edges = append(edges, Edge{
-						From: node,
-						To:   targetNode,
-						Type: SimpleEdge,
-					})
+					edges = append(edges, Edge{From: node, To: targetNode})
 				}
 			}
 		}
@@ -148,24 +134,14 @@ func (tm *TaskManager) processNode(ctx context.Context, node *Node, task *Task, 
 				return
 			}
 			for _, item := range items {
-				loopTask := &Task{
-					ID:      task.ID,
-					NodeKey: edge.From.Key,
-					Payload: item,
-					Results: task.Results,
-				}
+				loopTask := NewTask(task.ID, item, edge.From.Key, task.Results)
 				tm.wg.Add(1)
 				go tm.processNode(ctx, edge.To, loopTask, node)
 			}
 		case SimpleEdge:
 			if edge.To != nil {
 				tm.wg.Add(1)
-				t := &Task{
-					ID:      task.ID,
-					NodeKey: edge.From.Key,
-					Payload: result.Payload,
-					Results: task.Results,
-				}
+				t := NewTask(task.ID, result.Payload, edge.From.Key, task.Results)
 				go tm.processNode(ctx, edge.To, t, node)
 			} else if parentNode != nil {
 				tm.appendFinalResult(result)
