@@ -1,5 +1,6 @@
 package main
 
+/*
 import (
 	"context"
 	"encoding/json"
@@ -46,13 +47,13 @@ func main() {
 	}()
 
 	time.Sleep(10 * time.Second)
-	/*d.Prepare()
+	d.Prepare()
 	http.HandleFunc("POST /publish", requestHandler("publish"))
 	http.HandleFunc("POST /request", requestHandler("request"))
 	err := d.Start(context.TODO(), ":8083")
 	if err != nil {
 		panic(err)
-	}*/
+	}
 }
 
 func requestHandler(requestType string) func(w http.ResponseWriter, r *http.Request) {
@@ -89,3 +90,4 @@ func requestHandler(requestType string) func(w http.ResponseWriter, r *http.Requ
 		json.NewEncoder(w).Encode(result)
 	}
 }
+*/

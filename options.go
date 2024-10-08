@@ -8,7 +8,6 @@ import (
 )
 
 type Result struct {
-	Ctx     context.Context
 	Payload json.RawMessage `json:"payload"`
 	Topic   string          `json:"topic"`
 	TaskID  string          `json:"task_id"`
@@ -38,7 +37,6 @@ func HandleError(ctx context.Context, err error, status ...string) Result {
 	return Result{
 		Status: st,
 		Error:  err,
-		Ctx:    ctx,
 	}
 }
 
@@ -50,7 +48,6 @@ func (r Result) WithData(status string, data []byte) Result {
 		Status:  status,
 		Payload: data,
 		Error:   nil,
-		Ctx:     r.Ctx,
 	}
 }
 

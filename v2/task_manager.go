@@ -46,13 +46,18 @@ func (tm *TaskManager) processTask(ctx context.Context, nodeID string, task *mq.
 		tm.mutex.Lock()
 		defer tm.mutex.Unlock()
 		if len(tm.results) == 1 {
-			return tm.callback(ctx, tm.results[0])
+			return tm.handleResult(ctx, tm.results[0])
 		}
-		return tm.callback(ctx, tm.results)
+		return tm.handleResult(ctx, tm.results)
 	}
 }
 
-func (tm *TaskManager) callback(ctx context.Context, results any) mq.Result {
+func (tm *TaskManager) handleCallback(ctx context.Context, result mq.Result) mq.Result {
+	fmt.Println(string(result.Payload), result.Topic, result.TaskID)
+	return mq.Result{}
+}
+
+func (tm *TaskManager) handleResult(ctx context.Context, results any) mq.Result {
 	var rs mq.Result
 	switch res := results.(type) {
 	case []mq.Result:
@@ -101,17 +106,21 @@ func (tm *TaskManager) processNode(ctx context.Context, node *Node, task *mq.Tas
 		return
 	default:
 		ctx = mq.SetHeaders(ctx, map[string]string{consts.QueueKey: node.Key})
-		result = node.consumer.ProcessTask(ctx, task)
-		result.Topic = node.Key
-		if result.Error != nil {
-			tm.appendFinalResult(result)
-			return
+		if tm.dag.server.SyncMode() {
+			result = node.consumer.ProcessTask(ctx, task)
+			result.Topic = node.Key
+			if result.Error != nil {
+				tm.appendFinalResult(result)
+				return
+			}
+		} else {
+			err := tm.dag.server.Publish(ctx, *task, node.Key)
+			if err != nil {
+				tm.appendFinalResult(mq.Result{Error: err})
+				return
+			}
 		}
 	}
-	if result.Ctx == nil {
-		result.Ctx = ctx
-	}
-	ctx = result.Ctx
 	tm.mutex.Lock()
 	task.Results[node.Key] = result
 	tm.mutex.Unlock()

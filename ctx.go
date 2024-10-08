@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/oarkflow/xid"
@@ -38,7 +39,11 @@ func IsClosed(conn net.Conn) bool {
 	return false
 }
 
+var m = sync.RWMutex{}
+
 func SetHeaders(ctx context.Context, headers map[string]string) context.Context {
+	m.Lock()
+	defer m.Unlock()
 	hd, ok := GetHeaders(ctx)
 	if !ok {
 		hd = make(map[string]string)

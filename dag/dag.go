@@ -176,7 +176,7 @@ func (d *DAG) Send(ctx context.Context, payload []byte) mq.Result {
 
 func (d *DAG) processNode(ctx context.Context, task mq.Result) mq.Result {
 	if con, ok := d.nodes[task.Topic]; ok {
-		return con.ProcessTask(ctx, mq.Task{
+		return con.ProcessTask(ctx, &mq.Task{
 			ID:      task.TaskID,
 			Payload: task.Payload,
 		})
