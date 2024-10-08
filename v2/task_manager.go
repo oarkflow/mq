@@ -32,42 +32,63 @@ func NewTaskManager(d *DAG, taskID string) *TaskManager {
 	}
 }
 
+func (tm *TaskManager) handleSyncTask(ctx context.Context, node *Node, payload json.RawMessage) mq.Result {
+	tm.done = make(chan struct{})
+	tm.wg.Add(1)
+	go tm.processNode(ctx, node, payload)
+	go func() {
+		tm.wg.Wait()
+		close(tm.done)
+	}()
+	select {
+	case <-ctx.Done():
+		return mq.Result{Error: ctx.Err()}
+	case <-tm.done:
+		tm.mutex.Lock()
+		defer tm.mutex.Unlock()
+		if len(tm.results) == 1 {
+			return tm.handleResult(ctx, tm.results[0])
+		}
+		return tm.handleResult(ctx, tm.results)
+	}
+}
+
+func (tm *TaskManager) handleAsyncTask(ctx context.Context, node *Node, payload json.RawMessage) mq.Result {
+	tm.finalResult = make(chan mq.Result)
+	tm.wg.Add(1)
+	go tm.processNode(ctx, node, payload)
+	go func() {
+		tm.wg.Wait()
+	}()
+	select {
+	case result := <-tm.finalResult: // Block until a result is available
+		return result
+	case <-ctx.Done(): // Handle context cancellation
+		return mq.Result{Error: ctx.Err()}
+	}
+}
+
 func (tm *TaskManager) processTask(ctx context.Context, nodeID string, payload json.RawMessage) mq.Result {
 	node, ok := tm.dag.Nodes[nodeID]
 	if !ok {
 		return mq.Result{Error: fmt.Errorf("nodeID %s not found", nodeID)}
 	}
 	if tm.dag.server.SyncMode() {
-		tm.done = make(chan struct{})
-		tm.wg.Add(1)
-		go tm.processNode(ctx, node, payload)
-		go func() {
-			tm.wg.Wait()
-			close(tm.done)
-		}()
-		select {
-		case <-ctx.Done():
-			return mq.Result{Error: ctx.Err()}
-		case <-tm.done:
-			tm.mutex.Lock()
-			defer tm.mutex.Unlock()
-			if len(tm.results) == 1 {
-				return tm.handleResult(ctx, tm.results[0])
-			}
-			return tm.handleResult(ctx, tm.results)
+		return tm.handleSyncTask(ctx, node, payload)
+	}
+	return tm.handleAsyncTask(ctx, node, payload)
+}
+
+func (tm *TaskManager) dispatchFinalResult(ctx context.Context) {
+	if !tm.dag.server.SyncMode() {
+		var rs mq.Result
+		if len(tm.results) == 1 {
+			rs = tm.handleResult(ctx, tm.results[0])
+		} else {
+			rs = tm.handleResult(ctx, tm.results)
 		}
-	} else {
-		tm.finalResult = make(chan mq.Result)
-		tm.wg.Add(1)
-		go tm.processNode(ctx, node, payload)
-		go func() {
-			tm.wg.Wait()
-		}()
-		select {
-		case result := <-tm.finalResult: // Block until a result is available
-			return result
-		case <-ctx.Done(): // Handle context cancellation
-			return mq.Result{Error: ctx.Err()}
+		if tm.waitingCallback == 0 {
+			tm.finalResult <- rs
 		}
 	}
 }
@@ -93,17 +114,7 @@ func (tm *TaskManager) handleCallback(ctx context.Context, result mq.Result) mq.
 	}
 	if len(edges) == 0 {
 		tm.appendFinalResult(result)
-		if !tm.dag.server.SyncMode() {
-			var rs mq.Result
-			if len(tm.results) == 1 {
-				rs = tm.handleResult(ctx, tm.results[0])
-			} else {
-				rs = tm.handleResult(ctx, tm.results)
-			}
-			if tm.waitingCallback == 0 {
-				tm.finalResult <- rs
-			}
-		}
+		tm.dispatchFinalResult(ctx)
 		return result
 	}
 	for _, edge := range edges {
@@ -204,4 +215,11 @@ func (tm *TaskManager) processNode(ctx context.Context, node *Node, payload json
 	tm.nodeResults[node.Key] = result
 	tm.mutex.Unlock()
 	tm.handleCallback(ctx, result)
+}
+
+func (tm *TaskManager) Clear() error {
+	tm.waitingCallback = 0
+	clear(tm.results)
+	tm.nodeResults = make(map[string]mq.Result)
+	return nil
 }

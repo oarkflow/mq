@@ -57,11 +57,11 @@ func handler6(ctx context.Context, task *mq.Task) mq.Result {
 }
 
 var (
-	d = v2.NewDAG(mq.WithSyncMode(false))
+	d = v2.NewDAG(mq.WithSyncMode(true))
 )
 
 func main() {
-	d.AddNode("A", handler1)
+	d.AddNode("A", handler1, true)
 	d.AddNode("B", handler2)
 	d.AddNode("C", handler3)
 	d.AddNode("D", handler4)
@@ -72,7 +72,6 @@ func main() {
 	d.AddEdge("B", "C")
 	d.AddEdge("D", "F")
 	d.AddEdge("E", "F")
-
 	// fmt.Println(rs.TaskID, "Task", string(rs.Payload))
 	http.HandleFunc("POST /publish", requestHandler("publish"))
 	http.HandleFunc("POST /request", requestHandler("request"))
@@ -101,7 +100,9 @@ func requestHandler(requestType string) func(w http.ResponseWriter, r *http.Requ
 			http.Error(w, "Empty request body", http.StatusBadRequest)
 			return
 		}
-		rs := d.ProcessTask(context.Background(), "A", payload)
+		ctx := context.Background()
+		// ctx = context.WithValue(ctx, "initial_node", "E")
+		rs := d.ProcessTask(ctx, payload)
 		w.Header().Set("Content-Type", "application/json")
 		result := map[string]any{
 			"message_id": rs.TaskID,
