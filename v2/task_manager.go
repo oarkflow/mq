@@ -104,6 +104,9 @@ func (tm *TaskManager) processNode(ctx context.Context, node *Node, task *Task, 
 			return
 		}
 	}
+	if result.Ctx == nil {
+		result.Ctx = ctx
+	}
 	tm.mutex.Lock()
 	task.Results[node.Key] = result
 	tm.mutex.Unlock()
@@ -136,13 +139,13 @@ func (tm *TaskManager) processNode(ctx context.Context, node *Node, task *Task, 
 			for _, item := range items {
 				loopTask := NewTask(task.ID, item, edge.From.Key, task.Results)
 				tm.wg.Add(1)
-				go tm.processNode(ctx, edge.To, loopTask, node)
+				go tm.processNode(result.Ctx, edge.To, loopTask, node)
 			}
 		case SimpleEdge:
 			if edge.To != nil {
 				tm.wg.Add(1)
 				t := NewTask(task.ID, result.Payload, edge.From.Key, task.Results)
-				go tm.processNode(ctx, edge.To, t, node)
+				go tm.processNode(result.Ctx, edge.To, t, node)
 			} else if parentNode != nil {
 				tm.appendFinalResult(result)
 			}
