@@ -32,13 +32,13 @@ func NewTaskManager(d *DAG, taskID string) *TaskManager {
 	}
 }
 
-func (tm *TaskManager) processTask(ctx context.Context, nodeID string, task *mq.Task) mq.Result {
+func (tm *TaskManager) processTask(ctx context.Context, nodeID string, payload json.RawMessage) mq.Result {
 	node, ok := tm.dag.Nodes[nodeID]
 	if !ok {
 		return mq.Result{Error: fmt.Errorf("nodeID %s not found", nodeID)}
 	}
 	tm.wg.Add(1)
-	go tm.processNode(ctx, node, task)
+	go tm.processNode(ctx, node, payload)
 	go func() {
 		tm.wg.Wait()
 		close(tm.done)
@@ -65,10 +65,10 @@ func (tm *TaskManager) handleResult(ctx context.Context, results any) mq.Result 
 	switch res := results.(type) {
 	case []mq.Result:
 		aggregatedOutput := make([]json.RawMessage, 0)
+		status := ""
 		for i, result := range res {
 			if i == 0 {
-				rs.TaskID = result.TaskID
-				rs.Status = result.Status
+				status = result.Status
 			}
 			if result.Error != nil {
 				return mq.HandleError(ctx, result.Error)
@@ -81,16 +81,16 @@ func (tm *TaskManager) handleResult(ctx context.Context, results any) mq.Result 
 			aggregatedOutput = append(aggregatedOutput, item)
 		}
 		finalOutput, err := json.Marshal(aggregatedOutput)
-		return mq.HandleError(ctx, err).WithData(rs.Status, finalOutput)
-	case mq.Result:
-		rs.TaskID = res.TaskID
-		var item json.RawMessage
-		err := json.Unmarshal(res.Payload, &item)
 		if err != nil {
 			return mq.HandleError(ctx, err)
 		}
-		finalOutput, err := json.Marshal(item)
-		return mq.HandleError(ctx, err).WithData(res.Status, finalOutput)
+		return mq.Result{
+			TaskID:  tm.taskID,
+			Payload: finalOutput,
+			Status:  status,
+		}
+	case mq.Result:
+		return res
 	}
 	return rs
 }
@@ -102,25 +102,25 @@ func (tm *TaskManager) appendFinalResult(result mq.Result) {
 	tm.mutex.Unlock()
 }
 
-func (tm *TaskManager) processNode(ctx context.Context, node *Node, task *mq.Task) {
+func (tm *TaskManager) processNode(ctx context.Context, node *Node, payload json.RawMessage) {
 	defer tm.wg.Done()
 	var result mq.Result
 	select {
 	case <-ctx.Done():
-		result = mq.Result{TaskID: task.ID, Topic: node.Key, Error: ctx.Err()}
+		result = mq.Result{TaskID: tm.taskID, Topic: node.Key, Error: ctx.Err()}
 		tm.appendFinalResult(result)
 		return
 	default:
 		ctx = mq.SetHeaders(ctx, map[string]string{consts.QueueKey: node.Key})
 		if tm.dag.server.SyncMode() {
-			result = node.consumer.ProcessTask(ctx, task)
+			result = node.consumer.ProcessTask(ctx, NewTask(tm.taskID, payload, node.Key))
 			result.Topic = node.Key
 			if result.Error != nil {
 				tm.appendFinalResult(result)
 				return
 			}
 		} else {
-			err := tm.dag.server.Publish(ctx, *task, node.Key)
+			err := tm.dag.server.Publish(ctx, NewTask(tm.taskID, payload, node.Key), node.Key)
 			if err != nil {
 				tm.appendFinalResult(mq.Result{Error: err})
 				return
@@ -128,7 +128,7 @@ func (tm *TaskManager) processNode(ctx context.Context, node *Node, task *mq.Tas
 		}
 	}
 	tm.mutex.Lock()
-	task.Results[node.Key] = result
+	tm.nodeResults[node.Key] = result
 	tm.mutex.Unlock()
 	edges := make([]Edge, len(node.Edges))
 	copy(edges, node.Edges)
@@ -151,21 +151,19 @@ func (tm *TaskManager) processNode(ctx context.Context, node *Node, task *mq.Tas
 			var items []json.RawMessage
 			err := json.Unmarshal(result.Payload, &items)
 			if err != nil {
-				tm.appendFinalResult(mq.Result{TaskID: task.ID, Topic: node.Key, Error: err})
+				tm.appendFinalResult(mq.Result{TaskID: tm.taskID, Topic: node.Key, Error: err})
 				return
 			}
 			for _, item := range items {
-				loopTask := NewTask(task.ID, item, edge.From.Key, task.Results)
 				tm.wg.Add(1)
 				ctx = mq.SetHeaders(ctx, map[string]string{consts.QueueKey: edge.To.Key})
-				go tm.processNode(ctx, edge.To, loopTask)
+				go tm.processNode(ctx, edge.To, item)
 			}
 		case SimpleEdge:
 			if edge.To != nil {
 				tm.wg.Add(1)
-				t := NewTask(task.ID, result.Payload, edge.From.Key, task.Results)
 				ctx = mq.SetHeaders(ctx, map[string]string{consts.QueueKey: edge.To.Key})
-				go tm.processNode(ctx, edge.To, t)
+				go tm.processNode(ctx, edge.To, result.Payload)
 			}
 		}
 	}

@@ -116,7 +116,7 @@ func (b *Broker) MessageResponseHandler(ctx context.Context, msg *codec.Message)
 	}
 }
 
-func (b *Broker) Publish(ctx context.Context, task Task, queue string) error {
+func (b *Broker) Publish(ctx context.Context, task *Task, queue string) error {
 	headers, _ := GetHeaders(ctx)
 	payload, err := json.Marshal(task)
 	if err != nil {

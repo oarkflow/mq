@@ -12,15 +12,11 @@ import (
 	"github.com/oarkflow/mq"
 )
 
-func NewTask(id string, payload json.RawMessage, nodeKey string, results ...map[string]mq.Result) *mq.Task {
+func NewTask(id string, payload json.RawMessage, nodeKey string) *mq.Task {
 	if id == "" {
 		id = xid.New().String()
 	}
-	result := make(map[string]mq.Result)
-	if len(results) > 0 && results[0] != nil {
-		result = results[0]
-	}
-	return &mq.Task{ID: id, Payload: payload, Topic: nodeKey, Results: result}
+	return &mq.Task{ID: id, Payload: payload, Topic: nodeKey}
 }
 
 type Node struct {
@@ -131,8 +127,7 @@ func (tm *DAG) ProcessTask(ctx context.Context, node string, payload []byte) mq.
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 	taskID := xid.New().String()
-	task := NewTask(taskID, payload, node, make(map[string]mq.Result))
 	manager := NewTaskManager(tm, taskID)
 	tm.taskContext[taskID] = manager
-	return manager.processTask(ctx, node, task)
+	return manager.processTask(ctx, node, payload)
 }

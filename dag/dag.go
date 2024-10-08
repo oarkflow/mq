@@ -50,11 +50,10 @@ func New(opts ...mq.Option) *DAG {
 
 func (d *DAG) AddNode(name string, handler mq.Handler, firstNode ...bool) {
 	tlsConfig := d.server.TLSConfig()
-	con := mq.NewConsumer(name, mq.WithTLS(tlsConfig.UseTLS, tlsConfig.CertPath, tlsConfig.KeyPath), mq.WithCAPath(tlsConfig.CAPath))
+	con := mq.NewConsumer(name, name, handler, mq.WithTLS(tlsConfig.UseTLS, tlsConfig.CertPath, tlsConfig.KeyPath), mq.WithCAPath(tlsConfig.CAPath))
 	if len(firstNode) > 0 {
 		d.FirstNode = name
 	}
-	con.RegisterHandler(name, handler)
 	d.nodes[name] = con
 }
 
@@ -114,7 +113,7 @@ func (d *DAG) PublishTask(ctx context.Context, payload json.RawMessage, taskID .
 	} else {
 		id = mq.NewID()
 	}
-	task := mq.Task{
+	task := &mq.Task{
 		ID:        id,
 		Payload:   payload,
 		CreatedAt: time.Now(),
