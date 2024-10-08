@@ -22,9 +22,9 @@ func NewTask(id string, payload json.RawMessage, nodeKey string, results ...map[
 }
 
 type Node struct {
-	Key     string
-	Edges   []Edge
-	handler mq.Handler
+	Key      string
+	Edges    []Edge
+	consumer *mq.Consumer
 }
 
 type EdgeType int
@@ -60,9 +60,11 @@ func NewDAG() *DAG {
 func (tm *DAG) AddNode(key string, handler mq.Handler) {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
+	con := mq.NewConsumer(key)
+	con.RegisterHandler(key, handler)
 	tm.Nodes[key] = &Node{
-		Key:     key,
-		handler: handler,
+		Key:      key,
+		consumer: con,
 	}
 }
 

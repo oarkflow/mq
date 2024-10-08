@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/oarkflow/mq"
+	"github.com/oarkflow/mq/consts"
 )
 
 type TaskManager struct {
@@ -99,7 +100,8 @@ func (tm *TaskManager) processNode(ctx context.Context, node *Node, task *mq.Tas
 		tm.appendFinalResult(result)
 		return
 	default:
-		result = node.handler(ctx, task)
+		ctx = mq.SetHeaders(ctx, map[string]string{consts.QueueKey: node.Key})
+		result = node.consumer.ProcessTask(ctx, task)
 		result.Topic = node.Key
 		if result.Error != nil {
 			tm.appendFinalResult(result)
@@ -109,6 +111,7 @@ func (tm *TaskManager) processNode(ctx context.Context, node *Node, task *mq.Tas
 	if result.Ctx == nil {
 		result.Ctx = ctx
 	}
+	ctx = result.Ctx
 	tm.mutex.Lock()
 	task.Results[node.Key] = result
 	tm.mutex.Unlock()
@@ -141,13 +144,15 @@ func (tm *TaskManager) processNode(ctx context.Context, node *Node, task *mq.Tas
 			for _, item := range items {
 				loopTask := NewTask(task.ID, item, edge.From.Key, task.Results)
 				tm.wg.Add(1)
-				go tm.processNode(result.Ctx, edge.To, loopTask, node)
+				ctx = mq.SetHeaders(ctx, map[string]string{consts.QueueKey: edge.To.Key})
+				go tm.processNode(ctx, edge.To, loopTask, node)
 			}
 		case SimpleEdge:
 			if edge.To != nil {
 				tm.wg.Add(1)
 				t := NewTask(task.ID, result.Payload, edge.From.Key, task.Results)
-				go tm.processNode(result.Ctx, edge.To, t, node)
+				ctx = mq.SetHeaders(ctx, map[string]string{consts.QueueKey: edge.To.Key})
+				go tm.processNode(ctx, edge.To, t, node)
 			} else if parentNode != nil {
 				tm.appendFinalResult(result)
 			}
