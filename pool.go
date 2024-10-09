@@ -3,6 +3,7 @@ package mq
 import (
 	"context"
 	"fmt"
+	"net"
 	"sync"
 
 	"github.com/oarkflow/mq/utils"
@@ -13,7 +14,7 @@ type QueueTask struct {
 	payload *Task
 }
 
-type Callback func(result Result, err error)
+type Callback func(ctx context.Context, taskID string, result Result, queue string) error
 
 type Pool struct {
 	totalMemoryUsed           int64
@@ -26,12 +27,14 @@ type Pool struct {
 	stop                      chan struct{}
 	handler                   Handler
 	callback                  Callback
+	conn                      net.Conn
 }
 
 func NewPool(
 	numOfWorkers, taskQueueSize int,
 	maxMemoryLoad int64,
-	handler Handler, callback Callback) *Pool {
+	handler Handler,
+	callback Callback, conn net.Conn) *Pool {
 	return &Pool{
 		numOfWorkers:  numOfWorkers,
 		taskQueue:     make(chan QueueTask, taskQueueSize),
@@ -39,6 +42,7 @@ func NewPool(
 		maxMemoryLoad: maxMemoryLoad,
 		handler:       handler,
 		callback:      callback,
+		conn:          conn,
 	}
 }
 
@@ -60,19 +64,23 @@ func (wp *Pool) worker() {
 			taskSize := int64(utils.SizeOf(task.payload))
 			wp.totalMemoryUsed += taskSize
 			wp.totalTasks++
-			if wp.handler != nil {
-				result := wp.handler(task.ctx, task.payload)
-				if result.Error != nil {
+
+			result := wp.handler(task.ctx, task.payload)
+
+			if result.Error != nil {
+				wp.errorCount++
+			} else {
+				wp.completedTasks++
+			}
+
+			if wp.callback != nil {
+				if err := wp.callback(task.ctx, task.payload.ID, result, result.Topic); err != nil {
 					wp.errorCount++
-				} else {
-					wp.completedTasks++
-				}
-				if wp.callback != nil {
-					wp.callback(result, result.Error)
 				}
 			}
 
 			wp.totalMemoryUsed -= taskSize
+
 		case <-wp.stop:
 			return
 		}

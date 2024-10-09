@@ -24,8 +24,9 @@ type QueuedTask struct {
 }
 
 type consumer struct {
-	id   string
-	conn net.Conn
+	id    string
+	state consts.ConsumerState
+	conn  net.Conn
 }
 
 type publisher struct {
@@ -110,6 +111,14 @@ func (b *Broker) OnMessage(ctx context.Context, msg *codec.Message, conn net.Con
 		b.MessageResponseHandler(ctx, msg)
 	case consts.MESSAGE_ACK:
 		b.MessageAck(ctx, msg)
+	case consts.CONSUMER_PAUSE:
+		b.OnConsumerPause(ctx, msg)
+	case consts.CONSUMER_RESUME:
+		b.OnConsumerResume(ctx, msg)
+	case consts.CONSUMER_STOP:
+		b.OnConsumerStop(ctx, msg)
+	default:
+		log.Printf("BROKER - UNKNOWN_COMMAND ~> %s on %s", msg.Command, msg.Queue)
 	}
 }
 
@@ -117,6 +126,36 @@ func (b *Broker) MessageAck(ctx context.Context, msg *codec.Message) {
 	consumerID, _ := GetConsumerID(ctx)
 	taskID, _ := jsonparser.GetString(msg.Payload, "id")
 	log.Printf("BROKER - MESSAGE_ACK ~> %s on %s for Task %s", consumerID, msg.Queue, taskID)
+}
+
+func (b *Broker) OnConsumerPause(ctx context.Context, msg *codec.Message) {
+	consumerID, _ := GetConsumerID(ctx)
+	if consumerID != "" {
+		if con, exists := b.consumers.Get(consumerID); exists {
+			con.state = consts.ConsumerStatePaused
+			log.Printf("BROKER - CONSUMER ~> Paused %s", consumerID)
+		}
+	}
+}
+
+func (b *Broker) OnConsumerStop(ctx context.Context, msg *codec.Message) {
+	consumerID, _ := GetConsumerID(ctx)
+	if consumerID != "" {
+		if con, exists := b.consumers.Get(consumerID); exists {
+			con.state = consts.ConsumerStateStopped
+			log.Printf("BROKER - CONSUMER ~> Stopped %s", consumerID)
+		}
+	}
+}
+
+func (b *Broker) OnConsumerResume(ctx context.Context, msg *codec.Message) {
+	consumerID, _ := GetConsumerID(ctx)
+	if consumerID != "" {
+		if con, exists := b.consumers.Get(consumerID); exists {
+			con.state = consts.ConsumerStateActive
+			log.Printf("BROKER - CONSUMER ~> Resumed %s", consumerID)
+		}
+	}
 }
 
 func (b *Broker) MessageResponseHandler(ctx context.Context, msg *codec.Message) {
@@ -323,13 +362,22 @@ func (b *Broker) dispatchWorker(queue *Queue) {
 
 func (b *Broker) dispatchTaskToConsumer(queue *Queue, task *QueuedTask) bool {
 	var consumerFound bool
+	var err error
 	queue.consumers.ForEach(func(_ string, con *consumer) bool {
+		if con.state != consts.ConsumerStateActive {
+			err = fmt.Errorf("consumer %s is not active", con.id)
+			return false
+		}
 		if err := b.send(con.conn, task.Message); err == nil {
 			consumerFound = true
 			return false // break the loop once a consumer is found
 		}
 		return true
 	})
+	if err != nil {
+		log.Println(err.Error())
+		return false
+	}
 	if !consumerFound {
 		log.Printf("No available consumers for queue %s, retrying...", queue.name)
 	}

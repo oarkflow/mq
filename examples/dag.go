@@ -4,10 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/oarkflow/mq/consts"
-	"github.com/oarkflow/mq/examples/tasks"
 	"io"
 	"net/http"
+
+	"github.com/oarkflow/mq/consts"
+	"github.com/oarkflow/mq/examples/tasks"
 
 	"github.com/oarkflow/mq"
 	"github.com/oarkflow/mq/dag"
@@ -24,10 +25,8 @@ func main() {
 	d.AddNode("C", tasks.Node3)
 	d.AddNode("D", tasks.Node4)
 	d.AddNode("E", tasks.Node5)
-	err := d.AddDeferredNode("F")
-	if err != nil {
-		panic(err)
-	}
+	d.AddNode("F", tasks.Node6)
+
 	d.AddEdge("A", "B", dag.LoopEdge)
 	d.AddCondition("C", map[string]string{"PASS": "D", "FAIL": "E"})
 	d.AddEdge("B", "C")
@@ -35,7 +34,7 @@ func main() {
 	d.AddEdge("E", "F")
 	http.HandleFunc("POST /publish", requestHandler("publish"))
 	http.HandleFunc("POST /request", requestHandler("request"))
-	err = d.Start(context.TODO(), ":8083")
+	err := d.Start(context.TODO(), ":8083")
 	if err != nil {
 		panic(err)
 	}

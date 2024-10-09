@@ -16,24 +16,35 @@ import (
 	"github.com/oarkflow/mq/utils"
 )
 
-// Consumer structure to hold consumer-specific configurations and state.
+// Consumer defines the structure for a message consumer.
 type Consumer struct {
 	id      string
 	handler Handler
 	conn    net.Conn
 	queue   string
 	opts    Options
+	pool    *Pool // Use the worker pool in the consumer
 }
 
-// NewConsumer initializes a new consumer with the provided options.
+// NewConsumer initializes a new consumer and the worker pool.
 func NewConsumer(id string, queue string, handler Handler, opts ...Option) *Consumer {
 	options := setupOptions(opts...)
-	return &Consumer{
+
+	// Initialize the consumer with worker pool
+	conn, _ := GetConnection(options.brokerAddr, options.tlsConfig)
+	c := &Consumer{
 		id:      id,
 		opts:    options,
 		queue:   queue,
 		handler: handler,
+		conn:    conn,
 	}
+
+	// Create the worker pool, using ProcessTask as handler and MessageResponseCallback as callback
+	c.pool = NewPool(options.numOfWorkers, options.queueSize, options.maxMemoryLoad, c.ProcessTask, c.MessageResponseCallback, conn)
+	c.pool.Start()
+
+	return c
 }
 
 func (c *Consumer) send(conn net.Conn, msg *codec.Message) error {
@@ -44,8 +55,9 @@ func (c *Consumer) receive(conn net.Conn) (*codec.Message, error) {
 	return codec.ReadMessage(conn, c.opts.aesKey, c.opts.hmacKey, c.opts.enableEncryption)
 }
 
-// Close closes the consumer's connection.
+// Close closes the consumer's connection and stops the worker pool.
 func (c *Consumer) Close() error {
+	c.pool.Stop()
 	return c.conn.Close()
 }
 
@@ -72,6 +84,7 @@ func (c *Consumer) OnError(_ context.Context, conn net.Conn, err error) {
 	fmt.Println("Error reading from connection:", err, conn.RemoteAddr())
 }
 
+// OnMessage processes incoming messages and adds them to the pool.
 func (c *Consumer) OnMessage(ctx context.Context, msg *codec.Message, conn net.Conn) {
 	headers := WithHeaders(ctx, map[string]string{
 		consts.ConsumerKey: c.id,
@@ -82,16 +95,36 @@ func (c *Consumer) OnMessage(ctx context.Context, msg *codec.Message, conn net.C
 	if err := c.send(conn, reply); err != nil {
 		fmt.Printf("failed to send MESSAGE_ACK for queue %s: %v", msg.Queue, err)
 	}
+
 	var task Task
 	err := json.Unmarshal(msg.Payload, &task)
 	if err != nil {
 		log.Println("Error unmarshalling message:", err)
 		return
 	}
+
 	ctx = SetHeaders(ctx, map[string]string{consts.QueueKey: msg.Queue})
-	result := c.ProcessTask(ctx, &task)
-	result.TaskID = task.ID
-	result.Topic = msg.Queue
+
+	// Add the task to the worker pool
+	if err := c.pool.AddTask(ctx, &task); err != nil {
+		c.sendDenyMessage(ctx, taskID, msg.Queue, err)
+		return
+	}
+}
+
+// ProcessTask processes the task and returns the result.
+func (c *Consumer) ProcessTask(ctx context.Context, task *Task) Result {
+	return c.handler(ctx, task)
+}
+
+// MessageResponseCallback sends the result back to the broker.
+func (c *Consumer) MessageResponseCallback(ctx context.Context, taskID string, result Result, queue string) error {
+	headers := WithHeaders(ctx, map[string]string{
+		consts.ConsumerKey: c.id,
+		consts.QueueKey:    queue,
+		consts.ContentType: consts.TypeJson,
+	})
+
 	if result.Status == "" {
 		if result.Error != nil {
 			result.Status = "FAILED"
@@ -99,16 +132,26 @@ func (c *Consumer) OnMessage(ctx context.Context, msg *codec.Message, conn net.C
 			result.Status = "SUCCESS"
 		}
 	}
+	result.TaskID = taskID
+	result.Topic = queue
+
 	bt, _ := json.Marshal(result)
-	reply = codec.NewMessage(consts.MESSAGE_RESPONSE, bt, msg.Queue, headers)
-	if err := c.send(conn, reply); err != nil {
-		fmt.Printf("failed to send MESSAGE_RESPONSE for queue %s: %v", msg.Queue, err)
+	reply := codec.NewMessage(consts.MESSAGE_RESPONSE, bt, queue, headers)
+	if err := codec.SendMessage(c.conn, reply, c.opts.aesKey, c.opts.hmacKey, c.opts.enableEncryption); err != nil {
+		return fmt.Errorf("failed to send MESSAGE_RESPONSE: %v", err)
 	}
+	return nil
 }
 
-// ProcessTask handles a received task message and invokes the appropriate handler.
-func (c *Consumer) ProcessTask(ctx context.Context, msg *Task) Result {
-	return c.handler(ctx, msg)
+func (c *Consumer) sendDenyMessage(ctx context.Context, taskID, queue string, err error) {
+	headers := WithHeaders(ctx, map[string]string{
+		consts.ConsumerKey: c.id,
+		consts.ContentType: consts.TypeJson,
+	})
+	reply := codec.NewMessage(consts.MESSAGE_DENY, []byte(fmt.Sprintf(`{"id":"%s", "error":"%s"}`, taskID, err.Error())), queue, headers)
+	if sendErr := c.send(c.conn, reply); sendErr != nil {
+		log.Printf("failed to send MESSAGE_DENY for task %s: %v", taskID, sendErr)
+	}
 }
 
 // AttemptConnect tries to establish a connection to the server, with TLS or without, based on the configuration.
@@ -158,6 +201,7 @@ func (c *Consumer) Consume(ctx context.Context) error {
 	if err := c.subscribe(ctx, c.queue); err != nil {
 		return fmt.Errorf("failed to connect to server for queue %s: %v", c.queue, err)
 	}
+
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
@@ -184,4 +228,54 @@ func (c *Consumer) waitForAck(conn net.Conn) error {
 		return nil
 	}
 	return fmt.Errorf("expected SUBSCRIBE_ACK, got: %v", msg.Command)
+}
+
+// Additional methods for Pause, Resume, and Stop
+
+func (c *Consumer) Pause() error {
+	if err := c.sendPauseMessage(); err != nil {
+		return err
+	}
+	c.pool.Pause()
+	return nil
+}
+
+func (c *Consumer) sendPauseMessage() error {
+	headers := WithHeaders(context.Background(), map[string]string{
+		consts.ConsumerKey: c.id,
+	})
+	msg := codec.NewMessage(consts.CONSUMER_PAUSE, nil, c.queue, headers)
+	return c.send(c.conn, msg)
+}
+
+func (c *Consumer) Resume() error {
+	if err := c.sendResumeMessage(); err != nil {
+		return err
+	}
+	c.pool.Resume()
+	return nil
+}
+
+func (c *Consumer) sendResumeMessage() error {
+	headers := WithHeaders(context.Background(), map[string]string{
+		consts.ConsumerKey: c.id,
+	})
+	msg := codec.NewMessage(consts.CONSUMER_RESUME, nil, c.queue, headers)
+	return c.send(c.conn, msg)
+}
+
+func (c *Consumer) Stop() error {
+	if err := c.sendStopMessage(); err != nil {
+		return err
+	}
+	c.pool.Stop()
+	return nil
+}
+
+func (c *Consumer) sendStopMessage() error {
+	headers := WithHeaders(context.Background(), map[string]string{
+		consts.ConsumerKey: c.id,
+	})
+	msg := codec.NewMessage(consts.CONSUMER_STOP, nil, c.queue, headers)
+	return c.send(c.conn, msg)
 }

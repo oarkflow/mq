@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"runtime"
 	"time"
 )
 
@@ -72,6 +73,8 @@ type Options struct {
 	hmacKey             json.RawMessage
 	enableEncryption    bool
 	queueSize           int
+	numOfWorkers        int
+	maxMemoryLoad       int64
 }
 
 func defaultOptions() Options {
@@ -83,6 +86,8 @@ func defaultOptions() Options {
 		maxBackoff:    20 * time.Second,
 		jitterPercent: 0.5,
 		queueSize:     100,
+		numOfWorkers:  runtime.NumCPU(),
+		maxMemoryLoad: 5000000,
 	}
 }
 
@@ -157,6 +162,27 @@ func WithSyncMode(mode bool) Option {
 func WithMaxRetries(val int) Option {
 	return func(opts *Options) {
 		opts.maxRetries = val
+	}
+}
+
+// WithQueueSize -
+func WithQueueSize(val int) Option {
+	return func(opts *Options) {
+		opts.queueSize = val
+	}
+}
+
+// WithNumOfWorkers -
+func WithNumOfWorkers(val int) Option {
+	return func(opts *Options) {
+		opts.numOfWorkers = val
+	}
+}
+
+// WithMaxMemoryLoad -
+func WithMaxMemoryLoad(val int64) Option {
+	return func(opts *Options) {
+		opts.maxMemoryLoad = val
 	}
 }
 

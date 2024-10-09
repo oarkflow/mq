@@ -10,10 +10,12 @@ import (
 )
 
 func Node1(ctx context.Context, task *mq.Task) mq.Result {
+	fmt.Println("Node 1", string(task.Payload))
 	return mq.Result{Payload: task.Payload, TaskID: task.ID}
 }
 
 func Node2(ctx context.Context, task *mq.Task) mq.Result {
+	fmt.Println("Node 2", string(task.Payload))
 	return mq.Result{Payload: task.Payload, TaskID: task.ID}
 }
 
