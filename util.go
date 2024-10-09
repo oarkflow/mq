@@ -15,6 +15,10 @@ func (b *Broker) SyncMode() bool {
 	return b.opts.syncMode
 }
 
+func (b *Broker) NotifyHandler() func(context.Context, Result) {
+	return b.opts.notifyResponse
+}
+
 func (b *Broker) HandleCallback(ctx context.Context, msg *codec.Message) {
 	if b.opts.callback != nil {
 		var result Result

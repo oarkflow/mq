@@ -8,11 +8,13 @@ import (
 )
 
 type Result struct {
-	Payload json.RawMessage `json:"payload"`
-	Topic   string          `json:"topic"`
-	TaskID  string          `json:"task_id"`
-	Error   error           `json:"error,omitempty"`
-	Status  string          `json:"status"`
+	Payload     json.RawMessage `json:"payload"`
+	Topic       string          `json:"topic"`
+	CreatedAt   time.Time       `json:"created_at"`
+	ProcessedAt time.Time       `json:"processed_at,omitempty"`
+	TaskID      string          `json:"task_id"`
+	Error       error           `json:"error,omitempty"`
+	Status      string          `json:"status"`
 }
 
 func (r Result) Unmarshal(data any) error {
@@ -20,10 +22,6 @@ func (r Result) Unmarshal(data any) error {
 		return fmt.Errorf("payload is nil")
 	}
 	return json.Unmarshal(r.Payload, data)
-}
-
-func (r Result) String() string {
-	return string(r.Payload)
 }
 
 func HandleError(ctx context.Context, err error, status ...string) Result {
@@ -63,6 +61,7 @@ type Options struct {
 	brokerAddr       string
 	callback         []func(context.Context, Result) Result
 	maxRetries       int
+	notifyResponse   func(context.Context, Result)
 	initialDelay     time.Duration
 	maxBackoff       time.Duration
 	jitterPercent    float64
@@ -94,6 +93,12 @@ func setupOptions(opts ...Option) Options {
 		opt(&options)
 	}
 	return options
+}
+
+func WithNotifyResponse(handler func(ctx context.Context, result Result)) Option {
+	return func(opts *Options) {
+		opts.notifyResponse = handler
+	}
 }
 
 func WithEncryption(aesKey, hmacKey json.RawMessage, enableEncryption bool) Option {

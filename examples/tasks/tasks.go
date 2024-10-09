@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 
 	"github.com/oarkflow/mq"
 )
@@ -17,53 +18,46 @@ func Node2(ctx context.Context, task *mq.Task) mq.Result {
 }
 
 func Node3(ctx context.Context, task *mq.Task) mq.Result {
-	var data map[string]any
-	err := json.Unmarshal(task.Payload, &data)
-	if err != nil {
-		return mq.Result{Error: err}
+	var user map[string]any
+	json.Unmarshal(task.Payload, &user)
+	age := int(user["age"].(float64))
+	status := "FAIL"
+	if age > 20 {
+		status = "PASS"
 	}
-	data["salary"] = fmt.Sprintf("12000%v", data["user_id"])
-	bt, _ := json.Marshal(data)
-	return mq.Result{Payload: bt, TaskID: task.ID}
+	user["status"] = status
+	resultPayload, _ := json.Marshal(user)
+	return mq.Result{Payload: resultPayload, Status: status}
 }
 
 func Node4(ctx context.Context, task *mq.Task) mq.Result {
-	var data []map[string]any
-	err := json.Unmarshal(task.Payload, &data)
-	if err != nil {
-		return mq.Result{Error: err}
-	}
-	payload := map[string]any{"storage": data}
-	bt, _ := json.Marshal(payload)
-	return mq.Result{Payload: bt, TaskID: task.ID}
+	var user map[string]any
+	json.Unmarshal(task.Payload, &user)
+	user["final"] = "D"
+	resultPayload, _ := json.Marshal(user)
+	return mq.Result{Payload: resultPayload}
 }
 
-func CheckCondition(ctx context.Context, task *mq.Task) mq.Result {
-	var data map[string]any
-	err := json.Unmarshal(task.Payload, &data)
-	if err != nil {
-		return mq.Result{Error: err}
-	}
-	var status string
-	if data["user_id"].(float64) == 2 {
-		status = "pass"
-	} else {
-		status = "fail"
-	}
-	return mq.Result{Status: status, Payload: task.Payload, TaskID: task.ID}
+func Node5(ctx context.Context, task *mq.Task) mq.Result {
+	var user map[string]any
+	json.Unmarshal(task.Payload, &user)
+	user["salary"] = "E"
+	resultPayload, _ := json.Marshal(user)
+	return mq.Result{Payload: resultPayload}
 }
 
-func Pass(ctx context.Context, task *mq.Task) mq.Result {
-	fmt.Println("Pass")
-	return mq.Result{Payload: task.Payload}
-}
-
-func Fail(ctx context.Context, task *mq.Task) mq.Result {
-	fmt.Println("Fail")
-	return mq.Result{Payload: []byte(`{"test2": "asdsa"}`)}
+func Node6(ctx context.Context, task *mq.Task) mq.Result {
+	var user map[string]any
+	json.Unmarshal(task.Payload, &user)
+	resultPayload, _ := json.Marshal(map[string]any{"storage": user})
+	return mq.Result{Payload: resultPayload}
 }
 
 func Callback(ctx context.Context, task mq.Result) mq.Result {
 	fmt.Println("Received task", task.TaskID, "Payload", string(task.Payload), task.Error, task.Topic)
 	return mq.Result{}
+}
+
+func NotifyResponse(ctx context.Context, result mq.Result) {
+	log.Printf("DAG Final response: TaskID: %s, Payload: %s, Topic: %s", result.TaskID, result.Payload, result.Topic)
 }

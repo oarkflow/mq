@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/oarkflow/mq"
 	"github.com/oarkflow/mq/consts"
@@ -14,13 +15,13 @@ import (
 type TaskManager struct {
 	taskID          string
 	dag             *DAG
-	wg              sync.WaitGroup
 	mutex           sync.Mutex
+	createdAt       time.Time
+	processedAt     time.Time
 	results         []mq.Result
 	waitingCallback int64
 	nodeResults     map[string]mq.Result
-	done            chan struct{}
-	finalResult     chan mq.Result // Channel to collect final results
+	finalResult     chan mq.Result
 }
 
 func NewTaskManager(d *DAG, taskID string) *TaskManager {
@@ -32,64 +33,45 @@ func NewTaskManager(d *DAG, taskID string) *TaskManager {
 	}
 }
 
-func (tm *TaskManager) handleSyncTask(ctx context.Context, node *Node, payload json.RawMessage) mq.Result {
-	tm.done = make(chan struct{})
-	tm.wg.Add(1)
-	go tm.processNode(ctx, node, payload)
-	go func() {
-		tm.wg.Wait()
-		close(tm.done)
-	}()
-	select {
-	case <-ctx.Done():
-		return mq.Result{Error: ctx.Err()}
-	case <-tm.done:
-		tm.mutex.Lock()
-		defer tm.mutex.Unlock()
-		if len(tm.results) == 1 {
-			return tm.handleResult(ctx, tm.results[0])
-		}
-		return tm.handleResult(ctx, tm.results)
-	}
-}
-
-func (tm *TaskManager) handleAsyncTask(ctx context.Context, node *Node, payload json.RawMessage) mq.Result {
-	tm.finalResult = make(chan mq.Result)
-	tm.wg.Add(1)
-	go tm.processNode(ctx, node, payload)
-	go func() {
-		tm.wg.Wait()
-	}()
-	select {
-	case result := <-tm.finalResult: // Block until a result is available
-		return result
-	case <-ctx.Done(): // Handle context cancellation
-		return mq.Result{Error: ctx.Err()}
-	}
-}
-
 func (tm *TaskManager) processTask(ctx context.Context, nodeID string, payload json.RawMessage) mq.Result {
 	node, ok := tm.dag.Nodes[nodeID]
 	if !ok {
 		return mq.Result{Error: fmt.Errorf("nodeID %s not found", nodeID)}
 	}
-	if tm.dag.server.SyncMode() {
-		return tm.handleSyncTask(ctx, node, payload)
+	tm.createdAt = time.Now()
+	tm.finalResult = make(chan mq.Result, 0)
+	go tm.processNode(ctx, node, payload)
+	awaitResponse, ok := mq.GetAwaitResponse(ctx)
+	if awaitResponse != "true" {
+		go func() {
+			finalResult := <-tm.finalResult
+			finalResult.CreatedAt = tm.createdAt
+			finalResult.ProcessedAt = time.Now()
+			if tm.dag.server.NotifyHandler() != nil {
+				tm.dag.server.NotifyHandler()(ctx, finalResult)
+			}
+		}()
+		return mq.Result{CreatedAt: tm.createdAt, TaskID: tm.taskID, Topic: nodeID, Status: "PENDING"}
+	} else {
+		finalResult := <-tm.finalResult
+		finalResult.CreatedAt = tm.createdAt
+		finalResult.ProcessedAt = time.Now()
+		if tm.dag.server.NotifyHandler() != nil {
+			tm.dag.server.NotifyHandler()(ctx, finalResult)
+		}
+		return finalResult
 	}
-	return tm.handleAsyncTask(ctx, node, payload)
 }
 
 func (tm *TaskManager) dispatchFinalResult(ctx context.Context) {
-	if !tm.dag.server.SyncMode() {
-		var rs mq.Result
-		if len(tm.results) == 1 {
-			rs = tm.handleResult(ctx, tm.results[0])
-		} else {
-			rs = tm.handleResult(ctx, tm.results)
-		}
-		if tm.waitingCallback == 0 {
-			tm.finalResult <- rs
-		}
+	var rs mq.Result
+	if len(tm.results) == 1 {
+		rs = tm.handleResult(ctx, tm.results[0])
+	} else {
+		rs = tm.handleResult(ctx, tm.results)
+	}
+	if tm.waitingCallback == 0 {
+		tm.finalResult <- rs
 	}
 }
 
@@ -127,13 +109,11 @@ func (tm *TaskManager) handleCallback(ctx context.Context, result mq.Result) mq.
 				return result
 			}
 			for _, item := range items {
-				tm.wg.Add(1)
 				ctx = mq.SetHeaders(ctx, map[string]string{consts.QueueKey: edge.To.Key})
 				go tm.processNode(ctx, edge.To, item)
 			}
 		case SimpleEdge:
 			if edge.To != nil {
-				tm.wg.Add(1)
 				ctx = mq.SetHeaders(ctx, map[string]string{consts.QueueKey: edge.To.Key})
 				go tm.processNode(ctx, edge.To, result.Payload)
 			}
@@ -147,10 +127,11 @@ func (tm *TaskManager) handleResult(ctx context.Context, results any) mq.Result 
 	switch res := results.(type) {
 	case []mq.Result:
 		aggregatedOutput := make([]json.RawMessage, 0)
-		status := ""
+		var status, topic string
 		for i, result := range res {
 			if i == 0 {
 				status = result.Status
+				topic = result.Topic
 			}
 			if result.Error != nil {
 				return mq.HandleError(ctx, result.Error)
@@ -170,6 +151,7 @@ func (tm *TaskManager) handleResult(ctx context.Context, results any) mq.Result 
 			TaskID:  tm.taskID,
 			Payload: finalOutput,
 			Status:  status,
+			Topic:   topic,
 		}
 	case mq.Result:
 		return res
@@ -186,7 +168,6 @@ func (tm *TaskManager) appendFinalResult(result mq.Result) {
 
 func (tm *TaskManager) processNode(ctx context.Context, node *Node, payload json.RawMessage) {
 	atomic.AddInt64(&tm.waitingCallback, 1)
-	defer tm.wg.Done()
 	var result mq.Result
 	select {
 	case <-ctx.Done():
