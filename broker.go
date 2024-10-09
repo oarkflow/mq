@@ -50,7 +50,7 @@ func NewBroker(opts ...Option) *Broker {
 	}
 }
 
-func (b *Broker) OnClose(ctx context.Context, _ net.Conn) error {
+func (b *Broker) OnClose(ctx context.Context, conn net.Conn) error {
 	consumerID, ok := GetConsumerID(ctx)
 	if ok && consumerID != "" {
 		if con, exists := b.consumers.Get(consumerID); exists {
@@ -58,7 +58,31 @@ func (b *Broker) OnClose(ctx context.Context, _ net.Conn) error {
 			b.consumers.Del(consumerID)
 		}
 		b.queues.ForEach(func(_ string, queue *Queue) bool {
-			queue.consumers.Del(consumerID)
+			if _, ok := queue.consumers.Get(consumerID); ok {
+				if b.opts.consumerOnClose != nil {
+					b.opts.consumerOnClose(ctx, queue.name, consumerID)
+				}
+				queue.consumers.Del(consumerID)
+			}
+			return true
+		})
+	} else {
+		b.consumers.ForEach(func(consumerID string, con *consumer) bool {
+			if con.conn.RemoteAddr().String() == conn.RemoteAddr().String() && con.conn.LocalAddr().String() == conn.LocalAddr().String() {
+				if c, exists := b.consumers.Get(consumerID); exists {
+					c.conn.Close()
+					b.consumers.Del(consumerID)
+				}
+				b.queues.ForEach(func(_ string, queue *Queue) bool {
+					if _, ok := queue.consumers.Get(consumerID); ok {
+						if b.opts.consumerOnClose != nil {
+							b.opts.consumerOnClose(ctx, queue.name, consumerID)
+						}
+						queue.consumers.Del(consumerID)
+					}
+					return true
+				})
+			}
 			return true
 		})
 	}
@@ -151,8 +175,8 @@ func (b *Broker) SubscribeHandler(ctx context.Context, conn net.Conn, msg *codec
 	if err := b.send(conn, ack); err != nil {
 		log.Printf("Error sending SUBSCRIBE_ACK: %v\n", err)
 	}
-	if b.opts.consumerSubscribeHandler != nil {
-		b.opts.consumerSubscribeHandler(ctx, msg.Queue, consumerID)
+	if b.opts.consumerOnSubscribe != nil {
+		b.opts.consumerOnSubscribe(ctx, msg.Queue, consumerID)
 	}
 	go func() {
 		select {

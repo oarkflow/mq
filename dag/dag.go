@@ -57,7 +57,7 @@ func NewDAG(opts ...mq.Option) *DAG {
 		taskContext: make(map[string]*TaskManager),
 		conditions:  make(map[string]map[string]string),
 	}
-	opts = append(opts, mq.WithCallback(d.onTaskCallback), mq.WithConsumerSubscribe(d.onConsumerJoin))
+	opts = append(opts, mq.WithCallback(d.onTaskCallback), mq.WithConsumerOnSubscribe(d.onConsumerJoin), mq.WithConsumerOnClose(d.onConsumerClose))
 	d.server = mq.NewBroker(opts...)
 	return d
 }
@@ -71,8 +71,15 @@ func (tm *DAG) onTaskCallback(ctx context.Context, result mq.Result) mq.Result {
 
 func (tm *DAG) onConsumerJoin(_ context.Context, topic, _ string) {
 	if node, ok := tm.Nodes[topic]; ok {
-		log.Printf("Consumer is ready on %s", topic)
+		log.Printf("DAG - CONSUMER ~> ready on %s", topic)
 		node.isReady = true
+	}
+}
+
+func (tm *DAG) onConsumerClose(_ context.Context, topic, _ string) {
+	if node, ok := tm.Nodes[topic]; ok {
+		log.Printf("DAG - CONSUMER ~> down on %s", topic)
+		node.isReady = false
 	}
 }
 
@@ -96,7 +103,7 @@ func (tm *DAG) Start(ctx context.Context, addr string) error {
 		}
 	}
 
-	log.Printf("HTTP server started on %s", addr)
+	log.Printf("DAG - HTTP_SERVER ~> started on %s", addr)
 	config := tm.server.TLSConfig()
 	if config.UseTLS {
 		return http.ListenAndServeTLS(addr, config.CertPath, config.KeyPath, nil)
