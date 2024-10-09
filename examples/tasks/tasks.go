@@ -4,18 +4,19 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+
 	"github.com/oarkflow/mq"
 )
 
-func Node1(ctx context.Context, task mq.Task) mq.Result {
-	return mq.Result{Payload: task.Payload, MessageID: task.ID}
+func Node1(ctx context.Context, task *mq.Task) mq.Result {
+	return mq.Result{Payload: task.Payload, TaskID: task.ID}
 }
 
-func Node2(ctx context.Context, task mq.Task) mq.Result {
-	return mq.Result{Payload: task.Payload, MessageID: task.ID}
+func Node2(ctx context.Context, task *mq.Task) mq.Result {
+	return mq.Result{Payload: task.Payload, TaskID: task.ID}
 }
 
-func Node3(ctx context.Context, task mq.Task) mq.Result {
+func Node3(ctx context.Context, task *mq.Task) mq.Result {
 	var data map[string]any
 	err := json.Unmarshal(task.Payload, &data)
 	if err != nil {
@@ -23,10 +24,10 @@ func Node3(ctx context.Context, task mq.Task) mq.Result {
 	}
 	data["salary"] = fmt.Sprintf("12000%v", data["user_id"])
 	bt, _ := json.Marshal(data)
-	return mq.Result{Payload: bt, MessageID: task.ID}
+	return mq.Result{Payload: bt, TaskID: task.ID}
 }
 
-func Node4(ctx context.Context, task mq.Task) mq.Result {
+func Node4(ctx context.Context, task *mq.Task) mq.Result {
 	var data []map[string]any
 	err := json.Unmarshal(task.Payload, &data)
 	if err != nil {
@@ -34,10 +35,10 @@ func Node4(ctx context.Context, task mq.Task) mq.Result {
 	}
 	payload := map[string]any{"storage": data}
 	bt, _ := json.Marshal(payload)
-	return mq.Result{Payload: bt, MessageID: task.ID}
+	return mq.Result{Payload: bt, TaskID: task.ID}
 }
 
-func CheckCondition(ctx context.Context, task mq.Task) mq.Result {
+func CheckCondition(ctx context.Context, task *mq.Task) mq.Result {
 	var data map[string]any
 	err := json.Unmarshal(task.Payload, &data)
 	if err != nil {
@@ -49,20 +50,20 @@ func CheckCondition(ctx context.Context, task mq.Task) mq.Result {
 	} else {
 		status = "fail"
 	}
-	return mq.Result{Status: status, Payload: task.Payload, MessageID: task.ID}
+	return mq.Result{Status: status, Payload: task.Payload, TaskID: task.ID}
 }
 
-func Pass(ctx context.Context, task mq.Task) mq.Result {
+func Pass(ctx context.Context, task *mq.Task) mq.Result {
 	fmt.Println("Pass")
 	return mq.Result{Payload: task.Payload}
 }
 
-func Fail(ctx context.Context, task mq.Task) mq.Result {
+func Fail(ctx context.Context, task *mq.Task) mq.Result {
 	fmt.Println("Fail")
 	return mq.Result{Payload: []byte(`{"test2": "asdsa"}`)}
 }
 
 func Callback(ctx context.Context, task mq.Result) mq.Result {
-	fmt.Println("Received task", task.MessageID, "Payload", string(task.Payload), task.Error, task.Queue)
+	fmt.Println("Received task", task.TaskID, "Payload", string(task.Payload), task.Error, task.Topic)
 	return mq.Result{}
 }

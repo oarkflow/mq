@@ -31,7 +31,7 @@ func NewMessage(cmd consts.CMD, payload json.RawMessage, queue string, headers m
 func (m *Message) Serialize(aesKey, hmacKey []byte, encrypt bool) ([]byte, string, error) {
 	var buf bytes.Buffer
 
-	// Serialize Headers, Queue, Command, Payload, and Metadata
+	// Serialize Headers, Topic, Command, Payload, and Metadata
 	if err := writeLengthPrefixedJSON(&buf, m.Headers); err != nil {
 		return nil, "", fmt.Errorf("error serializing headers: %v", err)
 	}
@@ -62,7 +62,7 @@ func Deserialize(data, aesKey, hmacKey []byte, receivedHMAC string, decrypt bool
 
 	buf := bytes.NewReader(data)
 
-	// Deserialize Headers, Queue, Command, Payload, and Metadata
+	// Deserialize Headers, Topic, Command, Payload, and Metadata
 	headers := make(map[string]string)
 	if err := readLengthPrefixedJSON(buf, &headers); err != nil {
 		return nil, fmt.Errorf("error deserializing headers: %v", err)

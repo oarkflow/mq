@@ -97,16 +97,12 @@ func (b *Broker) MessageAck(ctx context.Context, msg *codec.Message) {
 
 func (b *Broker) MessageResponseHandler(ctx context.Context, msg *codec.Message) {
 	msg.Command = consts.RESPONSE
-	headers, ok := GetHeaders(ctx)
-	if !ok {
-		return
-	}
 	b.HandleCallback(ctx, msg)
-	awaitResponse, ok := headers[consts.AwaitResponseKey]
+	awaitResponse, ok := GetAwaitResponse(ctx)
 	if !(ok && awaitResponse == "true") {
 		return
 	}
-	publisherID, exists := headers[consts.PublisherKey]
+	publisherID, exists := GetPublisherID(ctx)
 	if !exists {
 		return
 	}
@@ -120,13 +116,13 @@ func (b *Broker) MessageResponseHandler(ctx context.Context, msg *codec.Message)
 	}
 }
 
-func (b *Broker) Publish(ctx context.Context, task Task, queue string) error {
+func (b *Broker) Publish(ctx context.Context, task *Task, queue string) error {
 	headers, _ := GetHeaders(ctx)
 	payload, err := json.Marshal(task)
 	if err != nil {
 		return err
 	}
-	msg := codec.NewMessage(consts.PUBLISH, payload, queue, headers)
+	msg := codec.NewMessage(consts.PUBLISH, payload, queue, headers.headers)
 	b.broadcastToConsumers(ctx, msg)
 	return nil
 }
