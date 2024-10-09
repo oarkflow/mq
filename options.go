@@ -57,19 +57,20 @@ type TLSConfig struct {
 }
 
 type Options struct {
-	syncMode         bool
-	brokerAddr       string
-	callback         []func(context.Context, Result) Result
-	maxRetries       int
-	notifyResponse   func(context.Context, Result)
-	initialDelay     time.Duration
-	maxBackoff       time.Duration
-	jitterPercent    float64
-	tlsConfig        TLSConfig
-	aesKey           json.RawMessage
-	hmacKey          json.RawMessage
-	enableEncryption bool
-	queueSize        int
+	syncMode                 bool
+	brokerAddr               string
+	callback                 []func(context.Context, Result) Result
+	maxRetries               int
+	consumerSubscribeHandler func(ctx context.Context, topic, consumerName string)
+	notifyResponse           func(context.Context, Result)
+	initialDelay             time.Duration
+	maxBackoff               time.Duration
+	jitterPercent            float64
+	tlsConfig                TLSConfig
+	aesKey                   json.RawMessage
+	hmacKey                  json.RawMessage
+	enableEncryption         bool
+	queueSize                int
 }
 
 func defaultOptions() Options {
@@ -98,6 +99,12 @@ func setupOptions(opts ...Option) Options {
 func WithNotifyResponse(handler func(ctx context.Context, result Result)) Option {
 	return func(opts *Options) {
 		opts.notifyResponse = handler
+	}
+}
+
+func WithConsumerSubscribe(handler func(ctx context.Context, topic, consumerName string)) Option {
+	return func(opts *Options) {
+		opts.consumerSubscribeHandler = handler
 	}
 }
 

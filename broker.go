@@ -151,6 +151,9 @@ func (b *Broker) SubscribeHandler(ctx context.Context, conn net.Conn, msg *codec
 	if err := b.send(conn, ack); err != nil {
 		log.Printf("Error sending SUBSCRIBE_ACK: %v\n", err)
 	}
+	if b.opts.consumerSubscribeHandler != nil {
+		b.opts.consumerSubscribeHandler(ctx, msg.Queue, consumerID)
+	}
 	go func() {
 		select {
 		case <-ctx.Done():

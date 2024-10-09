@@ -4,12 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/oarkflow/xid"
 	"log"
 	"net/http"
 	"sync"
 	"time"
-
-	"github.com/oarkflow/xid"
 
 	"github.com/oarkflow/mq"
 )
@@ -33,6 +32,7 @@ const (
 type Node struct {
 	Key      string
 	Edges    []Edge
+	isReady  bool
 	consumer *mq.Consumer
 }
 
@@ -57,7 +57,7 @@ func NewDAG(opts ...mq.Option) *DAG {
 		taskContext: make(map[string]*TaskManager),
 		conditions:  make(map[string]map[string]string),
 	}
-	opts = append(opts, mq.WithCallback(d.onTaskCallback))
+	opts = append(opts, mq.WithCallback(d.onTaskCallback), mq.WithConsumerSubscribe(d.onConsumerJoin))
 	d.server = mq.NewBroker(opts...)
 	return d
 }
@@ -69,6 +69,13 @@ func (tm *DAG) onTaskCallback(ctx context.Context, result mq.Result) mq.Result {
 	return mq.Result{}
 }
 
+func (tm *DAG) onConsumerJoin(_ context.Context, topic, _ string) {
+	if node, ok := tm.Nodes[topic]; ok {
+		log.Printf("Consumer is ready on %s", topic)
+		node.isReady = true
+	}
+}
+
 func (tm *DAG) Start(ctx context.Context, addr string) error {
 	if !tm.server.SyncMode() {
 		go func() {
@@ -78,10 +85,14 @@ func (tm *DAG) Start(ctx context.Context, addr string) error {
 			}
 		}()
 		for _, con := range tm.Nodes {
-			go func(con *Node) {
-				time.Sleep(1 * time.Second)
-				con.consumer.Consume(ctx)
-			}(con)
+			if con.isReady {
+				go func(con *Node) {
+					time.Sleep(1 * time.Second)
+					con.consumer.Consume(ctx)
+				}(con)
+			} else {
+				log.Printf("[WARNING] - %s is not ready yet", con.Key)
+			}
 		}
 	}
 
@@ -100,10 +111,37 @@ func (tm *DAG) AddNode(key string, handler mq.Handler, firstNode ...bool) {
 	tm.Nodes[key] = &Node{
 		Key:      key,
 		consumer: con,
+		isReady:  true,
 	}
 	if len(firstNode) > 0 && firstNode[0] {
 		tm.FirstNode = key
 	}
+}
+
+func (tm *DAG) AddDeferredNode(key string, firstNode ...bool) error {
+	if tm.server.SyncMode() {
+		return fmt.Errorf("DAG cannot have deferred node in Sync Mode")
+	}
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+	tm.Nodes[key] = &Node{
+		Key: key,
+	}
+	if len(firstNode) > 0 && firstNode[0] {
+		tm.FirstNode = key
+	}
+	return nil
+}
+
+func (tm *DAG) IsReady() bool {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+	for _, node := range tm.Nodes {
+		if !node.isReady {
+			return false
+		}
+	}
+	return true
 }
 
 func (tm *DAG) AddCondition(fromNode string, conditions map[string]string) {
@@ -131,6 +169,9 @@ func (tm *DAG) AddEdge(from, to string, edgeTypes ...EdgeType) {
 }
 
 func (tm *DAG) ProcessTask(ctx context.Context, payload []byte) mq.Result {
+	if !tm.IsReady() {
+		return mq.Result{Error: fmt.Errorf("DAG is not ready yet")}
+	}
 	val := ctx.Value("initial_node")
 	initialNode, ok := val.(string)
 	if !ok {

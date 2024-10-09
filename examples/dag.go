@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"github.com/oarkflow/mq/consts"
 	"github.com/oarkflow/mq/examples/tasks"
 	"io"
@@ -23,7 +24,10 @@ func main() {
 	d.AddNode("C", tasks.Node3)
 	d.AddNode("D", tasks.Node4)
 	d.AddNode("E", tasks.Node5)
-	d.AddNode("F", tasks.Node6)
+	err := d.AddDeferredNode("F")
+	if err != nil {
+		panic(err)
+	}
 	d.AddEdge("A", "B", dag.LoopEdge)
 	d.AddCondition("C", map[string]string{"PASS": "D", "FAIL": "E"})
 	d.AddEdge("B", "C")
@@ -31,7 +35,7 @@ func main() {
 	d.AddEdge("E", "F")
 	http.HandleFunc("POST /publish", requestHandler("publish"))
 	http.HandleFunc("POST /request", requestHandler("request"))
-	err := d.Start(context.TODO(), ":8083")
+	err = d.Start(context.TODO(), ":8083")
 	if err != nil {
 		panic(err)
 	}
@@ -62,6 +66,10 @@ func requestHandler(requestType string) func(w http.ResponseWriter, r *http.Requ
 		}
 		// ctx = context.WithValue(ctx, "initial_node", "E")
 		rs := d.ProcessTask(ctx, payload)
+		if rs.Error != nil {
+			http.Error(w, fmt.Sprintf("[DAG Error] - %v", rs.Error), http.StatusInternalServerError)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(rs)
 	}
