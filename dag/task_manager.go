@@ -42,6 +42,8 @@ func (tm *TaskManager) processTask(ctx context.Context, nodeID string, payload j
 	tm.finalResult = make(chan mq.Result, 0)
 	go tm.processNode(ctx, node, payload)
 	awaitResponse, ok := mq.GetAwaitResponse(ctx)
+	headers, _ := mq.GetHeaders(ctx)
+	fmt.Println("Await", awaitResponse, headers)
 	if awaitResponse != "true" {
 		go func() {
 			finalResult := <-tm.finalResult

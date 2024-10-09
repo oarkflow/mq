@@ -42,7 +42,7 @@ func NewConsumer(id string, queue string, handler Handler, opts ...Option) *Cons
 
 	// Create the worker pool, using ProcessTask as handler and MessageResponseCallback as callback
 	c.pool = NewPool(options.numOfWorkers, options.queueSize, options.maxMemoryLoad, c.ProcessTask, c.MessageResponseCallback, conn)
-	c.pool.Start()
+	c.pool.Start(options.numOfWorkers)
 
 	return c
 }
