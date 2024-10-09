@@ -254,4 +254,3 @@ func requestHandler(requestType string) func(w http.ResponseWriter, r *http.Requ
 
 - Backend for task persistence
 - Task scheduling
-- Conditional nodes for tasks
