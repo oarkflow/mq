@@ -91,14 +91,14 @@ func (c *Consumer) OnMessage(ctx context.Context, msg *codec.Message, conn net.C
 	}
 	ctx = SetHeaders(ctx, map[string]string{consts.QueueKey: msg.Queue})
 	result := c.ProcessTask(ctx, &task)
-	err = c.MessageResponseCallback(ctx, result)
+	err = c.OnResponse(ctx, result)
 	if err != nil {
 		log.Printf("Error on message callback: %v", err)
 	}
 }
 
-// MessageResponseCallback sends the result back to the broker.
-func (c *Consumer) MessageResponseCallback(ctx context.Context, result Result) error {
+// OnResponse sends the result back to the broker.
+func (c *Consumer) OnResponse(ctx context.Context, result Result) error {
 	headers := WithHeaders(ctx, map[string]string{
 		consts.ConsumerKey: c.id,
 		consts.QueueKey:    result.Topic,
