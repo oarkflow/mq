@@ -91,8 +91,6 @@ func (c *Consumer) OnMessage(ctx context.Context, msg *codec.Message, conn net.C
 	}
 	ctx = SetHeaders(ctx, map[string]string{consts.QueueKey: msg.Queue})
 	result := c.ProcessTask(ctx, &task)
-	result.Topic = msg.Queue
-	result.TaskID = taskID
 	err = c.MessageResponseCallback(ctx, result)
 	if err != nil {
 		log.Printf("Error on message callback: %v", err)
@@ -124,7 +122,10 @@ func (c *Consumer) MessageResponseCallback(ctx context.Context, result Result) e
 
 // ProcessTask handles a received task message and invokes the appropriate handler.
 func (c *Consumer) ProcessTask(ctx context.Context, msg *Task) Result {
-	return c.handler(ctx, msg)
+	result := c.handler(ctx, msg)
+	result.Topic = msg.Topic
+	result.TaskID = msg.ID
+	return result
 }
 
 // AttemptConnect tries to establish a connection to the server, with TLS or without, based on the configuration.
