@@ -4,11 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/oarkflow/xid"
 	"log"
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/oarkflow/xid"
 
 	"github.com/oarkflow/mq"
 )
@@ -49,6 +50,8 @@ type DAG struct {
 	taskContext map[string]*TaskManager
 	conditions  map[string]map[string]string
 	mu          sync.RWMutex
+	paused      bool
+	opts        []mq.Option
 }
 
 func NewDAG(opts ...mq.Option) *DAG {
@@ -59,6 +62,7 @@ func NewDAG(opts ...mq.Option) *DAG {
 	}
 	opts = append(opts, mq.WithCallback(d.onTaskCallback), mq.WithConsumerOnSubscribe(d.onConsumerJoin), mq.WithConsumerOnClose(d.onConsumerClose))
 	d.server = mq.NewBroker(opts...)
+	d.opts = opts
 	return d
 }
 
@@ -95,10 +99,13 @@ func (tm *DAG) Start(ctx context.Context, addr string) error {
 			if con.isReady {
 				go func(con *Node) {
 					time.Sleep(1 * time.Second)
-					con.consumer.Consume(ctx)
+					err := con.consumer.Consume(ctx)
+					if err != nil {
+						panic(err)
+					}
 				}(con)
 			} else {
-				log.Printf("[WARNING] - %s is not ready yet", con.Key)
+				log.Printf("[WARNING] - Consumer %s is not ready yet", con.Key)
 			}
 		}
 	}
@@ -114,7 +121,7 @@ func (tm *DAG) Start(ctx context.Context, addr string) error {
 func (tm *DAG) AddNode(key string, handler mq.Handler, firstNode ...bool) {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
-	con := mq.NewConsumer(key, key, handler)
+	con := mq.NewConsumer(key, key, handler, tm.opts...)
 	tm.Nodes[key] = &Node{
 		Key:      key,
 		consumer: con,
@@ -176,8 +183,11 @@ func (tm *DAG) AddEdge(from, to string, edgeTypes ...EdgeType) {
 }
 
 func (tm *DAG) ProcessTask(ctx context.Context, payload []byte) mq.Result {
+	if tm.paused {
+		return mq.Result{Error: fmt.Errorf("unable to process task, error: DAG is not accepting any task")}
+	}
 	if !tm.IsReady() {
-		return mq.Result{Error: fmt.Errorf("DAG is not ready yet")}
+		return mq.Result{Error: fmt.Errorf("unable to process task, error: DAG is not ready yet")}
 	}
 	val := ctx.Value("initial_node")
 	initialNode, ok := val.(string)
@@ -225,4 +235,28 @@ func (tm *DAG) FindInitialNode() *Node {
 		}
 	}
 	return nil
+}
+
+func (tm *DAG) Pause() {
+	tm.paused = true
+	log.Printf("DAG - PAUSED")
+}
+
+func (tm *DAG) Resume() {
+	tm.paused = false
+	log.Printf("DAG - RESUMED")
+}
+
+func (tm *DAG) PauseConsumer(id string) {
+	if node, ok := tm.Nodes[id]; ok {
+		node.consumer.Pause()
+		node.isReady = false
+	}
+}
+
+func (tm *DAG) ResumeConsumer(id string) {
+	if node, ok := tm.Nodes[id]; ok {
+		node.consumer.Resume()
+		node.isReady = true
+	}
 }

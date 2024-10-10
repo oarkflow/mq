@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"runtime"
 	"time"
 )
 
@@ -72,17 +73,22 @@ type Options struct {
 	hmacKey             json.RawMessage
 	enableEncryption    bool
 	queueSize           int
+	numOfWorkers        int
+	maxMemoryLoad       int64
+	enableWorkerPool    bool
 }
 
 func defaultOptions() Options {
 	return Options{
-		syncMode:      false,
 		brokerAddr:    ":8080",
 		maxRetries:    5,
 		initialDelay:  2 * time.Second,
 		maxBackoff:    20 * time.Second,
 		jitterPercent: 0.5,
 		queueSize:     100,
+		hmacKey:       []byte(`a9f4b9415485b70275673b5920182796ea497b5e093ead844a43ea5d77cbc24f`),
+		numOfWorkers:  runtime.NumCPU(),
+		maxMemoryLoad: 5000000,
 	}
 }
 
@@ -103,6 +109,15 @@ func WithNotifyResponse(handler func(ctx context.Context, result Result)) Option
 	}
 }
 
+func WithWorkerPool(queueSize, numOfWorkers int, maxMemoryLoad int64) Option {
+	return func(opts *Options) {
+		opts.enableWorkerPool = true
+		opts.queueSize = queueSize
+		opts.numOfWorkers = numOfWorkers
+		opts.maxMemoryLoad = maxMemoryLoad
+	}
+}
+
 func WithConsumerOnSubscribe(handler func(ctx context.Context, topic, consumerName string)) Option {
 	return func(opts *Options) {
 		opts.consumerOnSubscribe = handler
@@ -115,11 +130,16 @@ func WithConsumerOnClose(handler func(ctx context.Context, topic, consumerName s
 	}
 }
 
-func WithEncryption(aesKey, hmacKey json.RawMessage, enableEncryption bool) Option {
+func WithSecretKey(aesKey json.RawMessage) Option {
 	return func(opts *Options) {
 		opts.aesKey = aesKey
+		opts.enableEncryption = true
+	}
+}
+
+func WithHMACKey(hmacKey json.RawMessage) Option {
+	return func(opts *Options) {
 		opts.hmacKey = hmacKey
-		opts.enableEncryption = enableEncryption
 	}
 }
 

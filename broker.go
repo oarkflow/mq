@@ -24,8 +24,9 @@ type QueuedTask struct {
 }
 
 type consumer struct {
-	id   string
-	conn net.Conn
+	id    string
+	state consts.ConsumerState
+	conn  net.Conn
 }
 
 type publisher struct {
@@ -48,6 +49,10 @@ func NewBroker(opts ...Option) *Broker {
 		consumers:  xsync.NewMap[string, *consumer](),
 		opts:       options,
 	}
+}
+
+func (b *Broker) Options() Options {
+	return b.opts
 }
 
 func (b *Broker) OnClose(ctx context.Context, conn net.Conn) error {
@@ -110,6 +115,16 @@ func (b *Broker) OnMessage(ctx context.Context, msg *codec.Message, conn net.Con
 		b.MessageResponseHandler(ctx, msg)
 	case consts.MESSAGE_ACK:
 		b.MessageAck(ctx, msg)
+	case consts.MESSAGE_DENY:
+		b.MessageDeny(ctx, msg)
+	case consts.CONSUMER_PAUSED:
+		b.OnConsumerPause(ctx, msg)
+	case consts.CONSUMER_RESUMED:
+		b.OnConsumerResume(ctx, msg)
+	case consts.CONSUMER_STOPPED:
+		b.OnConsumerStop(ctx, msg)
+	default:
+		log.Printf("BROKER - UNKNOWN_COMMAND ~> %s on %s", msg.Command, msg.Queue)
 	}
 }
 
@@ -117,6 +132,43 @@ func (b *Broker) MessageAck(ctx context.Context, msg *codec.Message) {
 	consumerID, _ := GetConsumerID(ctx)
 	taskID, _ := jsonparser.GetString(msg.Payload, "id")
 	log.Printf("BROKER - MESSAGE_ACK ~> %s on %s for Task %s", consumerID, msg.Queue, taskID)
+}
+
+func (b *Broker) MessageDeny(ctx context.Context, msg *codec.Message) {
+	consumerID, _ := GetConsumerID(ctx)
+	taskID, _ := jsonparser.GetString(msg.Payload, "id")
+	taskError, _ := jsonparser.GetString(msg.Payload, "error")
+	log.Printf("BROKER - MESSAGE_DENY ~> %s on %s for Task %s, Error: %s", consumerID, msg.Queue, taskID, taskError)
+}
+
+func (b *Broker) OnConsumerPause(ctx context.Context, msg *codec.Message) {
+	consumerID, _ := GetConsumerID(ctx)
+	if consumerID != "" {
+		if con, exists := b.consumers.Get(consumerID); exists {
+			con.state = consts.ConsumerStatePaused
+			log.Printf("BROKER - CONSUMER ~> Paused %s", consumerID)
+		}
+	}
+}
+
+func (b *Broker) OnConsumerStop(ctx context.Context, msg *codec.Message) {
+	consumerID, _ := GetConsumerID(ctx)
+	if consumerID != "" {
+		if con, exists := b.consumers.Get(consumerID); exists {
+			con.state = consts.ConsumerStateStopped
+			log.Printf("BROKER - CONSUMER ~> Stopped %s", consumerID)
+		}
+	}
+}
+
+func (b *Broker) OnConsumerResume(ctx context.Context, msg *codec.Message) {
+	consumerID, _ := GetConsumerID(ctx)
+	if consumerID != "" {
+		if con, exists := b.consumers.Get(consumerID); exists {
+			con.state = consts.ConsumerStateActive
+			log.Printf("BROKER - CONSUMER ~> Resumed %s", consumerID)
+		}
+	}
 }
 
 func (b *Broker) MessageResponseHandler(ctx context.Context, msg *codec.Message) {
@@ -170,7 +222,7 @@ func (b *Broker) PublishHandler(ctx context.Context, conn net.Conn, msg *codec.M
 }
 
 func (b *Broker) SubscribeHandler(ctx context.Context, conn net.Conn, msg *codec.Message) {
-	consumerID := b.addConsumer(ctx, msg.Queue, conn)
+	consumerID := b.AddConsumer(ctx, msg.Queue, conn)
 	ack := codec.NewMessage(consts.SUBSCRIBE_ACK, nil, msg.Queue, msg.Headers)
 	if err := b.send(conn, ack); err != nil {
 		log.Printf("Error sending SUBSCRIBE_ACK: %v\n", err)
@@ -181,7 +233,7 @@ func (b *Broker) SubscribeHandler(ctx context.Context, conn net.Conn, msg *codec
 	go func() {
 		select {
 		case <-ctx.Done():
-			b.removeConsumer(msg.Queue, consumerID)
+			b.RemoveConsumer(consumerID, msg.Queue)
 		}
 	}()
 }
@@ -267,7 +319,7 @@ func (b *Broker) addPublisher(ctx context.Context, queueName string, conn net.Co
 	return con
 }
 
-func (b *Broker) addConsumer(ctx context.Context, queueName string, conn net.Conn) string {
+func (b *Broker) AddConsumer(ctx context.Context, queueName string, conn net.Conn) string {
 	consumerID, ok := GetConsumerID(ctx)
 	q, ok := b.queues.Get(queueName)
 	if !ok {
@@ -280,15 +332,66 @@ func (b *Broker) addConsumer(ctx context.Context, queueName string, conn net.Con
 	return consumerID
 }
 
-func (b *Broker) removeConsumer(queueName, consumerID string) {
-	if queue, ok := b.queues.Get(queueName); ok {
+func (b *Broker) RemoveConsumer(consumerID string, queues ...string) {
+	if len(queues) > 0 {
+		for _, queueName := range queues {
+			if queue, ok := b.queues.Get(queueName); ok {
+				con, ok := queue.consumers.Get(consumerID)
+				if ok {
+					con.conn.Close()
+					queue.consumers.Del(consumerID)
+				}
+				b.queues.Del(queueName)
+			}
+		}
+		return
+	}
+	b.queues.ForEach(func(queueName string, queue *Queue) bool {
 		con, ok := queue.consumers.Get(consumerID)
 		if ok {
 			con.conn.Close()
 			queue.consumers.Del(consumerID)
 		}
 		b.queues.Del(queueName)
+		return true
+	})
+}
+
+func (b *Broker) handleConsumer(cmd consts.CMD, state consts.ConsumerState, consumerID string, queues ...string) {
+	fn := func(queue *Queue) {
+		con, ok := queue.consumers.Get(consumerID)
+		if ok {
+			ack := codec.NewMessage(cmd, []byte("{}"), queue.name, map[string]string{consts.ConsumerKey: consumerID})
+			err := b.send(con.conn, ack)
+			if err == nil {
+				con.state = state
+			}
+		}
 	}
+	if len(queues) > 0 {
+		for _, queueName := range queues {
+			if queue, ok := b.queues.Get(queueName); ok {
+				fn(queue)
+			}
+		}
+		return
+	}
+	b.queues.ForEach(func(queueName string, queue *Queue) bool {
+		fn(queue)
+		return true
+	})
+}
+
+func (b *Broker) PauseConsumer(consumerID string, queues ...string) {
+	b.handleConsumer(consts.CONSUMER_PAUSE, consts.ConsumerStatePaused, consumerID, queues...)
+}
+
+func (b *Broker) ResumeConsumer(consumerID string, queues ...string) {
+	b.handleConsumer(consts.CONSUMER_RESUME, consts.ConsumerStateActive, consumerID, queues...)
+}
+
+func (b *Broker) StopConsumer(consumerID string, queues ...string) {
+	b.handleConsumer(consts.CONSUMER_STOP, consts.ConsumerStateStopped, consumerID, queues...)
 }
 
 func (b *Broker) readMessage(ctx context.Context, c net.Conn) error {
@@ -323,13 +426,22 @@ func (b *Broker) dispatchWorker(queue *Queue) {
 
 func (b *Broker) dispatchTaskToConsumer(queue *Queue, task *QueuedTask) bool {
 	var consumerFound bool
+	var err error
 	queue.consumers.ForEach(func(_ string, con *consumer) bool {
+		if con.state != consts.ConsumerStateActive {
+			err = fmt.Errorf("consumer %s is not active", con.id)
+			return false
+		}
 		if err := b.send(con.conn, task.Message); err == nil {
 			consumerFound = true
-			return false // break the loop once a consumer is found
+			return false
 		}
 		return true
 	})
+	if err != nil {
+		log.Println(err.Error())
+		return false
+	}
 	if !consumerFound {
 		log.Printf("No available consumers for queue %s, retrying...", queue.name)
 	}

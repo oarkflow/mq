@@ -2,7 +2,7 @@ package consts
 
 type CMD byte
 
-func (c CMD) IsValid() bool { return c >= PING && c <= STOP }
+func (c CMD) IsValid() bool { return c >= PING && c <= CONSUMER_STOP }
 
 const (
 	PING CMD = iota + 1
@@ -11,13 +11,29 @@ const (
 
 	MESSAGE_SEND
 	MESSAGE_RESPONSE
+	MESSAGE_DENY
 	MESSAGE_ACK
 	MESSAGE_ERROR
 
 	PUBLISH
 	PUBLISH_ACK
 	RESPONSE
-	STOP
+
+	CONSUMER_PAUSE
+	CONSUMER_RESUME
+	CONSUMER_STOP
+
+	CONSUMER_PAUSED
+	CONSUMER_RESUMED
+	CONSUMER_STOPPED
+)
+
+type ConsumerState byte
+
+const (
+	ConsumerStateActive ConsumerState = iota
+	ConsumerStatePaused
+	ConsumerStateStopped
 )
 
 func (c CMD) String() string {
@@ -30,6 +46,8 @@ func (c CMD) String() string {
 		return "SUBSCRIBE_ACK"
 	case MESSAGE_SEND:
 		return "MESSAGE_SEND"
+	case MESSAGE_DENY:
+		return "MESSAGE_DENY"
 	case MESSAGE_RESPONSE:
 		return "MESSAGE_RESPONSE"
 	case MESSAGE_ERROR:
@@ -40,8 +58,18 @@ func (c CMD) String() string {
 		return "PUBLISH"
 	case PUBLISH_ACK:
 		return "PUBLISH_ACK"
-	case STOP:
-		return "STOP"
+	case CONSUMER_PAUSE:
+		return "CONSUMER_PAUSE"
+	case CONSUMER_RESUME:
+		return "CONSUMER_RESUME"
+	case CONSUMER_STOP:
+		return "CONSUMER_STOP"
+	case CONSUMER_PAUSED:
+		return "CONSUMER_PAUSED"
+	case CONSUMER_RESUMED:
+		return "CONSUMER_RESUMED"
+	case CONSUMER_STOPPED:
+		return "CONSUMER_STOPPED"
 	case RESPONSE:
 		return "RESPONSE"
 	default:

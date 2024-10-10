@@ -23,6 +23,7 @@ type Consumer struct {
 	conn    net.Conn
 	queue   string
 	opts    Options
+	pool    *Pool
 }
 
 // NewConsumer initializes a new consumer with the provided options.
@@ -44,8 +45,9 @@ func (c *Consumer) receive(conn net.Conn) (*codec.Message, error) {
 	return codec.ReadMessage(conn, c.opts.aesKey, c.opts.hmacKey, c.opts.enableEncryption)
 }
 
-// Close closes the consumer's connection.
+// Close closes the consumer's connection and stops the worker pool.
 func (c *Consumer) Close() error {
+	c.pool.Stop()
 	return c.conn.Close()
 }
 
@@ -55,11 +57,10 @@ func (c *Consumer) subscribe(ctx context.Context, queue string) error {
 		consts.ConsumerKey: c.id,
 		consts.ContentType: consts.TypeJson,
 	})
-	msg := codec.NewMessage(consts.SUBSCRIBE, nil, queue, headers)
+	msg := codec.NewMessage(consts.SUBSCRIBE, []byte("{}"), queue, headers)
 	if err := c.send(c.conn, msg); err != nil {
 		return err
 	}
-
 	return c.waitForAck(c.conn)
 }
 
@@ -73,6 +74,30 @@ func (c *Consumer) OnError(_ context.Context, conn net.Conn, err error) {
 }
 
 func (c *Consumer) OnMessage(ctx context.Context, msg *codec.Message, conn net.Conn) {
+	switch msg.Command {
+	case consts.PUBLISH:
+		c.ConsumeMessage(ctx, msg, conn)
+	case consts.CONSUMER_PAUSE:
+		err := c.Pause()
+		if err != nil {
+			log.Printf("Unable to pause consumer: %v", err)
+		}
+	case consts.CONSUMER_RESUME:
+		err := c.Resume()
+		if err != nil {
+			log.Printf("Unable to resume consumer: %v", err)
+		}
+	case consts.CONSUMER_STOP:
+		err := c.Stop()
+		if err != nil {
+			log.Printf("Unable to stop consumer: %v", err)
+		}
+	default:
+		log.Printf("CONSUMER - UNKNOWN_COMMAND ~> %s on %s", msg.Command, msg.Queue)
+	}
+}
+
+func (c *Consumer) ConsumeMessage(ctx context.Context, msg *codec.Message, conn net.Conn) {
 	headers := WithHeaders(ctx, map[string]string{
 		consts.ConsumerKey: c.id,
 		consts.ContentType: consts.TypeJson,
@@ -89,11 +114,20 @@ func (c *Consumer) OnMessage(ctx context.Context, msg *codec.Message, conn net.C
 		log.Printf("Error unmarshalling message: %v", err)
 		return
 	}
+
 	ctx = SetHeaders(ctx, map[string]string{consts.QueueKey: msg.Queue})
-	result := c.ProcessTask(ctx, &task)
-	err = c.OnResponse(ctx, result)
-	if err != nil {
-		log.Printf("Error on message callback: %v", err)
+	if !c.opts.enableWorkerPool {
+		result := c.ProcessTask(ctx, &task)
+		err = c.OnResponse(ctx, result)
+		if err != nil {
+			log.Printf("Error on message callback: %v", err)
+		}
+		return
+	}
+	// Add the task to the worker pool
+	if err := c.pool.AddTask(ctx, &task); err != nil {
+		c.sendDenyMessage(ctx, taskID, msg.Queue, err)
+		return
 	}
 }
 
@@ -118,6 +152,17 @@ func (c *Consumer) OnResponse(ctx context.Context, result Result) error {
 		return fmt.Errorf("failed to send MESSAGE_RESPONSE: %v", err)
 	}
 	return nil
+}
+
+func (c *Consumer) sendDenyMessage(ctx context.Context, taskID, queue string, err error) {
+	headers := WithHeaders(ctx, map[string]string{
+		consts.ConsumerKey: c.id,
+		consts.ContentType: consts.TypeJson,
+	})
+	reply := codec.NewMessage(consts.MESSAGE_DENY, []byte(fmt.Sprintf(`{"id":"%s", "error":"%s"}`, taskID, err.Error())), queue, headers)
+	if sendErr := c.send(c.conn, reply); sendErr != nil {
+		log.Printf("failed to send MESSAGE_DENY for task %s: %v", taskID, sendErr)
+	}
 }
 
 // ProcessTask handles a received task message and invokes the appropriate handler.
@@ -171,10 +216,11 @@ func (c *Consumer) Consume(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-
+	c.pool = NewPool(c.opts.numOfWorkers, c.opts.queueSize, c.opts.maxMemoryLoad, c.ProcessTask, c.OnResponse, c.conn)
 	if err := c.subscribe(ctx, c.queue); err != nil {
 		return fmt.Errorf("failed to connect to server for queue %s: %v", c.queue, err)
 	}
+	c.pool.Start(c.opts.numOfWorkers)
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
@@ -201,4 +247,54 @@ func (c *Consumer) waitForAck(conn net.Conn) error {
 		return nil
 	}
 	return fmt.Errorf("expected SUBSCRIBE_ACK, got: %v", msg.Command)
+}
+
+// Additional methods for Pause, Resume, and Stop
+
+func (c *Consumer) Pause() error {
+	if err := c.sendPauseMessage(); err != nil {
+		return err
+	}
+	c.pool.Pause()
+	return nil
+}
+
+func (c *Consumer) sendPauseMessage() error {
+	headers := WithHeaders(context.Background(), map[string]string{
+		consts.ConsumerKey: c.id,
+	})
+	msg := codec.NewMessage(consts.CONSUMER_PAUSED, nil, c.queue, headers)
+	return c.send(c.conn, msg)
+}
+
+func (c *Consumer) Resume() error {
+	if err := c.sendResumeMessage(); err != nil {
+		return err
+	}
+	c.pool.Resume()
+	return nil
+}
+
+func (c *Consumer) sendResumeMessage() error {
+	headers := WithHeaders(context.Background(), map[string]string{
+		consts.ConsumerKey: c.id,
+	})
+	msg := codec.NewMessage(consts.CONSUMER_RESUMED, nil, c.queue, headers)
+	return c.send(c.conn, msg)
+}
+
+func (c *Consumer) Stop() error {
+	if err := c.sendStopMessage(); err != nil {
+		return err
+	}
+	c.pool.Stop()
+	return nil
+}
+
+func (c *Consumer) sendStopMessage() error {
+	headers := WithHeaders(context.Background(), map[string]string{
+		consts.ConsumerKey: c.id,
+	})
+	msg := codec.NewMessage(consts.CONSUMER_STOPPED, nil, c.queue, headers)
+	return c.send(c.conn, msg)
 }

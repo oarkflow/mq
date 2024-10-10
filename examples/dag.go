@@ -15,7 +15,11 @@ import (
 )
 
 var (
-	d = dag.NewDAG(mq.WithSyncMode(false), mq.WithNotifyResponse(tasks.NotifyResponse))
+	d = dag.NewDAG(
+		mq.WithNotifyResponse(tasks.NotifyResponse),
+		mq.WithWorkerPool(100, 4, 5000000),
+		mq.WithSecretKey([]byte("wKWa6GKdBd0njDKNQoInBbh6P0KTjmob")),
+	)
 	// d = dag.NewDAG(mq.WithSyncMode(true), mq.WithTLS(true, "./certs/server.crt", "./certs/server.key"), mq.WithCAPath("./certs/ca.cert"))
 )
 
@@ -34,6 +38,24 @@ func main() {
 	d.AddEdge("E", "F")
 	http.HandleFunc("POST /publish", requestHandler("publish"))
 	http.HandleFunc("POST /request", requestHandler("request"))
+	http.HandleFunc("/pause-consumer/{id}", func(writer http.ResponseWriter, request *http.Request) {
+		id := request.PathValue("id")
+		if id != "" {
+			d.PauseConsumer(id)
+		}
+	})
+	http.HandleFunc("/resume-consumer/{id}", func(writer http.ResponseWriter, request *http.Request) {
+		id := request.PathValue("id")
+		if id != "" {
+			d.ResumeConsumer(id)
+		}
+	})
+	http.HandleFunc("/pause", func(writer http.ResponseWriter, request *http.Request) {
+		d.Pause()
+	})
+	http.HandleFunc("/resume", func(writer http.ResponseWriter, request *http.Request) {
+		d.Resume()
+	})
 	err := d.Start(context.TODO(), ":8083")
 	if err != nil {
 		panic(err)

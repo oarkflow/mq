@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"sync"
 
 	"github.com/oarkflow/mq/consts"
 )
@@ -15,7 +16,7 @@ type Message struct {
 	Queue   string            `json:"q"`
 	Command consts.CMD        `json:"c"`
 	Payload json.RawMessage   `json:"p"`
-	// Metadata map[string]any    `json:"m"`
+	m       sync.RWMutex
 }
 
 func NewMessage(cmd consts.CMD, payload json.RawMessage, queue string, headers map[string]string) *Message {
@@ -24,14 +25,13 @@ func NewMessage(cmd consts.CMD, payload json.RawMessage, queue string, headers m
 		Queue:   queue,
 		Command: cmd,
 		Payload: payload,
-		// Metadata: nil,
 	}
 }
 
 func (m *Message) Serialize(aesKey, hmacKey []byte, encrypt bool) ([]byte, string, error) {
+	m.m.Lock()
+	defer m.m.Unlock()
 	var buf bytes.Buffer
-
-	// Serialize Headers, Topic, Command, Payload, and Metadata
 	if err := writeLengthPrefixedJSON(&buf, m.Headers); err != nil {
 		return nil, "", fmt.Errorf("error serializing headers: %v", err)
 	}
@@ -44,56 +44,37 @@ func (m *Message) Serialize(aesKey, hmacKey []byte, encrypt bool) ([]byte, strin
 	if err := writePayload(&buf, aesKey, m.Payload, encrypt); err != nil {
 		return nil, "", err
 	}
-	/*if err := writeLengthPrefixedJSON(&buf, m.Metadata); err != nil {
-		return nil, "", fmt.Errorf("error serializing metadata: %v", err)
-	}*/
-
-	// Calculate HMAC
 	messageBytes := buf.Bytes()
 	hmacSignature := CalculateHMAC(hmacKey, messageBytes)
-
 	return messageBytes, hmacSignature, nil
 }
 
 func Deserialize(data, aesKey, hmacKey []byte, receivedHMAC string, decrypt bool) (*Message, error) {
 	if !VerifyHMAC(hmacKey, data, receivedHMAC) {
-		return nil, fmt.Errorf("HMAC verification failed")
+		return nil, fmt.Errorf("HMAC verification failed %s", string(hmacKey))
 	}
-
 	buf := bytes.NewReader(data)
-
-	// Deserialize Headers, Topic, Command, Payload, and Metadata
 	headers := make(map[string]string)
 	if err := readLengthPrefixedJSON(buf, &headers); err != nil {
 		return nil, fmt.Errorf("error deserializing headers: %v", err)
 	}
-
 	topic, err := readLengthPrefixedString(buf)
 	if err != nil {
 		return nil, fmt.Errorf("error deserializing topic: %v", err)
 	}
-
 	var command consts.CMD
 	if err := binary.Read(buf, binary.LittleEndian, &command); err != nil {
 		return nil, fmt.Errorf("error deserializing command: %v", err)
 	}
-
 	payload, err := readPayload(buf, aesKey, decrypt)
 	if err != nil {
 		return nil, fmt.Errorf("error deserializing payload: %v", err)
 	}
-
-	/*metadata := make(map[string]any)
-	if err := readLengthPrefixedJSON(buf, &metadata); err != nil {
-		return nil, fmt.Errorf("error deserializing metadata: %v", err)
-	}*/
-
 	return &Message{
 		Headers: headers,
 		Queue:   topic,
 		Command: command,
 		Payload: payload,
-		// Metadata: metadata,
 	}, nil
 }
 
@@ -102,11 +83,9 @@ func SendMessage(conn io.Writer, msg *Message, aesKey, hmacKey []byte, encrypt b
 	if err != nil {
 		return fmt.Errorf("error serializing message: %v", err)
 	}
-
 	if err := writeMessageWithHMAC(conn, sentData, hmacSignature); err != nil {
 		return fmt.Errorf("error sending message: %v", err)
 	}
-
 	return nil
 }
 
@@ -115,7 +94,6 @@ func ReadMessage(conn io.Reader, aesKey, hmacKey []byte, decrypt bool) (*Message
 	if err != nil {
 		return nil, err
 	}
-
 	return Deserialize(data, aesKey, hmacKey, receivedHMAC, decrypt)
 }
 
@@ -195,7 +173,6 @@ func readPayload(r *bytes.Reader, aesKey []byte, decrypt bool) (json.RawMessage,
 	if err != nil {
 		return nil, err
 	}
-
 	var payloadBytes []byte
 	if decrypt {
 		nonce := make([]byte, 12)
@@ -209,12 +186,10 @@ func readPayload(r *bytes.Reader, aesKey []byte, decrypt bool) (json.RawMessage,
 	} else {
 		payloadBytes = encryptedPayload
 	}
-
 	var payload json.RawMessage
 	if err := json.Unmarshal(payloadBytes, &payload); err != nil {
 		return nil, fmt.Errorf("error unmarshalling payload: %v", err)
 	}
-
 	return payload, nil
 }
 func writeMessageWithHMAC(conn io.Writer, messageBytes []byte, hmacSignature string) error {
