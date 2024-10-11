@@ -25,7 +25,7 @@ func (r Result) Unmarshal(data any) error {
 	return json.Unmarshal(r.Payload, data)
 }
 
-func HandleError(ctx context.Context, err error, status ...string) Result {
+func HandleError(_ context.Context, err error, status ...string) Result {
 	st := "Failed"
 	if len(status) > 0 {
 		st = status[0]
