@@ -24,14 +24,14 @@ type QueuedTask struct {
 }
 
 type consumer struct {
+	conn  net.Conn
 	id    string
 	state consts.ConsumerState
-	conn  net.Conn
 }
 
 type publisher struct {
-	id   string
 	conn net.Conn
+	id   string
 }
 
 type Broker struct {

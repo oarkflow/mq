@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -42,9 +43,9 @@ func main() {
 
 	// Classify edges
 	// d.ClassifyEdges()
-	fmt.Println(d.ExportDOT())
+	// fmt.Println(d.ExportDOT())
 
-	/*http.HandleFunc("POST /publish", requestHandler("publish"))
+	http.HandleFunc("POST /publish", requestHandler("publish"))
 	http.HandleFunc("POST /request", requestHandler("request"))
 	http.HandleFunc("/pause-consumer/{id}", func(writer http.ResponseWriter, request *http.Request) {
 		id := request.PathValue("id")
@@ -67,7 +68,7 @@ func main() {
 	err := d.Start(context.TODO(), ":8083")
 	if err != nil {
 		panic(err)
-	}*/
+	}
 }
 
 func requestHandler(requestType string) func(w http.ResponseWriter, r *http.Request) {

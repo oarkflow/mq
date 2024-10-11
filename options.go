@@ -9,13 +9,13 @@ import (
 )
 
 type Result struct {
-	Payload     json.RawMessage `json:"payload"`
-	Topic       string          `json:"topic"`
 	CreatedAt   time.Time       `json:"created_at"`
 	ProcessedAt time.Time       `json:"processed_at,omitempty"`
-	TaskID      string          `json:"task_id"`
 	Error       error           `json:"error,omitempty"`
+	Topic       string          `json:"topic"`
+	TaskID      string          `json:"task_id"`
 	Status      string          `json:"status"`
+	Payload     json.RawMessage `json:"payload"`
 }
 
 func (r Result) Unmarshal(data any) error {
@@ -51,30 +51,30 @@ func (r Result) WithData(status string, data []byte) Result {
 }
 
 type TLSConfig struct {
-	UseTLS   bool
 	CertPath string
 	KeyPath  string
 	CAPath   string
+	UseTLS   bool
 }
 
 type Options struct {
-	syncMode            bool
-	brokerAddr          string
-	callback            []func(context.Context, Result) Result
-	maxRetries          int
 	consumerOnSubscribe func(ctx context.Context, topic, consumerName string)
 	consumerOnClose     func(ctx context.Context, topic, consumerName string)
 	notifyResponse      func(context.Context, Result)
+	tlsConfig           TLSConfig
+	brokerAddr          string
+	callback            []func(context.Context, Result) Result
+	aesKey              json.RawMessage
+	hmacKey             json.RawMessage
+	maxRetries          int
 	initialDelay        time.Duration
 	maxBackoff          time.Duration
 	jitterPercent       float64
-	tlsConfig           TLSConfig
-	aesKey              json.RawMessage
-	hmacKey             json.RawMessage
-	enableEncryption    bool
 	queueSize           int
 	numOfWorkers        int
 	maxMemoryLoad       int64
+	syncMode            bool
+	enableEncryption    bool
 	enableWorkerPool    bool
 }
 

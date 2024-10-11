@@ -18,19 +18,19 @@ type QueueTask struct {
 type Callback func(ctx context.Context, result Result) error
 
 type Pool struct {
+	conn                      net.Conn
+	taskQueue                 chan QueueTask
+	stop                      chan struct{}
+	handler                   Handler
+	callback                  Callback
+	workerAdjust              chan int // Channel for adjusting workers dynamically
+	wg                        sync.WaitGroup
 	totalMemoryUsed           int64
 	completedTasks            int
 	errorCount, maxMemoryLoad int64
 	totalTasks                int
 	numOfWorkers              int32 // Change to int32 for atomic operations
-	taskQueue                 chan QueueTask
-	wg                        sync.WaitGroup
 	paused                    bool
-	stop                      chan struct{}
-	handler                   Handler
-	callback                  Callback
-	conn                      net.Conn
-	workerAdjust              chan int // Channel for adjusting workers dynamically
 }
 
 func NewPool(

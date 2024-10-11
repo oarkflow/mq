@@ -21,12 +21,12 @@ type Processor interface {
 }
 
 type Consumer struct {
-	id      string
-	handler Handler
 	conn    net.Conn
+	handler Handler
+	pool    *Pool
+	id      string
 	queue   string
 	opts    Options
-	pool    *Pool
 }
 
 func NewConsumer(id string, queue string, handler Handler, opts ...Option) *Consumer {

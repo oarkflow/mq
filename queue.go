@@ -5,9 +5,9 @@ import (
 )
 
 type Queue struct {
-	name      string
 	consumers xsync.IMap[string, *consumer]
 	tasks     chan *QueuedTask // channel to hold tasks
+	name      string
 }
 
 func newQueue(name string, queueSize int) *Queue {
