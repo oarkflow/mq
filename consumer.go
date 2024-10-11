@@ -64,7 +64,7 @@ func (c *Consumer) subscribe(ctx context.Context, queue string) error {
 	return c.waitForAck(c.conn)
 }
 
-func (c *Consumer) OnClose(ctx context.Context, _ net.Conn) error {
+func (c *Consumer) OnClose(_ context.Context, _ net.Conn) error {
 	fmt.Println("Consumer closed")
 	return nil
 }
@@ -138,7 +138,6 @@ func (c *Consumer) OnResponse(ctx context.Context, result Result) error {
 		consts.QueueKey:    result.Topic,
 		consts.ContentType: consts.TypeJson,
 	})
-
 	if result.Status == "" {
 		if result.Error != nil {
 			result.Status = "FAILED"
@@ -173,8 +172,8 @@ func (c *Consumer) ProcessTask(ctx context.Context, msg *Task) Result {
 	return result
 }
 
-// AttemptConnect tries to establish a connection to the server, with TLS or without, based on the configuration.
-func (c *Consumer) AttemptConnect() error {
+// attemptConnect tries to establish a connection to the server, with TLS or without, based on the configuration.
+func (c *Consumer) attemptConnect() error {
 	var err error
 	delay := c.opts.initialDelay
 	for i := 0; i < c.opts.maxRetries; i++ {
@@ -212,7 +211,7 @@ func (c *Consumer) readMessage(ctx context.Context, conn net.Conn) error {
 
 // Consume starts the consumer to consume tasks from the queues.
 func (c *Consumer) Consume(ctx context.Context) error {
-	err := c.AttemptConnect()
+	err := c.attemptConnect()
 	if err != nil {
 		return err
 	}
