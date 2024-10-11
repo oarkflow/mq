@@ -74,17 +74,25 @@ type DAG struct {
 }
 
 func (tm *DAG) Consume(ctx context.Context) error {
-	for _, con := range tm.nodes {
-		if con.isReady {
-			go func(con *Node) {
-				time.Sleep(1 * time.Second)
-				err := con.processor.Consume(ctx)
-				if err != nil {
-					panic(err)
-				}
-			}(con)
-		} else {
-			log.Printf("[WARNING] - Consumer %s is not ready yet", con.Key)
+	if !tm.server.SyncMode() {
+		go func() {
+			err := tm.server.Start(ctx)
+			if err != nil {
+				panic(err)
+			}
+		}()
+		for _, con := range tm.nodes {
+			if con.isReady {
+				go func(con *Node) {
+					time.Sleep(1 * time.Second)
+					err := con.processor.Consume(ctx)
+					if err != nil {
+						panic(err)
+					}
+				}(con)
+			} else {
+				log.Printf("[WARNING] - Consumer %s is not ready yet", con.Key)
+			}
 		}
 	}
 	return nil
@@ -148,15 +156,7 @@ func (tm *DAG) GetStartNode() string {
 }
 
 func (tm *DAG) Start(ctx context.Context, addr string) error {
-	if !tm.server.SyncMode() {
-		go func() {
-			err := tm.server.Start(ctx)
-			if err != nil {
-				panic(err)
-			}
-		}()
-		tm.Consume(ctx)
-	}
+	go tm.Consume(ctx)
 	log.Printf("DAG - HTTP_SERVER ~> started on %s", addr)
 	config := tm.server.TLSConfig()
 	if config.UseTLS {
