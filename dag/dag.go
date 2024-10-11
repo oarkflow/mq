@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -24,11 +25,11 @@ func NewTask(id string, payload json.RawMessage, nodeKey string) *mq.Task {
 
 type EdgeType int
 
-func (c EdgeType) IsValid() bool { return c >= SimpleEdge && c <= LoopEdge }
+func (c EdgeType) IsValid() bool { return c >= Simple && c <= Iterator }
 
 const (
-	SimpleEdge EdgeType = iota
-	LoopEdge
+	Simple EdgeType = iota
+	Iterator
 )
 
 type Node struct {
@@ -50,8 +51,9 @@ type Edge struct {
 }
 
 type (
-	When string
-	Then string
+	FromNode string
+	When     string
+	Then     string
 )
 
 type DAG struct {
@@ -59,7 +61,7 @@ type DAG struct {
 	nodes       map[string]*Node
 	server      *mq.Broker
 	taskContext map[string]*TaskManager
-	conditions  map[string]map[When]Then
+	conditions  map[FromNode]map[When]Then
 	mu          sync.RWMutex
 	paused      bool
 	opts        []mq.Option
@@ -69,12 +71,105 @@ func NewDAG(opts ...mq.Option) *DAG {
 	d := &DAG{
 		nodes:       make(map[string]*Node),
 		taskContext: make(map[string]*TaskManager),
-		conditions:  make(map[string]map[When]Then),
+		conditions:  make(map[FromNode]map[When]Then),
 	}
 	opts = append(opts, mq.WithCallback(d.onTaskCallback), mq.WithConsumerOnSubscribe(d.onConsumerJoin), mq.WithConsumerOnClose(d.onConsumerClose))
 	d.server = mq.NewBroker(opts...)
 	d.opts = opts
 	return d
+}
+
+// PrintGraph prints the DAG's adjacency list
+func (tm *DAG) PrintGraph() {
+	tm.mu.RLock()
+	defer tm.mu.RUnlock()
+
+	fmt.Println("DAG Graph structure:")
+	for _, node := range tm.nodes {
+		fmt.Printf("Node: %s (%s) -> ", node.Name, node.Key)
+		if conditions, ok := tm.conditions[FromNode(node.Key)]; ok {
+			var c []string
+			for when, then := range conditions {
+				if target, ok := tm.nodes[string(then)]; ok {
+					c = append(c, fmt.Sprintf("If [%s] Then %s (%s)", when, target.Name, target.Key))
+				}
+			}
+			fmt.Println(strings.Join(c, ", "))
+		}
+		var c []string
+		for _, edge := range node.Edges {
+			for _, target := range edge.To {
+				c = append(c, fmt.Sprintf("%s (%s)", target.Name, target.Key))
+			}
+		}
+		fmt.Println(strings.Join(c, ", "))
+	}
+}
+
+func (tm *DAG) ClassifyEdges(startNodes ...string) {
+	startNode := tm.GetStartNode()
+	tm.mu.RLock()
+	defer tm.mu.RUnlock()
+	if len(startNodes) > 0 && startNodes[0] != "" {
+		startNode = startNodes[0]
+	}
+	visited := make(map[string]bool)
+	discoveryTime := make(map[string]int)
+	finishedTime := make(map[string]int)
+	timeVal := 0
+	if startNode == "" {
+		firstNode := tm.findStartNode()
+		if firstNode != nil {
+			startNode = firstNode.Key
+		}
+	}
+	if startNode != "" {
+		tm.dfs(startNode, visited, discoveryTime, finishedTime, &timeVal)
+	}
+}
+
+func (tm *DAG) dfs(v string, visited map[string]bool, discoveryTime, finishedTime map[string]int, timeVal *int) {
+	visited[v] = true
+	*timeVal++
+	discoveryTime[v] = *timeVal
+	node := tm.nodes[v]
+	for _, edge := range node.Edges {
+		for _, adj := range edge.To {
+			switch edge.Type {
+			case Simple:
+				if !visited[adj.Key] {
+					fmt.Printf("Simple Edge: %s -> %s\n", v, adj.Key)
+					tm.dfs(adj.Key, visited, discoveryTime, finishedTime, timeVal)
+				}
+			case Iterator:
+				if !visited[adj.Key] {
+					fmt.Printf("Iterator Edge: %s -> %s\n", v, adj.Key)
+					tm.dfs(adj.Key, visited, discoveryTime, finishedTime, timeVal)
+				}
+			}
+
+		}
+	}
+	tm.handleConditionalEdges(v, visited, discoveryTime, finishedTime, timeVal)
+	*timeVal++
+	finishedTime[v] = *timeVal
+}
+
+// handleConditionalEdges processes the conditional edges based on the task result
+func (tm *DAG) handleConditionalEdges(v string, visited map[string]bool, discoveryTime, finishedTime map[string]int, time *int) {
+	node := tm.nodes[v]
+	for when, then := range tm.conditions[FromNode(node.Key)] {
+		if targetNodeKey, ok := tm.nodes[string(then)]; ok {
+			if !visited[targetNodeKey.Key] {
+				fmt.Printf("Conditional Edge [%s]: %s -> %s\n", when, v, targetNodeKey.Key)
+				tm.dfs(targetNodeKey.Key, visited, discoveryTime, finishedTime, time)
+			} else {
+				if discoveryTime[v] > discoveryTime[targetNodeKey.Key] {
+					fmt.Printf("Conditional Loop Edge [%s]: %s -> %s\n", when, v, targetNodeKey.Key)
+				}
+			}
+		}
+	}
 }
 
 func (tm *DAG) onTaskCallback(ctx context.Context, result mq.Result) mq.Result {
@@ -178,18 +273,18 @@ func (tm *DAG) IsReady() bool {
 	return true
 }
 
-func (tm *DAG) AddCondition(fromNode string, conditions map[When]Then) {
+func (tm *DAG) AddCondition(fromNode FromNode, conditions map[When]Then) {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 	tm.conditions[fromNode] = conditions
 }
 
 func (tm *DAG) AddLoop(from string, targets ...string) {
-	tm.addEdge(LoopEdge, from, targets...)
+	tm.addEdge(Iterator, from, targets...)
 }
 
 func (tm *DAG) AddEdge(from string, targets ...string) {
-	tm.addEdge(SimpleEdge, from, targets...)
+	tm.addEdge(Simple, from, targets...)
 }
 
 func (tm *DAG) addEdge(edgeType EdgeType, from string, targets ...string) {
@@ -257,7 +352,7 @@ func (tm *DAG) findStartNode() *Node {
 
 			}
 		}
-		if cond, ok := tm.conditions[node.Key]; ok {
+		if cond, ok := tm.conditions[FromNode(node.Key)]; ok {
 			for _, target := range cond {
 				connectedNodes[string(target)] = true
 				incomingEdges[string(target)] = true

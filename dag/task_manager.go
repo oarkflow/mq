@@ -82,7 +82,7 @@ func (tm *TaskManager) getConditionalEdges(node *Node, result mq.Result) []Edge 
 	edges := make([]Edge, len(node.Edges))
 	copy(edges, node.Edges)
 	if result.Status != "" {
-		if conditions, ok := tm.dag.conditions[result.Topic]; ok {
+		if conditions, ok := tm.dag.conditions[FromNode(result.Topic)]; ok {
 			if targetNodeKey, ok := conditions[When(result.Status)]; ok {
 				if targetNode, ok := tm.dag.nodes[string(targetNodeKey)]; ok {
 					edges = append(edges, Edge{From: node, To: []*Node{targetNode}})
@@ -113,7 +113,7 @@ func (tm *TaskManager) handleCallback(ctx context.Context, result mq.Result) mq.
 	}
 	for _, edge := range edges {
 		switch edge.Type {
-		case LoopEdge:
+		case Iterator:
 			var items []json.RawMessage
 			err := json.Unmarshal(result.Payload, &items)
 			if err != nil {
@@ -126,7 +126,7 @@ func (tm *TaskManager) handleCallback(ctx context.Context, result mq.Result) mq.
 					go tm.processNode(ctx, target, item)
 				}
 			}
-		case SimpleEdge:
+		case Simple:
 			for _, target := range edge.To {
 				ctx = mq.SetHeaders(ctx, map[string]string{consts.QueueKey: target.Key})
 				go tm.processNode(ctx, target, result.Payload)
