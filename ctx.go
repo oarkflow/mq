@@ -8,10 +8,10 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"sync"
 	"time"
 
 	"github.com/oarkflow/xid"
+	"github.com/oarkflow/xsync"
 
 	"github.com/oarkflow/mq/consts"
 )
@@ -36,28 +36,15 @@ func IsClosed(conn net.Conn) bool {
 		}
 	}
 	return false
-} // HeaderMap wraps a map and a mutex for thread-safe access
-type HeaderMap struct {
-	mu      sync.RWMutex
-	headers map[string]string
-}
-
-// NewHeaderMap initializes a new HeaderMap
-func NewHeaderMap() *HeaderMap {
-	return &HeaderMap{
-		headers: make(map[string]string),
-	}
 }
 
 func SetHeaders(ctx context.Context, headers map[string]string) context.Context {
 	hd, _ := GetHeaders(ctx)
 	if hd == nil {
-		hd = NewHeaderMap()
+		hd = xsync.NewMap[string, string]()
 	}
-	hd.mu.Lock()
-	defer hd.mu.Unlock()
 	for key, val := range headers {
-		hd.headers[key] = val
+		hd.Set(key, val)
 	}
 	return context.WithValue(ctx, consts.HeaderKey, hd)
 }
@@ -65,18 +52,16 @@ func SetHeaders(ctx context.Context, headers map[string]string) context.Context 
 func WithHeaders(ctx context.Context, headers map[string]string) map[string]string {
 	hd, _ := GetHeaders(ctx)
 	if hd == nil {
-		hd = NewHeaderMap()
+		hd = xsync.NewMap[string, string]()
 	}
-	hd.mu.Lock()
-	defer hd.mu.Unlock()
 	for key, val := range headers {
-		hd.headers[key] = val
+		hd.Set(key, val)
 	}
-	return getMapAsRegularMap(hd)
+	return hd.AsMap()
 }
 
-func GetHeaders(ctx context.Context) (*HeaderMap, bool) {
-	headers, ok := ctx.Value(consts.HeaderKey).(*HeaderMap)
+func GetHeaders(ctx context.Context) (xsync.IMap[string, string], bool) {
+	headers, ok := ctx.Value(consts.HeaderKey).(xsync.IMap[string, string])
 	return headers, ok
 }
 
@@ -85,9 +70,7 @@ func GetHeader(ctx context.Context, key string) (string, bool) {
 	if !ok {
 		return "", false
 	}
-	headers.mu.RLock()
-	defer headers.mu.RUnlock()
-	val, ok := headers.headers[key]
+	val, ok := headers.Get(key)
 	return val, ok
 }
 
@@ -113,15 +96,6 @@ func GetAwaitResponse(ctx context.Context) (string, bool) {
 
 func GetPublisherID(ctx context.Context) (string, bool) {
 	return GetHeader(ctx, consts.PublisherKey)
-}
-
-// Helper function to convert HeaderMap to a regular map
-func getMapAsRegularMap(hd *HeaderMap) map[string]string {
-	result := make(map[string]string)
-	for key, value := range hd.headers {
-		result[key] = value
-	}
-	return result
 }
 
 func NewID() string {

@@ -17,7 +17,6 @@ import (
 var (
 	d = dag.NewDAG(
 		mq.WithNotifyResponse(tasks.NotifyResponse),
-		mq.WithWorkerPool(100, 4, 5000000),
 		mq.WithSecretKey([]byte("wKWa6GKdBd0njDKNQoInBbh6P0KTjmob")),
 	)
 	// d = dag.NewDAG(mq.WithSyncMode(true), mq.WithTLS(true, "./certs/server.crt", "./certs/server.key"), mq.WithCAPath("./certs/ca.cert"))

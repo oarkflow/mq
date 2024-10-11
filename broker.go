@@ -198,7 +198,7 @@ func (b *Broker) Publish(ctx context.Context, task *Task, queue string) error {
 	if err != nil {
 		return err
 	}
-	msg := codec.NewMessage(consts.PUBLISH, payload, queue, headers.headers)
+	msg := codec.NewMessage(consts.PUBLISH, payload, queue, headers.AsMap())
 	b.broadcastToConsumers(ctx, msg)
 	return nil
 }
