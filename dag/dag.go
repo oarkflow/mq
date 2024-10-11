@@ -176,28 +176,16 @@ func (tm *DAG) handleConditionalEdges(v string, visited map[string]bool, discove
 func (tm *DAG) ExportDOT() string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("digraph \"%s\" {\n", tm.name))
-
-	// Define a default node shape and style
 	sb.WriteString("  node [shape=box, style=\"rounded,filled\", fillcolor=lightgray, fontname=\"Helvetica\"];\n")
-
-	// Perform topological sorting to order nodes
 	sortedNodes := tm.TopologicalSort()
-
-	// Add nodes in topological order with customized styles
 	for _, nodeKey := range sortedNodes {
 		node := tm.nodes[nodeKey]
-		// Different node color based on the type or status (you can customize this)
 		nodeColor := "lightblue"
-
-		// Customizing the label to include more node information if needed
 		sb.WriteString(fmt.Sprintf("  \"%s\" [label=\"%s\", fillcolor=\"%s\"];\n", node.Key, node.Name, nodeColor))
 	}
-
-	// Add edges (regular, loop, and conditional) with different styles
 	for _, nodeKey := range sortedNodes {
 		node := tm.nodes[nodeKey]
 		for _, edge := range node.Edges {
-			// Apply custom styles to edges based on edge types (Iterator, Conditional, etc.)
 			var edgeStyle string
 			switch edge.Type {
 			case Iterator:
@@ -206,7 +194,6 @@ func (tm *DAG) ExportDOT() string {
 				edgeStyle = "solid"
 			}
 			for _, to := range edge.To {
-				// Different edge colors based on labels, or edge priority
 				edgeColor := "black"
 				if edge.Label == "Iterate" {
 					edgeColor = "blue"
@@ -215,27 +202,22 @@ func (tm *DAG) ExportDOT() string {
 				} else if edge.Label == "FAIL" {
 					edgeColor = "red"
 				}
-
 				sb.WriteString(fmt.Sprintf("  \"%s\" -> \"%s\" [label=\"%s\", color=\"%s\", style=%s];\n", node.Key, to.Key, edge.Label, edgeColor, edgeStyle))
 			}
 		}
 	}
-
-	// Add conditional edges with dotted lines and specific labels
 	for fromNodeKey, conditions := range tm.conditions {
 		for when, then := range conditions {
 			if toNode, ok := tm.nodes[string(then)]; ok {
-				// Style conditional edges differently
+
 				sb.WriteString(fmt.Sprintf("  \"%s\" -> \"%s\" [label=\"%s\", color=\"purple\", style=dotted];\n", fromNodeKey, toNode.Key, when))
 			}
 		}
 	}
-
 	sb.WriteString("}\n")
 	return sb.String()
 }
 
-// TopologicalSort performs topological sorting and returns an ordered list of node keys
 func (tm *DAG) TopologicalSort() []string {
 	visited := make(map[string]bool)
 	stack := []string{}
@@ -245,7 +227,6 @@ func (tm *DAG) TopologicalSort() []string {
 		}
 	}
 
-	// Reverse the stack to get the correct topological order
 	for i, j := 0, len(stack)-1; i < j; i, j = i+1, j-1 {
 		stack[i], stack[j] = stack[j], stack[i]
 	}
@@ -253,7 +234,6 @@ func (tm *DAG) TopologicalSort() []string {
 	return stack
 }
 
-// topologicalSortUtil is a recursive utility function for topological sorting
 func (tm *DAG) topologicalSortUtil(v string, visited map[string]bool, stack *[]string) {
 	visited[v] = true
 	node := tm.nodes[v]
