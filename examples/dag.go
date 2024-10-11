@@ -29,12 +29,15 @@ func main() {
 	d.AddNode("D", tasks.Node4)
 	d.AddNode("E", tasks.Node5)
 	d.AddNode("F", tasks.Node6)
+	d.AddNode("G", tasks.Node7)
+	d.AddNode("H", tasks.Node8)
 
-	d.AddEdge("A", "B", dag.LoopEdge)
+	d.AddLoop("A", "B")
 	d.AddCondition("C", map[string]string{"PASS": "D", "FAIL": "E"})
 	d.AddEdge("B", "C")
 	d.AddEdge("D", "F")
 	d.AddEdge("E", "F")
+	d.AddEdge("F", "G", "H")
 	http.HandleFunc("POST /publish", requestHandler("publish"))
 	http.HandleFunc("POST /request", requestHandler("request"))
 	http.HandleFunc("/pause-consumer/{id}", func(writer http.ResponseWriter, request *http.Request) {

@@ -55,6 +55,22 @@ func Node6(_ context.Context, task *mq.Task) mq.Result {
 	return mq.Result{Payload: resultPayload}
 }
 
+func Node7(_ context.Context, task *mq.Task) mq.Result {
+	var user map[string]any
+	_ = json.Unmarshal(task.Payload, &user)
+	user["node"] = "7"
+	resultPayload, _ := json.Marshal(user)
+	return mq.Result{Payload: resultPayload}
+}
+
+func Node8(_ context.Context, task *mq.Task) mq.Result {
+	var user map[string]any
+	_ = json.Unmarshal(task.Payload, &user)
+	user["node"] = "8"
+	resultPayload, _ := json.Marshal(user)
+	return mq.Result{Payload: resultPayload}
+}
+
 func Callback(_ context.Context, task mq.Result) mq.Result {
 	fmt.Println("Received task", task.TaskID, "Payload", string(task.Payload), task.Error, task.Topic)
 	return mq.Result{}

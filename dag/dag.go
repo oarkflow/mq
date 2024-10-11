@@ -39,7 +39,7 @@ type Node struct {
 
 type Edge struct {
 	From *Node
-	To   *Node
+	To   []*Node
 	Type EdgeType
 }
 
@@ -172,21 +172,30 @@ func (tm *DAG) AddCondition(fromNode string, conditions map[string]string) {
 	tm.conditions[fromNode] = conditions
 }
 
-func (tm *DAG) AddEdge(from, to string, edgeTypes ...EdgeType) {
+func (tm *DAG) AddLoop(from string, targets ...string) {
+	tm.addEdge(LoopEdge, from, targets...)
+}
+
+func (tm *DAG) AddEdge(from string, targets ...string) {
+	tm.addEdge(SimpleEdge, from, targets...)
+}
+
+func (tm *DAG) addEdge(edgeType EdgeType, from string, targets ...string) {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 	fromNode, ok := tm.nodes[from]
 	if !ok {
 		return
 	}
-	toNode, ok := tm.nodes[to]
-	if !ok {
-		return
+	var nodes []*Node
+	for _, target := range targets {
+		toNode, ok := tm.nodes[target]
+		if !ok {
+			return
+		}
+		nodes = append(nodes, toNode)
 	}
-	edge := Edge{From: fromNode, To: toNode}
-	if len(edgeTypes) > 0 && edgeTypes[0].IsValid() {
-		edge.Type = edgeTypes[0]
-	}
+	edge := Edge{From: fromNode, To: nodes, Type: edgeType}
 	fromNode.Edges = append(fromNode.Edges, edge)
 }
 
@@ -229,8 +238,11 @@ func (tm *DAG) FindInitialNode() *Node {
 		for _, edge := range node.Edges {
 			if edge.Type.IsValid() {
 				connectedNodes[node.Key] = true
-				connectedNodes[edge.To.Key] = true
-				incomingEdges[edge.To.Key] = true
+				for _, to := range edge.To {
+					connectedNodes[to.Key] = true
+					incomingEdges[to.Key] = true
+				}
+
 			}
 		}
 		if cond, ok := tm.conditions[node.Key]; ok {

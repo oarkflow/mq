@@ -92,7 +92,7 @@ func (tm *TaskManager) handleCallback(ctx context.Context, result mq.Result) mq.
 		if conditions, ok := tm.dag.conditions[result.Topic]; ok {
 			if targetNodeKey, ok := conditions[result.Status]; ok {
 				if targetNode, ok := tm.dag.nodes[targetNodeKey]; ok {
-					edges = append(edges, Edge{From: node, To: targetNode})
+					edges = append(edges, Edge{From: node, To: []*Node{targetNode}})
 				}
 			}
 		}
@@ -111,14 +111,16 @@ func (tm *TaskManager) handleCallback(ctx context.Context, result mq.Result) mq.
 				tm.appendFinalResult(mq.Result{TaskID: tm.taskID, Topic: node.Key, Error: err})
 				return result
 			}
-			for _, item := range items {
-				ctx = mq.SetHeaders(ctx, map[string]string{consts.QueueKey: edge.To.Key})
-				go tm.processNode(ctx, edge.To, item)
+			for _, target := range edge.To {
+				for _, item := range items {
+					ctx = mq.SetHeaders(ctx, map[string]string{consts.QueueKey: target.Key})
+					go tm.processNode(ctx, target, item)
+				}
 			}
 		case SimpleEdge:
-			if edge.To != nil {
-				ctx = mq.SetHeaders(ctx, map[string]string{consts.QueueKey: edge.To.Key})
-				go tm.processNode(ctx, edge.To, result.Payload)
+			for _, target := range edge.To {
+				ctx = mq.SetHeaders(ctx, map[string]string{consts.QueueKey: target.Key})
+				go tm.processNode(ctx, target, result.Payload)
 			}
 		}
 	}
