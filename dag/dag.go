@@ -45,9 +45,10 @@ func (n *Node) ProcessTask(ctx context.Context, msg *mq.Task) mq.Result {
 }
 
 type Edge struct {
-	From *Node
-	To   []*Node
-	Type EdgeType
+	Label string
+	From  *Node
+	To    []*Node
+	Type  EdgeType
 }
 
 type (
@@ -57,6 +58,7 @@ type (
 )
 
 type DAG struct {
+	name        string
 	startNode   string
 	nodes       map[string]*Node
 	server      *mq.Broker
@@ -67,8 +69,9 @@ type DAG struct {
 	opts        []mq.Option
 }
 
-func NewDAG(opts ...mq.Option) *DAG {
+func NewDAG(name string, opts ...mq.Option) *DAG {
 	d := &DAG{
+		name:        name,
 		nodes:       make(map[string]*Node),
 		taskContext: make(map[string]*TaskManager),
 		conditions:  make(map[FromNode]map[When]Then),
@@ -79,7 +82,6 @@ func NewDAG(opts ...mq.Option) *DAG {
 	return d
 }
 
-// PrintGraph prints the DAG's adjacency list
 func (tm *DAG) PrintGraph() {
 	tm.mu.RLock()
 	defer tm.mu.RUnlock()
@@ -155,7 +157,6 @@ func (tm *DAG) dfs(v string, visited map[string]bool, discoveryTime, finishedTim
 	finishedTime[v] = *timeVal
 }
 
-// handleConditionalEdges processes the conditional edges based on the task result
 func (tm *DAG) handleConditionalEdges(v string, visited map[string]bool, discoveryTime, finishedTime map[string]int, time *int) {
 	node := tm.nodes[v]
 	for when, then := range tm.conditions[FromNode(node.Key)] {
@@ -170,6 +171,81 @@ func (tm *DAG) handleConditionalEdges(v string, visited map[string]bool, discove
 			}
 		}
 	}
+}
+
+func (tm *DAG) ExportDOT() string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("digraph \"%s\" {\n", tm.name))
+	sb.WriteString("  node [shape=box, style=rounded];\n")
+
+	// Perform topological sorting to order nodes
+	sortedNodes := tm.TopologicalSort()
+
+	// Add nodes in topological order
+	for _, nodeKey := range sortedNodes {
+		node := tm.nodes[nodeKey]
+		sb.WriteString(fmt.Sprintf("  \"%s\" [label=\"%s\"];\n", node.Key, node.Name))
+	}
+
+	// Add edges (both simple and loop edges) in topological order
+	for _, nodeKey := range sortedNodes {
+		node := tm.nodes[nodeKey]
+		for _, edge := range node.Edges {
+			edgeStyle := "solid"
+			if edge.Type == Iterator {
+				edgeStyle = "dashed" // Use dashed lines for loop edges
+			}
+			for _, to := range edge.To {
+				sb.WriteString(fmt.Sprintf("  \"%s\" -> \"%s\" [label=\"%s\", style=%s];\n", node.Key, to.Key, edge.Label, edgeStyle))
+			}
+		}
+	}
+
+	// Add conditional edges
+	for fromNodeKey, conditions := range tm.conditions {
+		for when, then := range conditions {
+			if toNode, ok := tm.nodes[string(then)]; ok {
+				sb.WriteString(fmt.Sprintf("  \"%s\" -> \"%s\" [label=\"%s\", style=dotted];\n", fromNodeKey, toNode.Key, when))
+			}
+		}
+	}
+
+	sb.WriteString("}\n")
+	return sb.String()
+}
+
+// TopologicalSort performs topological sorting and returns an ordered list of node keys
+func (tm *DAG) TopologicalSort() []string {
+	visited := make(map[string]bool)
+	stack := []string{}
+	for _, node := range tm.nodes {
+		if !visited[node.Key] {
+			tm.topologicalSortUtil(node.Key, visited, &stack)
+		}
+	}
+
+	// Reverse the stack to get the correct topological order
+	for i, j := 0, len(stack)-1; i < j; i, j = i+1, j-1 {
+		stack[i], stack[j] = stack[j], stack[i]
+	}
+
+	return stack
+}
+
+// topologicalSortUtil is a recursive utility function for topological sorting
+func (tm *DAG) topologicalSortUtil(v string, visited map[string]bool, stack *[]string) {
+	visited[v] = true
+	node := tm.nodes[v]
+
+	for _, edge := range node.Edges {
+		for _, to := range edge.To {
+			if !visited[to.Key] {
+				tm.topologicalSortUtil(to.Key, visited, stack)
+			}
+		}
+	}
+
+	*stack = append(*stack, v)
 }
 
 func (tm *DAG) onTaskCallback(ctx context.Context, result mq.Result) mq.Result {
@@ -279,15 +355,15 @@ func (tm *DAG) AddCondition(fromNode FromNode, conditions map[When]Then) {
 	tm.conditions[fromNode] = conditions
 }
 
-func (tm *DAG) AddLoop(from string, targets ...string) {
-	tm.addEdge(Iterator, from, targets...)
+func (tm *DAG) AddLoop(label, from string, targets ...string) {
+	tm.addEdge(Iterator, label, from, targets...)
 }
 
-func (tm *DAG) AddEdge(from string, targets ...string) {
-	tm.addEdge(Simple, from, targets...)
+func (tm *DAG) AddEdge(label, from string, targets ...string) {
+	tm.addEdge(Simple, label, from, targets...)
 }
 
-func (tm *DAG) addEdge(edgeType EdgeType, from string, targets ...string) {
+func (tm *DAG) addEdge(edgeType EdgeType, label, from string, targets ...string) {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 	fromNode, ok := tm.nodes[from]
@@ -302,7 +378,7 @@ func (tm *DAG) addEdge(edgeType EdgeType, from string, targets ...string) {
 		}
 		nodes = append(nodes, toNode)
 	}
-	edge := Edge{From: fromNode, To: nodes, Type: edgeType}
+	edge := Edge{From: fromNode, To: nodes, Type: edgeType, Label: label}
 	fromNode.Edges = append(fromNode.Edges, edge)
 }
 

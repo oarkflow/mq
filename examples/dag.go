@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,6 +15,7 @@ import (
 
 var (
 	d = dag.NewDAG(
+		"Sample DAG",
 		// mq.WithSyncMode(true),
 		mq.WithNotifyResponse(tasks.NotifyResponse),
 		mq.WithSecretKey([]byte("wKWa6GKdBd0njDKNQoInBbh6P0KTjmob")),
@@ -33,17 +33,18 @@ func main() {
 	d.AddNode("G", "G", tasks.Node7)
 	d.AddNode("H", "H", tasks.Node8)
 
-	d.AddLoop("A", "B")
+	d.AddLoop("Send each item", "A", "B")
 	d.AddCondition("C", map[dag.When]dag.Then{"PASS": "D", "FAIL": "E"})
-	d.AddEdge("B", "C")
-	d.AddEdge("D", "F")
-	d.AddEdge("E", "F")
-	d.AddEdge("F", "G", "H")
+	d.AddEdge("Label 1", "B", "C")
+	d.AddEdge("Label 2", "D", "F")
+	d.AddEdge("Label 3", "E", "F")
+	d.AddEdge("Label 4", "F", "G", "H")
 
 	// Classify edges
-	d.ClassifyEdges()
+	// d.ClassifyEdges()
+	fmt.Println(d.ExportDOT())
 
-	http.HandleFunc("POST /publish", requestHandler("publish"))
+	/*http.HandleFunc("POST /publish", requestHandler("publish"))
 	http.HandleFunc("POST /request", requestHandler("request"))
 	http.HandleFunc("/pause-consumer/{id}", func(writer http.ResponseWriter, request *http.Request) {
 		id := request.PathValue("id")
@@ -66,7 +67,7 @@ func main() {
 	err := d.Start(context.TODO(), ":8083")
 	if err != nil {
 		panic(err)
-	}
+	}*/
 }
 
 func requestHandler(requestType string) func(w http.ResponseWriter, r *http.Request) {
