@@ -33,7 +33,7 @@ func main() {
 	d.AddNode("H", tasks.Node8)
 
 	d.AddLoop("A", "B")
-	d.AddCondition("C", map[string]string{"PASS": "D", "FAIL": "E"})
+	d.AddCondition("C", map[dag.When]dag.Then{"PASS": "D", "FAIL": "E"})
 	d.AddEdge("B", "C")
 	d.AddEdge("D", "F")
 	d.AddEdge("E", "F")

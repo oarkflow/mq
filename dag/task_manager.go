@@ -30,6 +30,7 @@ func NewTaskManager(d *DAG, taskID string) *TaskManager {
 		nodeResults: make(map[string]mq.Result),
 		results:     make([]mq.Result, 0),
 		taskID:      taskID,
+		finalResult: make(chan mq.Result, 1),
 	}
 }
 
@@ -44,7 +45,6 @@ func (tm *TaskManager) processTask(ctx context.Context, nodeID string, payload j
 		return mq.Result{Error: fmt.Errorf("nodeID %s not found", nodeID)}
 	}
 	tm.createdAt = time.Now()
-	tm.finalResult = make(chan mq.Result, 0)
 	go tm.processNode(ctx, node, payload)
 	awaitResponse, ok := mq.GetAwaitResponse(ctx)
 	if awaitResponse != "true" {
@@ -78,6 +78,25 @@ func (tm *TaskManager) dispatchFinalResult(ctx context.Context) {
 	}
 }
 
+func (tm *TaskManager) getConditionalEdges(node *Node, result mq.Result) []Edge {
+	edges := make([]Edge, len(node.Edges))
+	copy(edges, node.Edges)
+	if result.Status != "" {
+		if conditions, ok := tm.dag.conditions[result.Topic]; ok {
+			if targetNodeKey, ok := conditions[When(result.Status)]; ok {
+				if targetNode, ok := tm.dag.nodes[string(targetNodeKey)]; ok {
+					edges = append(edges, Edge{From: node, To: []*Node{targetNode}})
+				}
+			} else if targetNodeKey, ok = conditions["default"]; ok {
+				if targetNode, ok := tm.dag.nodes[string(targetNodeKey)]; ok {
+					edges = append(edges, Edge{From: node, To: []*Node{targetNode}})
+				}
+			}
+		}
+	}
+	return edges
+}
+
 func (tm *TaskManager) handleCallback(ctx context.Context, result mq.Result) mq.Result {
 	if result.Topic != "" {
 		atomic.AddInt64(&tm.waitingCallback, -1)
@@ -86,17 +105,7 @@ func (tm *TaskManager) handleCallback(ctx context.Context, result mq.Result) mq.
 	if !ok {
 		return result
 	}
-	edges := make([]Edge, len(node.Edges))
-	copy(edges, node.Edges)
-	if result.Status != "" {
-		if conditions, ok := tm.dag.conditions[result.Topic]; ok {
-			if targetNodeKey, ok := conditions[result.Status]; ok {
-				if targetNode, ok := tm.dag.nodes[targetNodeKey]; ok {
-					edges = append(edges, Edge{From: node, To: []*Node{targetNode}})
-				}
-			}
-		}
-	}
+	edges := tm.getConditionalEdges(node, result)
 	if len(edges) == 0 {
 		tm.appendFinalResult(result)
 		tm.dispatchFinalResult(ctx)

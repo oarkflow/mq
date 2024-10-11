@@ -43,12 +43,17 @@ type Edge struct {
 	Type EdgeType
 }
 
+type (
+	When string
+	Then string
+)
+
 type DAG struct {
 	startNode   string
 	nodes       map[string]*Node
 	server      *mq.Broker
 	taskContext map[string]*TaskManager
-	conditions  map[string]map[string]string
+	conditions  map[string]map[When]Then
 	mu          sync.RWMutex
 	paused      bool
 	opts        []mq.Option
@@ -58,7 +63,7 @@ func NewDAG(opts ...mq.Option) *DAG {
 	d := &DAG{
 		nodes:       make(map[string]*Node),
 		taskContext: make(map[string]*TaskManager),
-		conditions:  make(map[string]map[string]string),
+		conditions:  make(map[string]map[When]Then),
 	}
 	opts = append(opts, mq.WithCallback(d.onTaskCallback), mq.WithConsumerOnSubscribe(d.onConsumerJoin), mq.WithConsumerOnClose(d.onConsumerClose))
 	d.server = mq.NewBroker(opts...)
@@ -166,7 +171,7 @@ func (tm *DAG) IsReady() bool {
 	return true
 }
 
-func (tm *DAG) AddCondition(fromNode string, conditions map[string]string) {
+func (tm *DAG) AddCondition(fromNode string, conditions map[When]Then) {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 	tm.conditions[fromNode] = conditions
@@ -247,8 +252,8 @@ func (tm *DAG) FindInitialNode() *Node {
 		}
 		if cond, ok := tm.conditions[node.Key]; ok {
 			for _, target := range cond {
-				connectedNodes[target] = true
-				incomingEdges[target] = true
+				connectedNodes[string(target)] = true
+				incomingEdges[string(target)] = true
 			}
 		}
 	}
