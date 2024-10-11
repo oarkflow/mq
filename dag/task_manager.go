@@ -178,6 +178,12 @@ func (tm *TaskManager) appendFinalResult(result mq.Result) {
 func (tm *TaskManager) processNode(ctx context.Context, node *Node, payload json.RawMessage) {
 	atomic.AddInt64(&tm.waitingCallback, 1)
 	var result mq.Result
+	defer func() {
+		tm.mutex.Lock()
+		tm.nodeResults[node.Key] = result
+		tm.mutex.Unlock()
+		tm.handleCallback(ctx, result)
+	}()
 	select {
 	case <-ctx.Done():
 		result = mq.Result{TaskID: tm.taskID, Topic: node.Key, Error: ctx.Err()}
@@ -186,25 +192,19 @@ func (tm *TaskManager) processNode(ctx context.Context, node *Node, payload json
 	default:
 		ctx = mq.SetHeaders(ctx, map[string]string{consts.QueueKey: node.Key})
 		if tm.dag.server.SyncMode() {
-			result = node.consumer.ProcessTask(ctx, NewTask(tm.taskID, payload, node.Key))
-			result.Topic = node.Key
-			result.TaskID = tm.taskID
+			result = node.ProcessTask(ctx, NewTask(tm.taskID, payload, node.Key))
 			if result.Error != nil {
 				tm.appendFinalResult(result)
 				return
 			}
-		} else {
-			err := tm.dag.server.Publish(ctx, NewTask(tm.taskID, payload, node.Key), node.Key)
-			if err != nil {
-				tm.appendFinalResult(mq.Result{Error: err})
-				return
-			}
+			return
+		}
+		err := tm.dag.server.Publish(ctx, NewTask(tm.taskID, payload, node.Key), node.Key)
+		if err != nil {
+			tm.appendFinalResult(mq.Result{Error: err})
+			return
 		}
 	}
-	tm.mutex.Lock()
-	tm.nodeResults[node.Key] = result
-	tm.mutex.Unlock()
-	tm.handleCallback(ctx, result)
 }
 
 func (tm *TaskManager) Clear() error {

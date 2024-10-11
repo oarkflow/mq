@@ -1,99 +1,126 @@
 package main
 
 import (
-	"context"
-	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
-
-	"github.com/oarkflow/mq/consts"
-	"github.com/oarkflow/mq/examples/tasks"
-
-	"github.com/oarkflow/mq"
-	"github.com/oarkflow/mq/dag"
+	"sort"
 )
 
-var (
-	d = dag.NewDAG(
-		mq.WithNotifyResponse(tasks.NotifyResponse),
-		mq.WithSecretKey([]byte("wKWa6GKdBd0njDKNQoInBbh6P0KTjmob")),
-	)
-	// d = dag.NewDAG(mq.WithSyncMode(true), mq.WithTLS(true, "./certs/server.crt", "./certs/server.key"), mq.WithCAPath("./certs/ca.cert"))
-)
+// DAG represents a Directed Acyclic Graph
+type DAG struct {
+	vertices int
+	adjList  map[int][]int // adjacency list to represent edges
+}
 
-func main() {
-	d.AddNode("A", tasks.Node1, true)
-	d.AddNode("B", tasks.Node2)
-	d.AddNode("C", tasks.Node3)
-	d.AddNode("D", tasks.Node4)
-	d.AddNode("E", tasks.Node5)
-	d.AddNode("F", tasks.Node6)
-	d.AddNode("G", tasks.Node7)
-	d.AddNode("H", tasks.Node8)
-
-	d.AddLoop("A", "B")
-	d.AddCondition("C", map[dag.When]dag.Then{"PASS": "D", "FAIL": "E"})
-	d.AddEdge("B", "C")
-	d.AddEdge("D", "F")
-	d.AddEdge("E", "F")
-	d.AddEdge("F", "G", "H")
-	http.HandleFunc("POST /publish", requestHandler("publish"))
-	http.HandleFunc("POST /request", requestHandler("request"))
-	http.HandleFunc("/pause-consumer/{id}", func(writer http.ResponseWriter, request *http.Request) {
-		id := request.PathValue("id")
-		if id != "" {
-			d.PauseConsumer(id)
-		}
-	})
-	http.HandleFunc("/resume-consumer/{id}", func(writer http.ResponseWriter, request *http.Request) {
-		id := request.PathValue("id")
-		if id != "" {
-			d.ResumeConsumer(id)
-		}
-	})
-	http.HandleFunc("/pause", func(writer http.ResponseWriter, request *http.Request) {
-		d.Pause()
-	})
-	http.HandleFunc("/resume", func(writer http.ResponseWriter, request *http.Request) {
-		d.Resume()
-	})
-	err := d.Start(context.TODO(), ":8083")
-	if err != nil {
-		panic(err)
+// NewDAG creates a new DAG with a given number of vertices
+func NewDAG(vertices int) *DAG {
+	return &DAG{
+		vertices: vertices,
+		adjList:  make(map[int][]int),
 	}
 }
 
-func requestHandler(requestType string) func(w http.ResponseWriter, r *http.Request) {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
-			return
-		}
-		var payload []byte
-		if r.Body != nil {
-			defer r.Body.Close()
-			var err error
-			payload, err = io.ReadAll(r.Body)
-			if err != nil {
-				http.Error(w, "Failed to read request body", http.StatusBadRequest)
-				return
-			}
-		} else {
-			http.Error(w, "Empty request body", http.StatusBadRequest)
-			return
-		}
-		ctx := context.Background()
-		if requestType == "request" {
-			ctx = mq.SetHeaders(ctx, map[string]string{consts.AwaitResponseKey: "true"})
-		}
-		// ctx = context.WithValue(ctx, "initial_node", "E")
-		rs := d.ProcessTask(ctx, payload)
-		if rs.Error != nil {
-			http.Error(w, fmt.Sprintf("[DAG Error] - %v", rs.Error), http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(rs)
+// AddEdge adds a directed edge from u to v
+func (d *DAG) AddEdge(u, v int) {
+	d.adjList[u] = append(d.adjList[u], v)
+}
+
+// PrintGraph prints the graph's adjacency list
+func (d *DAG) PrintGraph() {
+	for vertex, edges := range d.adjList {
+		fmt.Printf("Vertex %d -> %v\n", vertex, edges)
 	}
+}
+
+// DFS traversal function to classify edges as tree, forward, or cross
+func (d *DAG) ClassifyEdges() {
+	visited := make([]bool, d.vertices)
+	discoveryTime := make([]int, d.vertices)
+	finishedTime := make([]int, d.vertices)
+	time := 0
+
+	for i := 0; i < d.vertices; i++ {
+		if !visited[i] {
+			d.dfs(i, visited, discoveryTime, finishedTime, &time)
+		}
+	}
+}
+
+// dfs performs a DFS and classifies the edges
+func (d *DAG) dfs(v int, visited []bool, discoveryTime []int, finishedTime []int, time *int) {
+	visited[v] = true
+	*time++
+	discoveryTime[v] = *time
+
+	for _, adj := range d.adjList[v] {
+		if !visited[adj] {
+			// Tree Edge: adj not visited, and it's being discovered
+			fmt.Printf("Tree Edge: %d -> %d\n", v, adj)
+			d.dfs(adj, visited, discoveryTime, finishedTime, time)
+		} else {
+			if discoveryTime[v] < discoveryTime[adj] {
+				// Forward Edge: adj is a descendant but already discovered
+				fmt.Printf("Forward Edge: %d -> %d\n", v, adj)
+			} else if finishedTime[adj] == 0 {
+				// Cross Edge: adj is in a different branch (adj was visited, but not fully processed)
+				fmt.Printf("Cross Edge: %d -> %d\n", v, adj)
+			}
+		}
+	}
+
+	*time++
+	finishedTime[v] = *time
+}
+
+// TopologicalSort returns a topologically sorted order of the DAG vertices
+func (d *DAG) TopologicalSort() []int {
+	visited := make([]bool, d.vertices)
+	stack := []int{}
+
+	for i := 0; i < d.vertices; i++ {
+		if !visited[i] {
+			d.topologicalSortUtil(i, visited, &stack)
+		}
+	}
+
+	// Reverse the stack to get the topological order
+	sort.Slice(stack, func(i, j int) bool { return stack[i] > stack[j] })
+	return stack
+}
+
+// Helper function for topological sorting using DFS
+func (d *DAG) topologicalSortUtil(v int, visited []bool, stack *[]int) {
+	visited[v] = true
+
+	for _, adj := range d.adjList[v] {
+		if !visited[adj] {
+			d.topologicalSortUtil(adj, visited, stack)
+		}
+	}
+
+	*stack = append(*stack, v)
+}
+
+// Main function to demonstrate DAG edge classification
+func main() {
+	// Create a new DAG
+	dag := NewDAG(6)
+
+	// Add edges (vertices start from 0)
+	dag.AddEdge(0, 1)
+	dag.AddEdge(0, 2)
+	dag.AddEdge(1, 3)
+	dag.AddEdge(2, 3)
+	dag.AddEdge(3, 4)
+	dag.AddEdge(4, 5)
+
+	fmt.Println("Graph adjacency list:")
+	dag.PrintGraph()
+
+	fmt.Println("\nClassifying edges:")
+	dag.ClassifyEdges()
+
+	// Perform topological sorting
+	fmt.Println("\nTopologically sorted order:")
+	order := dag.TopologicalSort()
+	fmt.Println(order)
 }

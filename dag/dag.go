@@ -12,6 +12,7 @@ import (
 	"github.com/oarkflow/xid"
 
 	"github.com/oarkflow/mq"
+	"github.com/oarkflow/mq/consts"
 )
 
 func NewTask(id string, payload json.RawMessage, nodeKey string) *mq.Task {
@@ -31,10 +32,15 @@ const (
 )
 
 type Node struct {
+	Name     string
 	Key      string
 	Edges    []Edge
 	isReady  bool
 	consumer *mq.Consumer
+}
+
+func (n *Node) ProcessTask(ctx context.Context, msg *mq.Task) mq.Result {
+	return n.consumer.ProcessTask(ctx, msg)
 }
 
 type Edge struct {
@@ -122,7 +128,6 @@ func (tm *DAG) Start(ctx context.Context, addr string) error {
 			}
 		}
 	}
-
 	log.Printf("DAG - HTTP_SERVER ~> started on %s", addr)
 	config := tm.server.TLSConfig()
 	if config.UseTLS {
@@ -131,11 +136,12 @@ func (tm *DAG) Start(ctx context.Context, addr string) error {
 	return http.ListenAndServe(addr, nil)
 }
 
-func (tm *DAG) AddNode(key string, handler mq.Handler, firstNode ...bool) {
+func (tm *DAG) AddNode(name, key string, handler mq.Handler, firstNode ...bool) {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 	con := mq.NewConsumer(key, key, handler, tm.opts...)
 	tm.nodes[key] = &Node{
+		Name:     name,
 		Key:      key,
 		consumer: con,
 		isReady:  true,
@@ -145,14 +151,15 @@ func (tm *DAG) AddNode(key string, handler mq.Handler, firstNode ...bool) {
 	}
 }
 
-func (tm *DAG) AddDeferredNode(key string, firstNode ...bool) error {
+func (tm *DAG) AddDeferredNode(name, key string, firstNode ...bool) error {
 	if tm.server.SyncMode() {
 		return fmt.Errorf("DAG cannot have deferred node in Sync Mode")
 	}
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 	tm.nodes[key] = &Node{
-		Key: key,
+		Name: name,
+		Key:  key,
 	}
 	if len(firstNode) > 0 && firstNode[0] {
 		tm.startNode = key
@@ -205,7 +212,7 @@ func (tm *DAG) addEdge(edgeType EdgeType, from string, targets ...string) {
 }
 
 func (tm *DAG) ProcessTask(ctx context.Context, payload []byte) mq.Result {
-	tm.mu.RLock() // lock when reading `paused`
+	tm.mu.RLock()
 	if tm.paused {
 		tm.mu.RUnlock()
 		return mq.Result{Error: fmt.Errorf("unable to process task, error: DAG is not accepting any task")}
@@ -218,7 +225,7 @@ func (tm *DAG) ProcessTask(ctx context.Context, payload []byte) mq.Result {
 	initialNode, ok := val.(string)
 	if !ok {
 		if tm.startNode == "" {
-			firstNode := tm.FindInitialNode()
+			firstNode := tm.findStartNode()
 			if firstNode != nil {
 				tm.startNode = firstNode.Key
 			}
@@ -236,7 +243,7 @@ func (tm *DAG) ProcessTask(ctx context.Context, payload []byte) mq.Result {
 	return manager.processTask(ctx, initialNode, payload)
 }
 
-func (tm *DAG) FindInitialNode() *Node {
+func (tm *DAG) findStartNode() *Node {
 	incomingEdges := make(map[string]bool)
 	connectedNodes := make(map[string]bool)
 	for _, node := range tm.nodes {
@@ -265,30 +272,33 @@ func (tm *DAG) FindInitialNode() *Node {
 	return nil
 }
 
-func (tm *DAG) Pause() {
-	tm.mu.Lock() // lock when modifying `paused`
+func (tm *DAG) Pause(pause bool) {
+	tm.mu.Lock()
 	defer tm.mu.Unlock()
-	tm.paused = true
-	log.Printf("DAG - PAUSED")
+	tm.paused = pause
 }
 
-func (tm *DAG) Resume() {
-	tm.mu.Lock() // lock when modifying `paused`
-	defer tm.mu.Unlock()
-	tm.paused = false
-	log.Printf("DAG - RESUMED")
+func (tm *DAG) PauseConsumer(ctx context.Context, id string) {
+	tm.doConsumer(ctx, id, consts.CONSUMER_PAUSE)
 }
 
-func (tm *DAG) PauseConsumer(id string) {
+func (tm *DAG) ResumeConsumer(ctx context.Context, id string) {
+	tm.doConsumer(ctx, id, consts.CONSUMER_RESUME)
+}
+
+func (tm *DAG) doConsumer(ctx context.Context, id string, action consts.CMD) {
 	if node, ok := tm.nodes[id]; ok {
-		node.consumer.Pause()
-		node.isReady = false
-	}
-}
-
-func (tm *DAG) ResumeConsumer(id string) {
-	if node, ok := tm.nodes[id]; ok {
-		node.consumer.Resume()
-		node.isReady = true
+		switch action {
+		case consts.CONSUMER_PAUSE:
+			err := node.consumer.Pause(ctx)
+			if err == nil {
+				node.isReady = false
+			}
+		case consts.CONSUMER_RESUME:
+			err := node.consumer.Resume(ctx)
+			if err == nil {
+				node.isReady = true
+			}
+		}
 	}
 }
