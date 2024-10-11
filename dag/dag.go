@@ -176,36 +176,57 @@ func (tm *DAG) handleConditionalEdges(v string, visited map[string]bool, discove
 func (tm *DAG) ExportDOT() string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("digraph \"%s\" {\n", tm.name))
-	sb.WriteString("  node [shape=box, style=rounded];\n")
+
+	// Define a default node shape and style
+	sb.WriteString("  node [shape=box, style=\"rounded,filled\", fillcolor=lightgray, fontname=\"Helvetica\"];\n")
 
 	// Perform topological sorting to order nodes
 	sortedNodes := tm.TopologicalSort()
 
-	// Add nodes in topological order
+	// Add nodes in topological order with customized styles
 	for _, nodeKey := range sortedNodes {
 		node := tm.nodes[nodeKey]
-		sb.WriteString(fmt.Sprintf("  \"%s\" [label=\"%s\"];\n", node.Key, node.Name))
+		// Different node color based on the type or status (you can customize this)
+		nodeColor := "lightblue"
+
+		// Customizing the label to include more node information if needed
+		sb.WriteString(fmt.Sprintf("  \"%s\" [label=\"%s\", fillcolor=\"%s\"];\n", node.Key, node.Name, nodeColor))
 	}
 
-	// Add edges (both simple and loop edges) in topological order
+	// Add edges (regular, loop, and conditional) with different styles
 	for _, nodeKey := range sortedNodes {
 		node := tm.nodes[nodeKey]
 		for _, edge := range node.Edges {
-			edgeStyle := "solid"
-			if edge.Type == Iterator {
-				edgeStyle = "dashed" // Use dashed lines for loop edges
+			// Apply custom styles to edges based on edge types (Iterator, Conditional, etc.)
+			var edgeStyle string
+			switch edge.Type {
+			case Iterator:
+				edgeStyle = "dashed"
+			default:
+				edgeStyle = "solid"
 			}
 			for _, to := range edge.To {
-				sb.WriteString(fmt.Sprintf("  \"%s\" -> \"%s\" [label=\"%s\", style=%s];\n", node.Key, to.Key, edge.Label, edgeStyle))
+				// Different edge colors based on labels, or edge priority
+				edgeColor := "black"
+				if edge.Label == "Iterate" {
+					edgeColor = "blue"
+				} else if edge.Label == "PASS" {
+					edgeColor = "green"
+				} else if edge.Label == "FAIL" {
+					edgeColor = "red"
+				}
+
+				sb.WriteString(fmt.Sprintf("  \"%s\" -> \"%s\" [label=\"%s\", color=\"%s\", style=%s];\n", node.Key, to.Key, edge.Label, edgeColor, edgeStyle))
 			}
 		}
 	}
 
-	// Add conditional edges
+	// Add conditional edges with dotted lines and specific labels
 	for fromNodeKey, conditions := range tm.conditions {
 		for when, then := range conditions {
 			if toNode, ok := tm.nodes[string(then)]; ok {
-				sb.WriteString(fmt.Sprintf("  \"%s\" -> \"%s\" [label=\"%s\", style=dotted];\n", fromNodeKey, toNode.Key, when))
+				// Style conditional edges differently
+				sb.WriteString(fmt.Sprintf("  \"%s\" -> \"%s\" [label=\"%s\", color=\"purple\", style=dotted];\n", fromNodeKey, toNode.Key, when))
 			}
 		}
 	}
