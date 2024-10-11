@@ -33,8 +33,13 @@ func NewTaskManager(d *DAG, taskID string) *TaskManager {
 	}
 }
 
+func (tm *TaskManager) updateTS(result *mq.Result) {
+	result.CreatedAt = tm.createdAt
+	result.ProcessedAt = time.Now()
+}
+
 func (tm *TaskManager) processTask(ctx context.Context, nodeID string, payload json.RawMessage) mq.Result {
-	node, ok := tm.dag.Nodes[nodeID]
+	node, ok := tm.dag.nodes[nodeID]
 	if !ok {
 		return mq.Result{Error: fmt.Errorf("nodeID %s not found", nodeID)}
 	}
@@ -45,8 +50,7 @@ func (tm *TaskManager) processTask(ctx context.Context, nodeID string, payload j
 	if awaitResponse != "true" {
 		go func() {
 			finalResult := <-tm.finalResult
-			finalResult.CreatedAt = tm.createdAt
-			finalResult.ProcessedAt = time.Now()
+			tm.updateTS(&finalResult)
 			if tm.dag.server.NotifyHandler() != nil {
 				tm.dag.server.NotifyHandler()(ctx, finalResult)
 			}
@@ -54,8 +58,7 @@ func (tm *TaskManager) processTask(ctx context.Context, nodeID string, payload j
 		return mq.Result{CreatedAt: tm.createdAt, TaskID: tm.taskID, Topic: nodeID, Status: "PENDING"}
 	} else {
 		finalResult := <-tm.finalResult
-		finalResult.CreatedAt = tm.createdAt
-		finalResult.ProcessedAt = time.Now()
+		tm.updateTS(&finalResult)
 		if tm.dag.server.NotifyHandler() != nil {
 			tm.dag.server.NotifyHandler()(ctx, finalResult)
 		}
@@ -79,7 +82,7 @@ func (tm *TaskManager) handleCallback(ctx context.Context, result mq.Result) mq.
 	if result.Topic != "" {
 		atomic.AddInt64(&tm.waitingCallback, -1)
 	}
-	node, ok := tm.dag.Nodes[result.Topic]
+	node, ok := tm.dag.nodes[result.Topic]
 	if !ok {
 		return result
 	}
@@ -88,7 +91,7 @@ func (tm *TaskManager) handleCallback(ctx context.Context, result mq.Result) mq.
 	if result.Status != "" {
 		if conditions, ok := tm.dag.conditions[result.Topic]; ok {
 			if targetNodeKey, ok := conditions[result.Status]; ok {
-				if targetNode, ok := tm.dag.Nodes[targetNodeKey]; ok {
+				if targetNode, ok := tm.dag.nodes[targetNodeKey]; ok {
 					edges = append(edges, Edge{From: node, To: targetNode})
 				}
 			}
@@ -147,12 +150,7 @@ func (tm *TaskManager) handleResult(ctx context.Context, results any) mq.Result 
 		if err != nil {
 			return mq.HandleError(ctx, err)
 		}
-		return mq.Result{
-			TaskID:  tm.taskID,
-			Payload: finalOutput,
-			Status:  status,
-			Topic:   topic,
-		}
+		return mq.Result{TaskID: tm.taskID, Payload: finalOutput, Status: status, Topic: topic}
 	case mq.Result:
 		return res
 	}

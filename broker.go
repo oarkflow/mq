@@ -208,7 +208,7 @@ func (b *Broker) PublishHandler(ctx context.Context, conn net.Conn, msg *codec.M
 	taskID, _ := jsonparser.GetString(msg.Payload, "id")
 	log.Printf("BROKER - PUBLISH ~> received from %s on %s for Task %s", pub.id, msg.Queue, taskID)
 
-	ack := codec.NewMessage(consts.PUBLISH_ACK, []byte(fmt.Sprintf(`{"id":"%s"}`, taskID)), msg.Queue, msg.Headers)
+	ack := codec.NewMessage(consts.PUBLISH_ACK, utils.ToByte(fmt.Sprintf(`{"id":"%s"}`, taskID)), msg.Queue, msg.Headers)
 	if err := b.send(conn, ack); err != nil {
 		log.Printf("Error sending PUBLISH_ACK: %v\n", err)
 	}
@@ -361,7 +361,7 @@ func (b *Broker) handleConsumer(cmd consts.CMD, state consts.ConsumerState, cons
 	fn := func(queue *Queue) {
 		con, ok := queue.consumers.Get(consumerID)
 		if ok {
-			ack := codec.NewMessage(cmd, []byte("{}"), queue.name, map[string]string{consts.ConsumerKey: consumerID})
+			ack := codec.NewMessage(cmd, utils.ToByte("{}"), queue.name, map[string]string{consts.ConsumerKey: consumerID})
 			err := b.send(con.conn, ack)
 			if err == nil {
 				con.state = state

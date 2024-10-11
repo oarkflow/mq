@@ -57,7 +57,7 @@ func (c *Consumer) subscribe(ctx context.Context, queue string) error {
 		consts.ConsumerKey: c.id,
 		consts.ContentType: consts.TypeJson,
 	})
-	msg := codec.NewMessage(consts.SUBSCRIBE, []byte("{}"), queue, headers)
+	msg := codec.NewMessage(consts.SUBSCRIBE, utils.ToByte("{}"), queue, headers)
 	if err := c.send(c.conn, msg); err != nil {
 		return err
 	}
@@ -104,7 +104,7 @@ func (c *Consumer) ConsumeMessage(ctx context.Context, msg *codec.Message, conn 
 		consts.QueueKey:    msg.Queue,
 	})
 	taskID, _ := jsonparser.GetString(msg.Payload, "id")
-	reply := codec.NewMessage(consts.MESSAGE_ACK, []byte(fmt.Sprintf(`{"id":"%s"}`, taskID)), msg.Queue, headers)
+	reply := codec.NewMessage(consts.MESSAGE_ACK, utils.ToByte(fmt.Sprintf(`{"id":"%s"}`, taskID)), msg.Queue, headers)
 	if err := c.send(conn, reply); err != nil {
 		fmt.Printf("failed to send MESSAGE_ACK for queue %s: %v", msg.Queue, err)
 	}
@@ -158,7 +158,7 @@ func (c *Consumer) sendDenyMessage(ctx context.Context, taskID, queue string, er
 		consts.ConsumerKey: c.id,
 		consts.ContentType: consts.TypeJson,
 	})
-	reply := codec.NewMessage(consts.MESSAGE_DENY, []byte(fmt.Sprintf(`{"id":"%s", "error":"%s"}`, taskID, err.Error())), queue, headers)
+	reply := codec.NewMessage(consts.MESSAGE_DENY, utils.ToByte(fmt.Sprintf(`{"id":"%s", "error":"%s"}`, taskID, err.Error())), queue, headers)
 	if sendErr := c.send(c.conn, reply); sendErr != nil {
 		log.Printf("failed to send MESSAGE_DENY for task %s: %v", taskID, sendErr)
 	}

@@ -86,7 +86,7 @@ func defaultOptions() Options {
 		maxBackoff:    20 * time.Second,
 		jitterPercent: 0.5,
 		queueSize:     100,
-		hmacKey:       []byte(`a9f4b9415485b70275673b5920182796ea497b5e093ead844a43ea5d77cbc24f`),
+		hmacKey:       []byte(`475f3adc6be9ee6f5357020e2922ff5b8f971598e175878e617d19df584bc648`),
 		numOfWorkers:  runtime.NumCPU(),
 		maxMemoryLoad: 5000000,
 	}

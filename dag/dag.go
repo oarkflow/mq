@@ -44,8 +44,8 @@ type Edge struct {
 }
 
 type DAG struct {
-	FirstNode   string
-	Nodes       map[string]*Node
+	startNode   string
+	nodes       map[string]*Node
 	server      *mq.Broker
 	taskContext map[string]*TaskManager
 	conditions  map[string]map[string]string
@@ -56,7 +56,7 @@ type DAG struct {
 
 func NewDAG(opts ...mq.Option) *DAG {
 	d := &DAG{
-		Nodes:       make(map[string]*Node),
+		nodes:       make(map[string]*Node),
 		taskContext: make(map[string]*TaskManager),
 		conditions:  make(map[string]map[string]string),
 	}
@@ -74,17 +74,25 @@ func (tm *DAG) onTaskCallback(ctx context.Context, result mq.Result) mq.Result {
 }
 
 func (tm *DAG) onConsumerJoin(_ context.Context, topic, _ string) {
-	if node, ok := tm.Nodes[topic]; ok {
+	if node, ok := tm.nodes[topic]; ok {
 		log.Printf("DAG - CONSUMER ~> ready on %s", topic)
 		node.isReady = true
 	}
 }
 
 func (tm *DAG) onConsumerClose(_ context.Context, topic, _ string) {
-	if node, ok := tm.Nodes[topic]; ok {
+	if node, ok := tm.nodes[topic]; ok {
 		log.Printf("DAG - CONSUMER ~> down on %s", topic)
 		node.isReady = false
 	}
+}
+
+func (tm *DAG) SetStartNode(node string) {
+	tm.startNode = node
+}
+
+func (tm *DAG) GetStartNode() string {
+	return tm.startNode
 }
 
 func (tm *DAG) Start(ctx context.Context, addr string) error {
@@ -95,7 +103,7 @@ func (tm *DAG) Start(ctx context.Context, addr string) error {
 				panic(err)
 			}
 		}()
-		for _, con := range tm.Nodes {
+		for _, con := range tm.nodes {
 			if con.isReady {
 				go func(con *Node) {
 					time.Sleep(1 * time.Second)
@@ -122,13 +130,13 @@ func (tm *DAG) AddNode(key string, handler mq.Handler, firstNode ...bool) {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 	con := mq.NewConsumer(key, key, handler, tm.opts...)
-	tm.Nodes[key] = &Node{
+	tm.nodes[key] = &Node{
 		Key:      key,
 		consumer: con,
 		isReady:  true,
 	}
 	if len(firstNode) > 0 && firstNode[0] {
-		tm.FirstNode = key
+		tm.startNode = key
 	}
 }
 
@@ -138,11 +146,11 @@ func (tm *DAG) AddDeferredNode(key string, firstNode ...bool) error {
 	}
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
-	tm.Nodes[key] = &Node{
+	tm.nodes[key] = &Node{
 		Key: key,
 	}
 	if len(firstNode) > 0 && firstNode[0] {
-		tm.FirstNode = key
+		tm.startNode = key
 	}
 	return nil
 }
@@ -150,7 +158,7 @@ func (tm *DAG) AddDeferredNode(key string, firstNode ...bool) error {
 func (tm *DAG) IsReady() bool {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
-	for _, node := range tm.Nodes {
+	for _, node := range tm.nodes {
 		if !node.isReady {
 			return false
 		}
@@ -167,11 +175,11 @@ func (tm *DAG) AddCondition(fromNode string, conditions map[string]string) {
 func (tm *DAG) AddEdge(from, to string, edgeTypes ...EdgeType) {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
-	fromNode, ok := tm.Nodes[from]
+	fromNode, ok := tm.nodes[from]
 	if !ok {
 		return
 	}
-	toNode, ok := tm.Nodes[to]
+	toNode, ok := tm.nodes[to]
 	if !ok {
 		return
 	}
@@ -183,25 +191,28 @@ func (tm *DAG) AddEdge(from, to string, edgeTypes ...EdgeType) {
 }
 
 func (tm *DAG) ProcessTask(ctx context.Context, payload []byte) mq.Result {
+	tm.mu.RLock() // lock when reading `paused`
 	if tm.paused {
+		tm.mu.RUnlock()
 		return mq.Result{Error: fmt.Errorf("unable to process task, error: DAG is not accepting any task")}
 	}
+	tm.mu.RUnlock()
 	if !tm.IsReady() {
 		return mq.Result{Error: fmt.Errorf("unable to process task, error: DAG is not ready yet")}
 	}
 	val := ctx.Value("initial_node")
 	initialNode, ok := val.(string)
 	if !ok {
-		if tm.FirstNode == "" {
+		if tm.startNode == "" {
 			firstNode := tm.FindInitialNode()
 			if firstNode != nil {
-				tm.FirstNode = firstNode.Key
+				tm.startNode = firstNode.Key
 			}
 		}
-		if tm.FirstNode == "" {
+		if tm.startNode == "" {
 			return mq.Result{Error: fmt.Errorf("initial node not found")}
 		}
-		initialNode = tm.FirstNode
+		initialNode = tm.startNode
 	}
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
@@ -214,7 +225,7 @@ func (tm *DAG) ProcessTask(ctx context.Context, payload []byte) mq.Result {
 func (tm *DAG) FindInitialNode() *Node {
 	incomingEdges := make(map[string]bool)
 	connectedNodes := make(map[string]bool)
-	for _, node := range tm.Nodes {
+	for _, node := range tm.nodes {
 		for _, edge := range node.Edges {
 			if edge.Type.IsValid() {
 				connectedNodes[node.Key] = true
@@ -229,7 +240,7 @@ func (tm *DAG) FindInitialNode() *Node {
 			}
 		}
 	}
-	for nodeID, node := range tm.Nodes {
+	for nodeID, node := range tm.nodes {
 		if !incomingEdges[nodeID] && connectedNodes[nodeID] {
 			return node
 		}
@@ -238,24 +249,28 @@ func (tm *DAG) FindInitialNode() *Node {
 }
 
 func (tm *DAG) Pause() {
+	tm.mu.Lock() // lock when modifying `paused`
+	defer tm.mu.Unlock()
 	tm.paused = true
 	log.Printf("DAG - PAUSED")
 }
 
 func (tm *DAG) Resume() {
+	tm.mu.Lock() // lock when modifying `paused`
+	defer tm.mu.Unlock()
 	tm.paused = false
 	log.Printf("DAG - RESUMED")
 }
 
 func (tm *DAG) PauseConsumer(id string) {
-	if node, ok := tm.Nodes[id]; ok {
+	if node, ok := tm.nodes[id]; ok {
 		node.consumer.Pause()
 		node.isReady = false
 	}
 }
 
 func (tm *DAG) ResumeConsumer(id string) {
-	if node, ok := tm.Nodes[id]; ok {
+	if node, ok := tm.nodes[id]; ok {
 		node.consumer.Resume()
 		node.isReady = true
 	}

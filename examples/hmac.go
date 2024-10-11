@@ -2,33 +2,25 @@ package main
 
 import (
 	"crypto/rand"
-	"encoding/base64"
+	"encoding/hex"
 	"fmt"
-	"log"
 )
 
-func GenerateSecretKey() (string, error) {
-	// Create a byte slice to hold 32 random bytes
-	key := make([]byte, 32)
-
-	// Fill the slice with secure random bytes
+func generateHMACKey() ([]byte, error) {
+	key := make([]byte, 32) // 32 bytes = 256 bits
 	_, err := rand.Read(key)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-
-	// Encode the byte slice to a Base64 string
-	secretKey := base64.StdEncoding.EncodeToString(key)
-
-	// Return the first 32 characters
-	return secretKey[:32], nil
+	return key, nil
 }
 
 func main() {
-	secretKey, err := GenerateSecretKey()
+	hmacKey, err := generateHMACKey()
 	if err != nil {
-		log.Fatalf("Error generating secret key: %v", err)
+		fmt.Println("Error generating HMAC key:", err)
+		return
 	}
 
-	fmt.Println("Generated Secret Key:", secretKey)
+	fmt.Println("HMAC Key (hex):", hex.EncodeToString(hmacKey))
 }
