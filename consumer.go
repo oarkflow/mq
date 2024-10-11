@@ -18,6 +18,12 @@ import (
 
 type Processor interface {
 	ProcessTask(ctx context.Context, msg *Task) Result
+	Consume(ctx context.Context) error
+	Pause(ctx context.Context) error
+	Resume(ctx context.Context) error
+	Stop(ctx context.Context) error
+	GetKey() string
+	Close() error
 }
 
 type Consumer struct {
@@ -50,6 +56,10 @@ func (c *Consumer) receive(conn net.Conn) (*codec.Message, error) {
 func (c *Consumer) Close() error {
 	c.pool.Stop()
 	return c.conn.Close()
+}
+
+func (c *Consumer) GetKey() string {
+	return c.id
 }
 
 func (c *Consumer) subscribe(ctx context.Context, queue string) error {

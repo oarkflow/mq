@@ -32,15 +32,19 @@ const (
 )
 
 type Node struct {
-	Name     string
-	Key      string
-	Edges    []Edge
-	isReady  bool
-	consumer *mq.Consumer
+	Name      string
+	Key       string
+	Edges     []Edge
+	isReady   bool
+	processor mq.Processor
 }
 
 func (n *Node) ProcessTask(ctx context.Context, msg *mq.Task) mq.Result {
-	return n.consumer.ProcessTask(ctx, msg)
+	return n.processor.ProcessTask(ctx, msg)
+}
+
+func (n *Node) Close() error {
+	return n.processor.Close()
 }
 
 type Edge struct {
@@ -58,6 +62,7 @@ type (
 
 type DAG struct {
 	name        string
+	key         string
 	startNode   string
 	nodes       map[string]*Node
 	server      *mq.Broker
@@ -68,9 +73,41 @@ type DAG struct {
 	opts        []mq.Option
 }
 
-func NewDAG(name string, opts ...mq.Option) *DAG {
+func (tm *DAG) Consume(ctx context.Context) error {
+	for _, con := range tm.nodes {
+		if con.isReady {
+			go func(con *Node) {
+				time.Sleep(1 * time.Second)
+				err := con.processor.Consume(ctx)
+				if err != nil {
+					panic(err)
+				}
+			}(con)
+		} else {
+			log.Printf("[WARNING] - Consumer %s is not ready yet", con.Key)
+		}
+	}
+	return nil
+}
+
+func (tm *DAG) Stop(ctx context.Context) error {
+	for _, n := range tm.nodes {
+		err := n.processor.Stop(ctx)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (tm *DAG) GetKey() string {
+	return tm.key
+}
+
+func NewDAG(name, key string, opts ...mq.Option) *DAG {
 	d := &DAG{
 		name:        name,
+		key:         key,
 		nodes:       make(map[string]*Node),
 		taskContext: make(map[string]*TaskManager),
 		conditions:  make(map[FromNode]map[When]Then),
@@ -118,19 +155,7 @@ func (tm *DAG) Start(ctx context.Context, addr string) error {
 				panic(err)
 			}
 		}()
-		for _, con := range tm.nodes {
-			if con.isReady {
-				go func(con *Node) {
-					time.Sleep(1 * time.Second)
-					err := con.consumer.Consume(ctx)
-					if err != nil {
-						panic(err)
-					}
-				}(con)
-			} else {
-				log.Printf("[WARNING] - Consumer %s is not ready yet", con.Key)
-			}
-		}
+		tm.Consume(ctx)
 	}
 	log.Printf("DAG - HTTP_SERVER ~> started on %s", addr)
 	config := tm.server.TLSConfig()
@@ -145,10 +170,10 @@ func (tm *DAG) AddNode(name, key string, handler mq.Handler, firstNode ...bool) 
 	defer tm.mu.Unlock()
 	con := mq.NewConsumer(key, key, handler, tm.opts...)
 	tm.nodes[key] = &Node{
-		Name:     name,
-		Key:      key,
-		consumer: con,
-		isReady:  true,
+		Name:      name,
+		Key:       key,
+		processor: con,
+		isReady:   true,
 	}
 	if len(firstNode) > 0 && firstNode[0] {
 		tm.startNode = key
@@ -215,7 +240,16 @@ func (tm *DAG) addEdge(edgeType EdgeType, label, from string, targets ...string)
 	fromNode.Edges = append(fromNode.Edges, edge)
 }
 
-func (tm *DAG) ProcessTask(ctx context.Context, payload []byte) mq.Result {
+func (tm *DAG) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+	taskID := xid.New().String()
+	manager := NewTaskManager(tm, taskID)
+	tm.taskContext[taskID] = manager
+	return manager.processTask(ctx, task.Topic, task.Payload)
+}
+
+func (tm *DAG) Process(ctx context.Context, payload []byte) mq.Result {
 	tm.mu.RLock()
 	if tm.paused {
 		tm.mu.RUnlock()
@@ -239,12 +273,8 @@ func (tm *DAG) ProcessTask(ctx context.Context, payload []byte) mq.Result {
 		}
 		initialNode = tm.startNode
 	}
-	tm.mu.Lock()
-	defer tm.mu.Unlock()
-	taskID := xid.New().String()
-	manager := NewTaskManager(tm, taskID)
-	tm.taskContext[taskID] = manager
-	return manager.processTask(ctx, initialNode, payload)
+	task := NewTask(xid.New().String(), payload, initialNode)
+	return tm.ProcessTask(ctx, task)
 }
 
 func (tm *DAG) findStartNode() *Node {
@@ -276,10 +306,28 @@ func (tm *DAG) findStartNode() *Node {
 	return nil
 }
 
-func (tm *DAG) Pause(pause bool) {
+func (tm *DAG) Pause(_ context.Context) error {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
-	tm.paused = pause
+	tm.paused = true
+	return nil
+}
+
+func (tm *DAG) Resume(_ context.Context) error {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+	tm.paused = false
+	return nil
+}
+
+func (tm *DAG) Close() error {
+	for _, n := range tm.nodes {
+		err := n.Close()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (tm *DAG) PauseConsumer(ctx context.Context, id string) {
@@ -294,12 +342,12 @@ func (tm *DAG) doConsumer(ctx context.Context, id string, action consts.CMD) {
 	if node, ok := tm.nodes[id]; ok {
 		switch action {
 		case consts.CONSUMER_PAUSE:
-			err := node.consumer.Pause(ctx)
+			err := node.processor.Pause(ctx)
 			if err == nil {
 				node.isReady = false
 			}
 		case consts.CONSUMER_RESUME:
-			err := node.consumer.Resume(ctx)
+			err := node.processor.Resume(ctx)
 			if err == nil {
 				node.isReady = true
 			}

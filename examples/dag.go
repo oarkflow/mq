@@ -17,6 +17,7 @@ import (
 var (
 	d = dag.NewDAG(
 		"Sample DAG",
+		"sample-dag",
 		// mq.WithSyncMode(true),
 		mq.WithNotifyResponse(tasks.NotifyResponse),
 		mq.WithSecretKey([]byte("wKWa6GKdBd0njDKNQoInBbh6P0KTjmob")),
@@ -60,10 +61,10 @@ func main() {
 		}
 	})
 	http.HandleFunc("/pause", func(writer http.ResponseWriter, request *http.Request) {
-		d.Pause(true)
+		d.Pause(request.Context())
 	})
 	http.HandleFunc("/resume", func(writer http.ResponseWriter, request *http.Request) {
-		d.Pause(false)
+		d.Resume(request.Context())
 	})
 	err := d.Start(context.TODO(), ":8083")
 	if err != nil {
@@ -95,7 +96,7 @@ func requestHandler(requestType string) func(w http.ResponseWriter, r *http.Requ
 			ctx = mq.SetHeaders(ctx, map[string]string{consts.AwaitResponseKey: "true"})
 		}
 		// ctx = context.WithValue(ctx, "initial_node", "E")
-		rs := d.ProcessTask(ctx, payload)
+		rs := d.Process(ctx, payload)
 		if rs.Error != nil {
 			http.Error(w, fmt.Sprintf("[DAG Error] - %v", rs.Error), http.StatusInternalServerError)
 			return
