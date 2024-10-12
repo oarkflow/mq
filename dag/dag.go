@@ -7,7 +7,6 @@ import (
 	"log"
 	"net/http"
 	"sync"
-	"time"
 
 	"github.com/oarkflow/xid"
 
@@ -74,27 +73,7 @@ type DAG struct {
 }
 
 func (tm *DAG) Consume(ctx context.Context) error {
-	if !tm.server.SyncMode() {
-		go func() {
-			err := tm.server.Start(ctx)
-			if err != nil {
-				panic(err)
-			}
-		}()
-		for _, con := range tm.nodes {
-			if con.isReady {
-				go func(con *Node) {
-					time.Sleep(1 * time.Second)
-					err := con.processor.Consume(ctx)
-					if err != nil {
-						panic(err)
-					}
-				}(con)
-			} else {
-				log.Printf("[WARNING] - Consumer %s is not ready yet", con.Key)
-			}
-		}
-	}
+
 	return nil
 }
 
@@ -156,7 +135,26 @@ func (tm *DAG) GetStartNode() string {
 }
 
 func (tm *DAG) Start(ctx context.Context, addr string) error {
-	go tm.Consume(ctx)
+	if !tm.server.SyncMode() {
+		go func() {
+			err := tm.server.Start(ctx)
+			if err != nil {
+				panic(err)
+			}
+		}()
+		for _, con := range tm.nodes {
+			if con.isReady {
+				go func(con *Node) {
+					err := con.processor.Consume(ctx)
+					if err != nil {
+						panic(err)
+					}
+				}(con)
+			} else {
+				log.Printf("[WARNING] - Consumer %s is not ready yet", con.Key)
+			}
+		}
+	}
 	log.Printf("DAG - HTTP_SERVER ~> started on %s", addr)
 	config := tm.server.TLSConfig()
 	if config.UseTLS {
@@ -288,7 +286,6 @@ func (tm *DAG) findStartNode() *Node {
 					connectedNodes[to.Key] = true
 					incomingEdges[to.Key] = true
 				}
-
 			}
 		}
 		if cond, ok := tm.conditions[FromNode(node.Key)]; ok {
