@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"runtime"
 	"time"
+
+	"github.com/oarkflow/mq/consts"
 )
 
 type Result struct {
@@ -206,4 +208,16 @@ func WithJitterPercent(val float64) Option {
 	return func(opts *Options) {
 		opts.jitterPercent = val
 	}
+}
+
+func HeadersWithConsumerID(ctx context.Context, id string) map[string]string {
+	return WithHeaders(ctx, map[string]string{consts.ConsumerKey: id, consts.ContentType: consts.TypeJson})
+}
+
+func HeadersWithConsumerIDAndQueue(ctx context.Context, id, queue string) map[string]string {
+	return WithHeaders(ctx, map[string]string{
+		consts.ConsumerKey: id,
+		consts.ContentType: consts.TypeJson,
+		consts.QueueKey:    queue,
+	})
 }

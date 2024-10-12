@@ -73,7 +73,8 @@ func (b *Broker) OnClose(ctx context.Context, conn net.Conn) error {
 		})
 	} else {
 		b.consumers.ForEach(func(consumerID string, con *consumer) bool {
-			if con.conn.RemoteAddr().String() == conn.RemoteAddr().String() && con.conn.LocalAddr().String() == conn.LocalAddr().String() {
+			if con.conn.RemoteAddr().String() == conn.RemoteAddr().String() &&
+				con.conn.LocalAddr().String() == conn.LocalAddr().String() {
 				if c, exists := b.consumers.Get(consumerID); exists {
 					c.conn.Close()
 					b.consumers.Del(consumerID)
@@ -141,7 +142,7 @@ func (b *Broker) MessageDeny(ctx context.Context, msg *codec.Message) {
 	log.Printf("BROKER - MESSAGE_DENY ~> %s on %s for Task %s, Error: %s", consumerID, msg.Queue, taskID, taskError)
 }
 
-func (b *Broker) OnConsumerPause(ctx context.Context, msg *codec.Message) {
+func (b *Broker) OnConsumerPause(ctx context.Context, _ *codec.Message) {
 	consumerID, _ := GetConsumerID(ctx)
 	if consumerID != "" {
 		if con, exists := b.consumers.Get(consumerID); exists {
@@ -151,7 +152,7 @@ func (b *Broker) OnConsumerPause(ctx context.Context, msg *codec.Message) {
 	}
 }
 
-func (b *Broker) OnConsumerStop(ctx context.Context, msg *codec.Message) {
+func (b *Broker) OnConsumerStop(ctx context.Context, _ *codec.Message) {
 	consumerID, _ := GetConsumerID(ctx)
 	if consumerID != "" {
 		if con, exists := b.consumers.Get(consumerID); exists {
@@ -161,7 +162,7 @@ func (b *Broker) OnConsumerStop(ctx context.Context, msg *codec.Message) {
 	}
 }
 
-func (b *Broker) OnConsumerResume(ctx context.Context, msg *codec.Message) {
+func (b *Broker) OnConsumerResume(ctx context.Context, _ *codec.Message) {
 	consumerID, _ := GetConsumerID(ctx)
 	if consumerID != "" {
 		if con, exists := b.consumers.Get(consumerID); exists {

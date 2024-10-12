@@ -63,10 +63,7 @@ func (c *Consumer) GetKey() string {
 }
 
 func (c *Consumer) subscribe(ctx context.Context, queue string) error {
-	headers := WithHeaders(ctx, map[string]string{
-		consts.ConsumerKey: c.id,
-		consts.ContentType: consts.TypeJson,
-	})
+	headers := HeadersWithConsumerID(ctx, c.id)
 	msg := codec.NewMessage(consts.SUBSCRIBE, utils.ToByte("{}"), queue, headers)
 	if err := c.send(c.conn, msg); err != nil {
 		return err
@@ -112,11 +109,7 @@ func (c *Consumer) OnMessage(ctx context.Context, msg *codec.Message, conn net.C
 }
 
 func (c *Consumer) ConsumeMessage(ctx context.Context, msg *codec.Message, conn net.Conn) {
-	headers := WithHeaders(ctx, map[string]string{
-		consts.ConsumerKey: c.id,
-		consts.ContentType: consts.TypeJson,
-		consts.QueueKey:    msg.Queue,
-	})
+	headers := HeadersWithConsumerIDAndQueue(ctx, c.id, msg.Queue)
 	taskID, _ := jsonparser.GetString(msg.Payload, "id")
 	reply := codec.NewMessage(consts.MESSAGE_ACK, utils.ToByte(fmt.Sprintf(`{"id":"%s"}`, taskID)), msg.Queue, headers)
 	if err := c.send(conn, reply); err != nil {
@@ -143,12 +136,15 @@ func (c *Consumer) ConsumeMessage(ctx context.Context, msg *codec.Message, conn 
 	}
 }
 
+func (c *Consumer) ProcessTask(ctx context.Context, msg *Task) Result {
+	result := c.handler(ctx, msg)
+	result.Topic = msg.Topic
+	result.TaskID = msg.ID
+	return result
+}
+
 func (c *Consumer) OnResponse(ctx context.Context, result Result) error {
-	headers := WithHeaders(ctx, map[string]string{
-		consts.ConsumerKey: c.id,
-		consts.QueueKey:    result.Topic,
-		consts.ContentType: consts.TypeJson,
-	})
+	headers := HeadersWithConsumerIDAndQueue(ctx, c.id, result.Topic)
 	if result.Status == "" {
 		if result.Error != nil {
 			result.Status = "FAILED"
@@ -158,28 +154,18 @@ func (c *Consumer) OnResponse(ctx context.Context, result Result) error {
 	}
 	bt, _ := json.Marshal(result)
 	reply := codec.NewMessage(consts.MESSAGE_RESPONSE, bt, result.Topic, headers)
-	if err := codec.SendMessage(c.conn, reply, c.opts.aesKey, c.opts.hmacKey, c.opts.enableEncryption); err != nil {
+	if err := c.send(c.conn, reply); err != nil {
 		return fmt.Errorf("failed to send MESSAGE_RESPONSE: %v", err)
 	}
 	return nil
 }
 
 func (c *Consumer) sendDenyMessage(ctx context.Context, taskID, queue string, err error) {
-	headers := WithHeaders(ctx, map[string]string{
-		consts.ConsumerKey: c.id,
-		consts.ContentType: consts.TypeJson,
-	})
+	headers := HeadersWithConsumerID(ctx, c.id)
 	reply := codec.NewMessage(consts.MESSAGE_DENY, utils.ToByte(fmt.Sprintf(`{"id":"%s", "error":"%s"}`, taskID, err.Error())), queue, headers)
 	if sendErr := c.send(c.conn, reply); sendErr != nil {
 		log.Printf("failed to send MESSAGE_DENY for task %s: %v", taskID, sendErr)
 	}
-}
-
-func (c *Consumer) ProcessTask(ctx context.Context, msg *Task) Result {
-	result := c.handler(ctx, msg)
-	result.Topic = msg.Topic
-	result.TaskID = msg.ID
-	return result
 }
 
 func (c *Consumer) attemptConnect() error {
@@ -210,7 +196,10 @@ func (c *Consumer) readMessage(ctx context.Context, conn net.Conn) error {
 		return c.OnMessage(ctx, msg, conn)
 	}
 	if err.Error() == "EOF" || strings.Contains(err.Error(), "closed network connection") {
-		c.OnClose(ctx, conn)
+		err1 := c.OnClose(ctx, conn)
+		if err1 != nil {
+			return err1
+		}
 		return err
 	}
 	c.OnError(ctx, conn, err)
@@ -256,49 +245,27 @@ func (c *Consumer) waitForAck(conn net.Conn) error {
 }
 
 func (c *Consumer) Pause(ctx context.Context) error {
-	if err := c.sendPauseMessage(ctx); err != nil {
-		return err
-	}
-	c.pool.Pause()
-	return nil
-}
-
-func (c *Consumer) sendPauseMessage(ctx context.Context) error {
-	headers := WithHeaders(ctx, map[string]string{
-		consts.ConsumerKey: c.id,
-	})
-	msg := codec.NewMessage(consts.CONSUMER_PAUSED, nil, c.queue, headers)
-	return c.send(c.conn, msg)
+	return c.operate(ctx, consts.CONSUMER_PAUSED, c.pool.Pause)
 }
 
 func (c *Consumer) Resume(ctx context.Context) error {
-	if err := c.sendResumeMessage(ctx); err != nil {
-		return err
-	}
-	c.pool.Resume()
-	return nil
-}
-
-func (c *Consumer) sendResumeMessage(ctx context.Context) error {
-	headers := WithHeaders(ctx, map[string]string{
-		consts.ConsumerKey: c.id,
-	})
-	msg := codec.NewMessage(consts.CONSUMER_RESUMED, nil, c.queue, headers)
-	return c.send(c.conn, msg)
+	return c.operate(ctx, consts.CONSUMER_RESUMED, c.pool.Resume)
 }
 
 func (c *Consumer) Stop(ctx context.Context) error {
-	if err := c.sendStopMessage(ctx); err != nil {
+	return c.operate(ctx, consts.CONSUMER_STOPPED, c.pool.Stop)
+}
+
+func (c *Consumer) operate(ctx context.Context, cmd consts.CMD, poolOperation func()) error {
+	if err := c.sendOpsMessage(ctx, cmd); err != nil {
 		return err
 	}
-	c.pool.Stop()
+	poolOperation()
 	return nil
 }
 
-func (c *Consumer) sendStopMessage(ctx context.Context) error {
-	headers := WithHeaders(ctx, map[string]string{
-		consts.ConsumerKey: c.id,
-	})
-	msg := codec.NewMessage(consts.CONSUMER_STOPPED, nil, c.queue, headers)
+func (c *Consumer) sendOpsMessage(ctx context.Context, cmd consts.CMD) error {
+	headers := HeadersWithConsumerID(ctx, c.id)
+	msg := codec.NewMessage(cmd, nil, c.queue, headers)
 	return c.send(c.conn, msg)
 }
