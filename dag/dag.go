@@ -166,7 +166,8 @@ func (tm *DAG) Start(ctx context.Context, addr string) error {
 func (tm *DAG) AddNode(name, key string, handler mq.Handler, firstNode ...bool) {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
-	con := mq.NewConsumer(key, key, handler, tm.opts...)
+	opts := append(tm.opts, mq.WithRespondPendingResult(false))
+	con := mq.NewConsumer(key, key, handler, opts...)
 	tm.nodes[key] = &Node{
 		Name:      name,
 		Key:       key,

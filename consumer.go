@@ -109,11 +109,10 @@ func (c *Consumer) OnMessage(ctx context.Context, msg *codec.Message, conn net.C
 }
 
 func (c *Consumer) ConsumeMessage(ctx context.Context, msg *codec.Message, conn net.Conn) {
-	headers := HeadersWithConsumerIDAndQueue(ctx, c.id, msg.Queue)
-	taskID, _ := jsonparser.GetString(msg.Payload, "id")
-	reply := codec.NewMessage(consts.MESSAGE_ACK, utils.ToByte(fmt.Sprintf(`{"id":"%s"}`, taskID)), msg.Queue, headers)
-	if err := c.send(conn, reply); err != nil {
-		fmt.Printf("failed to send MESSAGE_ACK for queue %s: %v", msg.Queue, err)
+	c.sendMessageAck(ctx, msg, conn)
+	if msg.Payload == nil {
+		log.Printf("Received empty message payload")
+		return
 	}
 	var task Task
 	err := json.Unmarshal(msg.Payload, &task)
@@ -123,12 +122,25 @@ func (c *Consumer) ConsumeMessage(ctx context.Context, msg *codec.Message, conn 
 	}
 	ctx = SetHeaders(ctx, map[string]string{consts.QueueKey: msg.Queue})
 	if err := c.pool.AddTask(ctx, &task); err != nil {
-		c.sendDenyMessage(ctx, taskID, msg.Queue, err)
+		c.sendDenyMessage(ctx, task.ID, msg.Queue, err)
 		return
 	}
 }
 
+func (c *Consumer) sendMessageAck(ctx context.Context, msg *codec.Message, conn net.Conn) {
+	headers := HeadersWithConsumerIDAndQueue(ctx, c.id, msg.Queue)
+	taskID, _ := jsonparser.GetString(msg.Payload, "id")
+	reply := codec.NewMessage(consts.MESSAGE_ACK, utils.ToByte(fmt.Sprintf(`{"id":"%s"}`, taskID)), msg.Queue, headers)
+	if err := c.send(conn, reply); err != nil {
+		fmt.Printf("failed to send MESSAGE_ACK for queue %s: %v", msg.Queue, err)
+	}
+}
+
 func (c *Consumer) ProcessTask(ctx context.Context, msg *Task) Result {
+	queue, _ := GetQueue(ctx)
+	if msg.Topic == "" && queue != "" {
+		msg.Topic = queue
+	}
 	result := c.handler(ctx, msg)
 	result.Topic = msg.Topic
 	result.TaskID = msg.ID

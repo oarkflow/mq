@@ -60,37 +60,39 @@ type TLSConfig struct {
 }
 
 type Options struct {
-	consumerOnSubscribe func(ctx context.Context, topic, consumerName string)
-	consumerOnClose     func(ctx context.Context, topic, consumerName string)
-	notifyResponse      func(context.Context, Result)
-	tlsConfig           TLSConfig
-	brokerAddr          string
-	callback            []func(context.Context, Result) Result
-	aesKey              json.RawMessage
-	hmacKey             json.RawMessage
-	maxRetries          int
-	initialDelay        time.Duration
-	maxBackoff          time.Duration
-	jitterPercent       float64
-	queueSize           int
-	numOfWorkers        int
-	maxMemoryLoad       int64
-	syncMode            bool
-	enableEncryption    bool
-	enableWorkerPool    bool
+	consumerOnSubscribe  func(ctx context.Context, topic, consumerName string)
+	consumerOnClose      func(ctx context.Context, topic, consumerName string)
+	notifyResponse       func(context.Context, Result)
+	tlsConfig            TLSConfig
+	brokerAddr           string
+	callback             []func(context.Context, Result) Result
+	aesKey               json.RawMessage
+	hmacKey              json.RawMessage
+	maxRetries           int
+	initialDelay         time.Duration
+	maxBackoff           time.Duration
+	jitterPercent        float64
+	queueSize            int
+	numOfWorkers         int
+	maxMemoryLoad        int64
+	syncMode             bool
+	enableEncryption     bool
+	enableWorkerPool     bool
+	respondPendingResult bool
 }
 
 func defaultOptions() Options {
 	return Options{
-		brokerAddr:    ":8080",
-		maxRetries:    5,
-		initialDelay:  2 * time.Second,
-		maxBackoff:    20 * time.Second,
-		jitterPercent: 0.5,
-		queueSize:     100,
-		hmacKey:       []byte(`475f3adc6be9ee6f5357020e2922ff5b8f971598e175878e617d19df584bc648`),
-		numOfWorkers:  runtime.NumCPU(),
-		maxMemoryLoad: 5000000,
+		brokerAddr:           ":8080",
+		maxRetries:           5,
+		respondPendingResult: true,
+		initialDelay:         2 * time.Second,
+		maxBackoff:           20 * time.Second,
+		jitterPercent:        0.5,
+		queueSize:            100,
+		hmacKey:              []byte(`475f3adc6be9ee6f5357020e2922ff5b8f971598e175878e617d19df584bc648`),
+		numOfWorkers:         runtime.NumCPU(),
+		maxMemoryLoad:        5000000,
 	}
 }
 
@@ -172,6 +174,13 @@ func WithCAPath(caPath string) Option {
 func WithSyncMode(mode bool) Option {
 	return func(opts *Options) {
 		opts.syncMode = mode
+	}
+}
+
+// WithRespondPendingResult -
+func WithRespondPendingResult(mode bool) Option {
+	return func(opts *Options) {
+		opts.respondPendingResult = mode
 	}
 }
 
