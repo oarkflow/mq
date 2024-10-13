@@ -148,6 +148,9 @@ func (c *Consumer) ProcessTask(ctx context.Context, msg *Task) Result {
 }
 
 func (c *Consumer) OnResponse(ctx context.Context, result Result) error {
+	if result.Status == "PENDING" && c.opts.respondPendingResult {
+		return nil
+	}
 	headers := HeadersWithConsumerIDAndQueue(ctx, c.id, result.Topic)
 	if result.Status == "" {
 		if result.Error != nil {
@@ -156,10 +159,17 @@ func (c *Consumer) OnResponse(ctx context.Context, result Result) error {
 			result.Status = "SUCCESS"
 		}
 	}
-	bt, _ := json.Marshal(result)
-	reply := codec.NewMessage(consts.MESSAGE_RESPONSE, bt, result.Topic, headers)
-	if err := c.send(c.conn, reply); err != nil {
-		return fmt.Errorf("failed to send MESSAGE_RESPONSE: %v", err)
+	if result.Payload != nil || result.Error != nil {
+		bt, _ := json.Marshal(result)
+		reply := codec.NewMessage(consts.MESSAGE_RESPONSE, bt, result.Topic, headers)
+		if err := c.send(c.conn, reply); err != nil {
+			return fmt.Errorf("failed to send MESSAGE_RESPONSE: %v", err)
+		}
+		if c.opts.notifyResponse != nil {
+			fmt.Println(result.Status, result.Topic)
+			panic(1)
+			c.opts.notifyResponse(ctx, result)
+		}
 	}
 	return nil
 }
