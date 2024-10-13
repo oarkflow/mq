@@ -35,7 +35,7 @@ func Node3(_ context.Context, task *mq.Task) mq.Result {
 func Node4(_ context.Context, task *mq.Task) mq.Result {
 	var user map[string]any
 	_ = json.Unmarshal(task.Payload, &user)
-	user["final"] = "D"
+	user["node"] = "D"
 	resultPayload, _ := json.Marshal(user)
 	return mq.Result{Payload: resultPayload}
 }
@@ -43,7 +43,7 @@ func Node4(_ context.Context, task *mq.Task) mq.Result {
 func Node5(_ context.Context, task *mq.Task) mq.Result {
 	var user map[string]any
 	_ = json.Unmarshal(task.Payload, &user)
-	user["salary"] = "E"
+	user["node"] = "E"
 	resultPayload, _ := json.Marshal(user)
 	return mq.Result{Payload: resultPayload}
 }
@@ -58,7 +58,7 @@ func Node6(_ context.Context, task *mq.Task) mq.Result {
 func Node7(_ context.Context, task *mq.Task) mq.Result {
 	var user map[string]any
 	_ = json.Unmarshal(task.Payload, &user)
-	user["node"] = "7"
+	user["node"] = "G"
 	resultPayload, _ := json.Marshal(user)
 	return mq.Result{Payload: resultPayload}
 }
@@ -66,7 +66,7 @@ func Node7(_ context.Context, task *mq.Task) mq.Result {
 func Node8(_ context.Context, task *mq.Task) mq.Result {
 	var user map[string]any
 	_ = json.Unmarshal(task.Payload, &user)
-	user["node"] = "8"
+	user["node"] = "H"
 	resultPayload, _ := json.Marshal(user)
 	return mq.Result{Payload: resultPayload}
 }
