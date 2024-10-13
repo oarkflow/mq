@@ -18,7 +18,7 @@ var (
 	d = dag.NewDAG(
 		"Sample DAG",
 		"sample-dag",
-		// mq.WithSyncMode(true),
+		mq.WithSyncMode(true),
 		mq.WithNotifyResponse(tasks.NotifyResponse),
 		mq.WithSecretKey([]byte("wKWa6GKdBd0njDKNQoInBbh6P0KTjmob")),
 	)
