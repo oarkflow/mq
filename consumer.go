@@ -108,6 +108,15 @@ func (c *Consumer) OnMessage(ctx context.Context, msg *codec.Message, conn net.C
 	return nil
 }
 
+func (c *Consumer) sendMessageAck(ctx context.Context, msg *codec.Message, conn net.Conn) {
+	headers := HeadersWithConsumerIDAndQueue(ctx, c.id, msg.Queue)
+	taskID, _ := jsonparser.GetString(msg.Payload, "id")
+	reply := codec.NewMessage(consts.MESSAGE_ACK, utils.ToByte(fmt.Sprintf(`{"id":"%s"}`, taskID)), msg.Queue, headers)
+	if err := c.send(conn, reply); err != nil {
+		fmt.Printf("failed to send MESSAGE_ACK for queue %s: %v", msg.Queue, err)
+	}
+}
+
 func (c *Consumer) ConsumeMessage(ctx context.Context, msg *codec.Message, conn net.Conn) {
 	c.sendMessageAck(ctx, msg, conn)
 	if msg.Payload == nil {
@@ -124,15 +133,6 @@ func (c *Consumer) ConsumeMessage(ctx context.Context, msg *codec.Message, conn 
 	if err := c.pool.AddTask(ctx, &task); err != nil {
 		c.sendDenyMessage(ctx, task.ID, msg.Queue, err)
 		return
-	}
-}
-
-func (c *Consumer) sendMessageAck(ctx context.Context, msg *codec.Message, conn net.Conn) {
-	headers := HeadersWithConsumerIDAndQueue(ctx, c.id, msg.Queue)
-	taskID, _ := jsonparser.GetString(msg.Payload, "id")
-	reply := codec.NewMessage(consts.MESSAGE_ACK, utils.ToByte(fmt.Sprintf(`{"id":"%s"}`, taskID)), msg.Queue, headers)
-	if err := c.send(conn, reply); err != nil {
-		fmt.Printf("failed to send MESSAGE_ACK for queue %s: %v", msg.Queue, err)
 	}
 }
 
@@ -166,8 +166,6 @@ func (c *Consumer) OnResponse(ctx context.Context, result Result) error {
 			return fmt.Errorf("failed to send MESSAGE_RESPONSE: %v", err)
 		}
 		if c.opts.notifyResponse != nil {
-			fmt.Println(result.Status, result.Topic)
-			panic(1)
 			c.opts.notifyResponse(ctx, result)
 		}
 	}

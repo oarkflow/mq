@@ -77,5 +77,5 @@ func Callback(_ context.Context, task mq.Result) mq.Result {
 }
 
 func NotifyResponse(_ context.Context, result mq.Result) {
-	log.Printf("DAG - FINAL_RESPONSE ~> TaskID: %s, Payload: %s, Topic: %s", result.TaskID, result.Payload, result.Topic)
+	log.Printf("DAG - FINAL_RESPONSE ~> TaskID: %s, Payload: %s, Topic: %s, Error: %s", result.TaskID, result.Payload, result.Topic, result.Error)
 }

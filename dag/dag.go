@@ -60,20 +60,25 @@ type (
 )
 
 type DAG struct {
-	name        string
-	key         string
-	startNode   string
-	nodes       map[string]*Node
-	server      *mq.Broker
-	taskContext map[string]*TaskManager
-	conditions  map[FromNode]map[When]Then
-	mu          sync.RWMutex
-	paused      bool
-	opts        []mq.Option
+	name          string
+	key           string
+	startNode     string
+	consumerTopic string
+	nodes         map[string]*Node
+	server        *mq.Broker
+	consumer      *mq.Consumer
+	taskContext   map[string]*TaskManager
+	conditions    map[FromNode]map[When]Then
+	mu            sync.RWMutex
+	paused        bool
+	opts          []mq.Option
 }
 
 func (tm *DAG) Consume(ctx context.Context) error {
-
+	if tm.consumer != nil {
+		tm.server.Options().SetSyncMode(true)
+		return tm.consumer.Consume(ctx)
+	}
 	return nil
 }
 
@@ -91,6 +96,11 @@ func (tm *DAG) GetKey() string {
 	return tm.key
 }
 
+func (tm *DAG) AssignTopic(topic string) {
+	tm.consumer = mq.NewConsumer(topic, topic, tm.ProcessTask, mq.WithRespondPendingResult(false))
+	tm.consumerTopic = topic
+}
+
 func NewDAG(name, key string, opts ...mq.Option) *DAG {
 	d := &DAG{
 		name:        name,
@@ -103,6 +113,13 @@ func NewDAG(name, key string, opts ...mq.Option) *DAG {
 	d.server = mq.NewBroker(opts...)
 	d.opts = opts
 	return d
+}
+
+func (tm *DAG) callbackToConsumer(ctx context.Context, result mq.Result) {
+	if tm.consumer != nil {
+		result.Topic = tm.consumerTopic
+		tm.consumer.OnResponse(ctx, result)
+	}
 }
 
 func (tm *DAG) onTaskCallback(ctx context.Context, result mq.Result) mq.Result {
@@ -166,11 +183,7 @@ func (tm *DAG) Start(ctx context.Context, addr string) error {
 func (tm *DAG) AddNode(name, key string, handler mq.Handler, firstNode ...bool) {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
-	var opts []mq.Option
-	copy(opts, tm.opts)
-	opts = append(tm.opts, mq.WithRespondPendingResult(false))
-	opts = append(opts, mq.WithNotifyResponse(nil))
-	con := mq.NewConsumer(key, key, handler, opts...)
+	con := mq.NewConsumer(key, key, handler, tm.opts...)
 	tm.nodes[key] = &Node{
 		Name:      name,
 		Key:       key,
@@ -248,7 +261,33 @@ func (tm *DAG) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 	taskID := xid.New().String()
 	manager := NewTaskManager(tm, taskID)
 	tm.taskContext[taskID] = manager
+	if tm.consumer != nil {
+		initialNode, err := tm.parseInitialNode(ctx)
+		if err != nil {
+			return mq.Result{Error: err}
+		}
+		task.Topic = initialNode
+	}
 	return manager.processTask(ctx, task.Topic, task.Payload)
+}
+
+func (tm *DAG) parseInitialNode(ctx context.Context) (string, error) {
+	val := ctx.Value("initial_node")
+	initialNode, ok := val.(string)
+	if ok {
+		return initialNode, nil
+	}
+	if tm.startNode == "" {
+		firstNode := tm.findStartNode()
+		if firstNode != nil {
+			tm.startNode = firstNode.Key
+		}
+	}
+
+	if tm.startNode == "" {
+		return "", fmt.Errorf("initial node not found")
+	}
+	return tm.startNode, nil
 }
 
 func (tm *DAG) Process(ctx context.Context, payload []byte) mq.Result {
@@ -261,19 +300,9 @@ func (tm *DAG) Process(ctx context.Context, payload []byte) mq.Result {
 	if !tm.IsReady() {
 		return mq.Result{Error: fmt.Errorf("unable to process task, error: DAG is not ready yet")}
 	}
-	val := ctx.Value("initial_node")
-	initialNode, ok := val.(string)
-	if !ok {
-		if tm.startNode == "" {
-			firstNode := tm.findStartNode()
-			if firstNode != nil {
-				tm.startNode = firstNode.Key
-			}
-		}
-		if tm.startNode == "" {
-			return mq.Result{Error: fmt.Errorf("initial node not found")}
-		}
-		initialNode = tm.startNode
+	initialNode, err := tm.parseInitialNode(ctx)
+	if err != nil {
+		return mq.Result{Error: err}
 	}
 	task := NewTask(xid.New().String(), payload, initialNode)
 	return tm.ProcessTask(ctx, task)

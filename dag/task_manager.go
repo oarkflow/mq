@@ -51,6 +51,7 @@ func (tm *TaskManager) processTask(ctx context.Context, nodeID string, payload j
 		go func() {
 			finalResult := <-tm.finalResult
 			tm.updateTS(&finalResult)
+			tm.dag.callbackToConsumer(ctx, finalResult)
 			if tm.dag.server.NotifyHandler() != nil {
 				tm.dag.server.NotifyHandler()(ctx, finalResult)
 			}
@@ -59,6 +60,7 @@ func (tm *TaskManager) processTask(ctx context.Context, nodeID string, payload j
 	} else {
 		finalResult := <-tm.finalResult
 		tm.updateTS(&finalResult)
+		tm.dag.callbackToConsumer(ctx, finalResult)
 		if tm.dag.server.NotifyHandler() != nil {
 			tm.dag.server.NotifyHandler()(ctx, finalResult)
 		}
