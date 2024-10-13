@@ -3,7 +3,6 @@ package mq
 import (
 	"context"
 	"fmt"
-	"net"
 	"sync"
 	"sync/atomic"
 
@@ -18,7 +17,6 @@ type QueueTask struct {
 type Callback func(ctx context.Context, result Result) error
 
 type Pool struct {
-	conn                      net.Conn
 	taskQueue                 chan QueueTask
 	stop                      chan struct{}
 	handler                   Handler
@@ -37,7 +35,7 @@ func NewPool(
 	numOfWorkers, taskQueueSize int,
 	maxMemoryLoad int64,
 	handler Handler,
-	callback Callback, conn net.Conn) *Pool {
+	callback Callback) *Pool {
 	pool := &Pool{
 		numOfWorkers:  int32(numOfWorkers),
 		taskQueue:     make(chan QueueTask, taskQueueSize),
@@ -45,10 +43,9 @@ func NewPool(
 		maxMemoryLoad: maxMemoryLoad,
 		handler:       handler,
 		callback:      callback,
-		conn:          conn,
 		workerAdjust:  make(chan int),
 	}
-	pool.Start(int(numOfWorkers))
+	pool.Start(numOfWorkers)
 	return pool
 }
 

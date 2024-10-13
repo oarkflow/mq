@@ -7,8 +7,7 @@ import (
 	"log"
 	"net/http"
 	"sync"
-
-	"github.com/oarkflow/xid"
+	"time"
 
 	"github.com/oarkflow/mq"
 	"github.com/oarkflow/mq/consts"
@@ -16,9 +15,9 @@ import (
 
 func NewTask(id string, payload json.RawMessage, nodeKey string) *mq.Task {
 	if id == "" {
-		id = xid.New().String()
+		id = mq.NewID()
 	}
-	return &mq.Task{ID: id, Payload: payload, Topic: nodeKey}
+	return &mq.Task{ID: id, Payload: payload, Topic: nodeKey, CreatedAt: time.Now()}
 }
 
 type EdgeType int
@@ -72,6 +71,7 @@ type DAG struct {
 	mu            sync.RWMutex
 	paused        bool
 	opts          []mq.Option
+	pool          *mq.Pool
 }
 
 func (tm *DAG) Consume(ctx context.Context) error {
@@ -112,6 +112,10 @@ func NewDAG(name, key string, opts ...mq.Option) *DAG {
 	opts = append(opts, mq.WithCallback(d.onTaskCallback), mq.WithConsumerOnSubscribe(d.onConsumerJoin), mq.WithConsumerOnClose(d.onConsumerClose))
 	d.server = mq.NewBroker(opts...)
 	d.opts = opts
+	d.pool = mq.NewPool(d.server.Options().NumOfWorkers(), d.server.Options().QueueSize(), d.server.Options().MaxMemoryLoad(), d.ProcessTask, func(ctx context.Context, result mq.Result) error {
+		return nil
+	})
+	d.pool.Start(d.server.Options().NumOfWorkers())
 	return d
 }
 
@@ -258,8 +262,9 @@ func (tm *DAG) addEdge(edgeType EdgeType, label, from string, targets ...string)
 func (tm *DAG) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
-	taskID := xid.New().String()
+	taskID := mq.NewID()
 	manager := NewTaskManager(tm, taskID)
+	manager.createdAt = task.CreatedAt
 	tm.taskContext[taskID] = manager
 	if tm.consumer != nil {
 		initialNode, err := tm.parseInitialNode(ctx)
@@ -269,6 +274,34 @@ func (tm *DAG) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 		task.Topic = initialNode
 	}
 	return manager.processTask(ctx, task.Topic, task.Payload)
+}
+
+func (tm *DAG) Process(ctx context.Context, payload []byte) mq.Result {
+	tm.mu.RLock()
+	if tm.paused {
+		tm.mu.RUnlock()
+		return mq.Result{Error: fmt.Errorf("unable to process task, error: DAG is not accepting any task")}
+	}
+	tm.mu.RUnlock()
+	if !tm.IsReady() {
+		return mq.Result{Error: fmt.Errorf("unable to process task, error: DAG is not ready yet")}
+	}
+	initialNode, err := tm.parseInitialNode(ctx)
+	if err != nil {
+		return mq.Result{Error: err}
+	}
+	task := NewTask(mq.NewID(), payload, initialNode)
+	awaitResponse, _ := mq.GetAwaitResponse(ctx)
+	if awaitResponse != "true" {
+		headers, ok := mq.GetHeaders(ctx)
+		ctxx := context.Background()
+		if ok {
+			ctxx = mq.SetHeaders(ctxx, headers.AsMap())
+		}
+		tm.pool.AddTask(ctxx, task)
+		return mq.Result{CreatedAt: task.CreatedAt, TaskID: task.ID, Topic: initialNode, Status: "PENDING"}
+	}
+	return tm.ProcessTask(ctx, task)
 }
 
 func (tm *DAG) parseInitialNode(ctx context.Context) (string, error) {
@@ -288,24 +321,6 @@ func (tm *DAG) parseInitialNode(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("initial node not found")
 	}
 	return tm.startNode, nil
-}
-
-func (tm *DAG) Process(ctx context.Context, payload []byte) mq.Result {
-	tm.mu.RLock()
-	if tm.paused {
-		tm.mu.RUnlock()
-		return mq.Result{Error: fmt.Errorf("unable to process task, error: DAG is not accepting any task")}
-	}
-	tm.mu.RUnlock()
-	if !tm.IsReady() {
-		return mq.Result{Error: fmt.Errorf("unable to process task, error: DAG is not ready yet")}
-	}
-	initialNode, err := tm.parseInitialNode(ctx)
-	if err != nil {
-		return mq.Result{Error: err}
-	}
-	task := NewTask(xid.New().String(), payload, initialNode)
-	return tm.ProcessTask(ctx, task)
 }
 
 func (tm *DAG) findStartNode() *Node {

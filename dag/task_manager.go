@@ -19,7 +19,6 @@ type TaskManager struct {
 	processedAt time.Time
 	results     []mq.Result
 	nodeResults map[string]mq.Result
-	finalResult chan mq.Result
 	wg          *WaitGroup
 }
 
@@ -29,7 +28,6 @@ func NewTaskManager(d *DAG, taskID string) *TaskManager {
 		nodeResults: make(map[string]mq.Result),
 		results:     make([]mq.Result, 0),
 		taskID:      taskID,
-		finalResult: make(chan mq.Result, 1),
 		wg:          NewWaitGroup(),
 	}
 }
@@ -44,7 +42,9 @@ func (tm *TaskManager) processTask(ctx context.Context, nodeID string, payload j
 	if !ok {
 		return mq.Result{Error: fmt.Errorf("nodeID %s not found", nodeID)}
 	}
-	tm.createdAt = time.Now()
+	if tm.createdAt.IsZero() {
+		tm.createdAt = time.Now()
+	}
 	tm.wg.Add(1)
 	go func() {
 		go tm.processNode(ctx, node, payload)
