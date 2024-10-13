@@ -15,11 +15,11 @@ import (
 
 type Publisher struct {
 	id   string
-	opts Options
+	opts *Options
 }
 
 func NewPublisher(id string, opts ...Option) *Publisher {
-	options := setupOptions(opts...)
+	options := SetupOptions(opts...)
 	return &Publisher{id: id, opts: options}
 }
 

@@ -32,11 +32,11 @@ type Consumer struct {
 	pool    *Pool
 	id      string
 	queue   string
-	opts    Options
+	opts    *Options
 }
 
 func NewConsumer(id string, queue string, handler Handler, opts ...Option) *Consumer {
-	options := setupOptions(opts...)
+	options := SetupOptions(opts...)
 	return &Consumer{
 		id:      id,
 		opts:    options,

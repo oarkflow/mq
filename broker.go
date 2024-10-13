@@ -38,11 +38,11 @@ type Broker struct {
 	queues     xsync.IMap[string, *Queue]
 	consumers  xsync.IMap[string, *consumer]
 	publishers xsync.IMap[string, *publisher]
-	opts       Options
+	opts       *Options
 }
 
 func NewBroker(opts ...Option) *Broker {
-	options := setupOptions(opts...)
+	options := SetupOptions(opts...)
 	return &Broker{
 		queues:     xsync.NewMap[string, *Queue](),
 		publishers: xsync.NewMap[string, *publisher](),
@@ -51,7 +51,7 @@ func NewBroker(opts ...Option) *Broker {
 	}
 }
 
-func (b *Broker) Options() Options {
+func (b *Broker) Options() *Options {
 	return b.opts
 }
 

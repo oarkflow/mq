@@ -81,8 +81,12 @@ type Options struct {
 	respondPendingResult bool
 }
 
-func defaultOptions() Options {
-	return Options{
+func (o *Options) SetSyncMode(sync bool) {
+	o.syncMode = sync
+}
+
+func defaultOptions() *Options {
+	return &Options{
 		brokerAddr:           ":8080",
 		maxRetries:           5,
 		respondPendingResult: true,
@@ -99,10 +103,10 @@ func defaultOptions() Options {
 // Option defines a function type for setting options.
 type Option func(*Options)
 
-func setupOptions(opts ...Option) Options {
+func SetupOptions(opts ...Option) *Options {
 	options := defaultOptions()
 	for _, opt := range opts {
-		opt(&options)
+		opt(options)
 	}
 	return options
 }
