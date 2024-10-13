@@ -122,14 +122,6 @@ func (c *Consumer) ConsumeMessage(ctx context.Context, msg *codec.Message, conn 
 		return
 	}
 	ctx = SetHeaders(ctx, map[string]string{consts.QueueKey: msg.Queue})
-	if !c.opts.enableWorkerPool {
-		result := c.ProcessTask(ctx, &task)
-		err = c.OnResponse(ctx, result)
-		if err != nil {
-			log.Printf("Error on message callback: %v", err)
-		}
-		return
-	}
 	if err := c.pool.AddTask(ctx, &task); err != nil {
 		c.sendDenyMessage(ctx, taskID, msg.Queue, err)
 		return
