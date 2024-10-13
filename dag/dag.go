@@ -268,14 +268,7 @@ func (tm *DAG) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 		}
 		task.Topic = initialNode
 	}
-	manager.wg.Add(1)
-	go func() {
-		manager.processTask(ctx, task.Topic, task.Payload)
-	}()
-	manager.wg.Wait()
-	result := manager.dispatchFinalResult(ctx)
-	manager.finalResult <- result
-	return result
+	return manager.processTask(ctx, task.Topic, task.Payload)
 }
 
 func (tm *DAG) parseInitialNode(ctx context.Context) (string, error) {

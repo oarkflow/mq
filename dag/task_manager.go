@@ -45,27 +45,12 @@ func (tm *TaskManager) processTask(ctx context.Context, nodeID string, payload j
 		return mq.Result{Error: fmt.Errorf("nodeID %s not found", nodeID)}
 	}
 	tm.createdAt = time.Now()
-	go tm.processNode(ctx, node, payload)
-	awaitResponse, ok := mq.GetAwaitResponse(ctx)
-	if awaitResponse != "true" {
-		go func() {
-			finalResult := <-tm.finalResult
-			tm.updateTS(&finalResult)
-			tm.dag.callbackToConsumer(ctx, finalResult)
-			if tm.dag.server.NotifyHandler() != nil {
-				tm.dag.server.NotifyHandler()(ctx, finalResult)
-			}
-		}()
-		return mq.Result{CreatedAt: tm.createdAt, TaskID: tm.taskID, Topic: nodeID, Status: "PENDING"}
-	} else {
-		finalResult := <-tm.finalResult
-		tm.updateTS(&finalResult)
-		tm.dag.callbackToConsumer(ctx, finalResult)
-		if tm.dag.server.NotifyHandler() != nil {
-			tm.dag.server.NotifyHandler()(ctx, finalResult)
-		}
-		return finalResult
-	}
+	tm.wg.Add(1)
+	go func() {
+		go tm.processNode(ctx, node, payload)
+	}()
+	tm.wg.Wait()
+	return tm.dispatchFinalResult(ctx)
 }
 
 func (tm *TaskManager) dispatchFinalResult(ctx context.Context) mq.Result {
@@ -74,6 +59,11 @@ func (tm *TaskManager) dispatchFinalResult(ctx context.Context) mq.Result {
 		rs = tm.handleResult(ctx, tm.results[0])
 	} else {
 		rs = tm.handleResult(ctx, tm.results)
+	}
+	tm.updateTS(&rs)
+	tm.dag.callbackToConsumer(ctx, rs)
+	if tm.dag.server.NotifyHandler() != nil {
+		tm.dag.server.NotifyHandler()(ctx, rs)
 	}
 	return rs
 }
