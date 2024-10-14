@@ -283,11 +283,11 @@ func (b *Broker) Start(ctx context.Context) error {
 }
 
 func (b *Broker) send(conn net.Conn, msg *codec.Message) error {
-	return codec.SendMessage(conn, msg, b.opts.aesKey, b.opts.hmacKey, b.opts.enableEncryption)
+	return codec.SendMessage(conn, msg)
 }
 
 func (b *Broker) receive(c net.Conn) (*codec.Message, error) {
-	return codec.ReadMessage(c, b.opts.aesKey, b.opts.hmacKey, b.opts.enableEncryption)
+	return codec.ReadMessage(c)
 }
 
 func (b *Broker) broadcastToConsumers(ctx context.Context, msg *codec.Message) {

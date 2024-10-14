@@ -13,7 +13,6 @@ func main() {
 	d := dag.NewDAG("Sample DAG", "sample-dag",
 		mq.WithSyncMode(true),
 		mq.WithNotifyResponse(tasks.NotifyResponse),
-		mq.WithSecretKey([]byte("wKWa6GKdBd0njDKNQoInBbh6P0KTjmob")),
 	)
 	d.AddNode("C", "C", tasks.Node3, true)
 	d.AddNode("D", "D", tasks.Node4)
@@ -27,6 +26,9 @@ func main() {
 	d.AddEdge("Label 2", "D", "F")
 	d.AddEdge("Label 3", "E", "F")
 	d.AddEdge("Label 4", "F", "G", "H")
-	d.AssignTopic("queue1")
-	d.Consume(context.Background())
+	d.AssignTopic("D")
+	err := d.Consume(context.Background())
+	if err != nil {
+		panic(err)
+	}
 }
