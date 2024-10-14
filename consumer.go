@@ -165,9 +165,6 @@ func (c *Consumer) OnResponse(ctx context.Context, result Result) error {
 		if err := c.send(c.conn, reply); err != nil {
 			return fmt.Errorf("failed to send MESSAGE_RESPONSE: %v", err)
 		}
-		if c.opts.notifyResponse != nil {
-			c.opts.notifyResponse(ctx, result)
-		}
 	}
 	return nil
 }

@@ -126,7 +126,7 @@ func (tm *TaskManager) handleCallback(ctx context.Context, result mq.Result) mq.
 			}
 		}
 	}
-	return mq.Result{}
+	return result
 }
 
 func (tm *TaskManager) handleResult(ctx context.Context, results any) mq.Result {
@@ -170,12 +170,14 @@ func (tm *TaskManager) appendFinalResult(result mq.Result) {
 
 func (tm *TaskManager) processNode(ctx context.Context, node *Node, payload json.RawMessage) {
 	var result mq.Result
-	defer func() {
-		tm.mutex.Lock()
-		tm.nodeResults[node.Key] = result
-		tm.mutex.Unlock()
-		tm.handleCallback(ctx, result)
-	}()
+	if tm.dag.server.SyncMode() {
+		defer func() {
+			tm.mutex.Lock()
+			tm.nodeResults[node.Key] = result
+			tm.mutex.Unlock()
+			tm.handleCallback(ctx, result)
+		}()
+	}
 	select {
 	case <-ctx.Done():
 		result = mq.Result{TaskID: tm.taskID, Topic: node.Key, Error: ctx.Err()}
