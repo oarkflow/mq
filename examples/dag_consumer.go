@@ -26,7 +26,7 @@ func main() {
 	d.AddEdge("Label 2", "D", "F")
 	d.AddEdge("Label 3", "E", "F")
 	d.AddEdge("Label 4", "F", "G", "H")
-	d.AssignTopic("D")
+	d.AssignTopic("queue1")
 	err := d.Consume(context.Background())
 	if err != nil {
 		panic(err)
