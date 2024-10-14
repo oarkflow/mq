@@ -1,8 +1,2 @@
-github.com/oarkflow/msgpack v0.0.1 h1:q7CvtT1/2TU+qoXgiQZ6BW4E9fAGOQ9bATWFFdFNZUI=
-github.com/oarkflow/msgpack v0.0.1/go.mod h1:LthukEYeLGz+NEYzN6voNUVHAiLR8A3HX2DM40O3QBg=
 github.com/oarkflow/xid v1.2.5 h1:6RcNJm9+oZ/B647gkME9trCzhpxGQaSdNoD56Vmkeho=
 github.com/oarkflow/xid v1.2.5/go.mod h1:jG4YBh+swbjlWApGWDBYnsJEa7hi3CCpmuqhB3RAxVo=
-github.com/oarkflow/xsync v0.0.5 h1:7HBQjmDus4YFLQFC5D197TB4c2YJTVwsTFuqk5zWKBM=
-github.com/oarkflow/xsync v0.0.5/go.mod h1:KAaEc506OEd3ISxfhgUBKxk8eQzkz+mb0JkpGGd/QwU=
-github.com/vmihailenco/tagparser/v2 v2.0.0 h1:y09buUbR+b5aycVFQs/g70pqKVZNBmxwAhO7/IwNM9g=
-github.com/vmihailenco/tagparser/v2 v2.0.0/go.mod h1:Wri+At7QHww0WTrCBeu4J6bNtoV6mEfg5OIWRZA9qds=

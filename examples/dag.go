@@ -25,22 +25,26 @@ var (
 )
 
 func main() {
+	subDag := dag.NewDAG(
+		"Sub DAG",
+		"D",
+		mq.WithNotifyResponse(tasks.NotifySubDAGResponse),
+	)
+	subDag.AddNode("D", "D", tasks.Node4, true)
+	subDag.AddNode("F", "F", tasks.Node6)
+	subDag.AddNode("G", "G", tasks.Node7)
+	subDag.AddNode("H", "H", tasks.Node8)
+	subDag.AddEdge("Label 2", "D", "F")
+	subDag.AddEdge("Label 4", "F", "G", "H")
+
 	d.AddNode("A", "A", tasks.Node1, true)
 	d.AddNode("B", "B", tasks.Node2)
 	d.AddNode("C", "C", tasks.Node3)
-	d.AddNode("D", "D", tasks.Node4)
+	d.AddDAGNode("D", "D", subDag)
 	d.AddNode("E", "E", tasks.Node5)
-	d.AddNode("F", "F", tasks.Node6)
-	d.AddNode("G", "G", tasks.Node7)
-	d.AddNode("H", "H", tasks.Node8)
-
 	d.AddLoop("Send each item", "A", "B")
 	d.AddCondition("C", map[dag.When]dag.Then{"PASS": "D", "FAIL": "E"})
 	d.AddEdge("Label 1", "B", "C")
-	d.AddEdge("Label 2", "D", "F")
-	d.AddEdge("Label 3", "E", "F")
-	d.AddEdge("Label 4", "F", "G", "H")
-
 	// Classify edges
 	// d.ClassifyEdges()
 	// fmt.Println(d.ExportDOT())

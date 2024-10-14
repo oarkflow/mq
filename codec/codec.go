@@ -5,8 +5,6 @@ import (
 	"net"
 	"sync"
 
-	"github.com/oarkflow/msgpack"
-
 	"github.com/oarkflow/mq/consts"
 )
 
@@ -30,7 +28,7 @@ func NewMessage(cmd consts.CMD, payload []byte, queue string, headers map[string
 func (m *Message) Serialize() ([]byte, error) {
 	m.m.RLock()
 	defer m.m.RUnlock()
-	data, err := msgpack.Marshal(m)
+	data, err := Marshal(m)
 	if err != nil {
 		return nil, err
 	}
@@ -39,7 +37,7 @@ func (m *Message) Serialize() ([]byte, error) {
 
 func Deserialize(data []byte) (*Message, error) {
 	var msg Message
-	if err := msgpack.Unmarshal(data, &msg); err != nil {
+	if err := Unmarshal(data, &msg); err != nil {
 		return nil, err
 	}
 
