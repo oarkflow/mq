@@ -18,7 +18,7 @@ var (
 	d = dag.NewDAG(
 		"Sample DAG",
 		"sample-dag",
-		mq.WithSyncMode(true),
+		// mq.WithSyncMode(true),
 		mq.WithNotifyResponse(tasks.NotifyResponse),
 	)
 	// d = dag.NewDAG(mq.WithSyncMode(true), mq.WithTLS(true, "./certs/server.crt", "./certs/server.key"), mq.WithCAPath("./certs/ca.cert"))
