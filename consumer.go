@@ -32,9 +32,9 @@ type Consumer struct {
 	conn    net.Conn
 	handler Handler
 	pool    *Pool
+	opts    *Options
 	id      string
 	queue   string
-	opts    *Options
 }
 
 func NewConsumer(id string, queue string, handler Handler, opts ...Option) *Consumer {

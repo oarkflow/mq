@@ -11,9 +11,9 @@ import (
 type Message struct {
 	Headers map[string]string `msgpack:"h"`
 	Queue   string            `msgpack:"q"`
-	Command consts.CMD        `msgpack:"c"`
 	Payload []byte            `msgpack:"p"`
 	m       sync.RWMutex
+	Command consts.CMD `msgpack:"c"`
 }
 
 func NewMessage(cmd consts.CMD, payload []byte, queue string, headers map[string]string) *Message {

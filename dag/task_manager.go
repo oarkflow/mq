@@ -12,14 +12,14 @@ import (
 )
 
 type TaskManager struct {
-	taskID      string
-	dag         *DAG
-	mutex       sync.Mutex
 	createdAt   time.Time
 	processedAt time.Time
-	results     []mq.Result
+	dag         *DAG
 	nodeResults map[string]mq.Result
 	wg          *WaitGroup
+	taskID      string
+	results     []mq.Result
+	mutex       sync.Mutex
 }
 
 func NewTaskManager(d *DAG, taskID string) *TaskManager {

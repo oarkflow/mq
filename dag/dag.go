@@ -32,11 +32,11 @@ const (
 )
 
 type Node struct {
+	processor mq.Processor
 	Name      string
 	Key       string
 	Edges     []Edge
 	isReady   bool
-	processor mq.Processor
 }
 
 func (n *Node) ProcessTask(ctx context.Context, msg *mq.Task) mq.Result {
@@ -61,20 +61,20 @@ type (
 )
 
 type DAG struct {
-	name          string
-	key           string
-	startNode     string
-	consumerTopic string
 	nodes         map[string]*Node
 	server        *mq.Broker
 	consumer      *mq.Consumer
 	taskContext   map[string]*TaskManager
 	conditions    map[FromNode]map[When]Then
-	mu            sync.RWMutex
-	paused        bool
-	opts          []mq.Option
 	pool          *mq.Pool
 	taskCleanupCh chan string
+	name          string
+	key           string
+	startNode     string
+	consumerTopic string
+	opts          []mq.Option
+	mu            sync.RWMutex
+	paused        bool
 }
 
 func (tm *DAG) SetKey(key string) {

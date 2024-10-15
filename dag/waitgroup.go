@@ -5,9 +5,9 @@ import (
 )
 
 type WaitGroup struct {
-	sync.Mutex
-	counter int
 	cond    *sync.Cond
+	counter int
+	sync.Mutex
 }
 
 func NewWaitGroup() *WaitGroup {

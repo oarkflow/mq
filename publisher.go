@@ -14,8 +14,8 @@ import (
 )
 
 type Publisher struct {
-	id   string
 	opts *Options
+	id   string
 }
 
 func NewPublisher(id string, opts ...Option) *Publisher {
