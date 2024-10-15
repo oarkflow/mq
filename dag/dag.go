@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/time/rate"
+
 	"github.com/oarkflow/mq"
 	"github.com/oarkflow/mq/consts"
 )
@@ -72,6 +74,23 @@ type DAG struct {
 	paused        bool
 	opts          []mq.Option
 	pool          *mq.Pool
+	taskCleanupCh chan string
+}
+
+func (tm *DAG) listenForTaskCleanup() {
+	for taskID := range tm.taskCleanupCh {
+		tm.mu.Lock()
+		delete(tm.taskContext, taskID)
+		tm.mu.Unlock()
+		log.Printf("DAG - Task %s cleaned up", taskID)
+	}
+}
+
+func (tm *DAG) taskCleanup(taskID string) {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+	delete(tm.taskContext, taskID)
+	log.Printf("DAG - Task %s cleaned up", taskID)
 }
 
 func (tm *DAG) Consume(ctx context.Context) error {
@@ -103,11 +122,12 @@ func (tm *DAG) AssignTopic(topic string) {
 
 func NewDAG(name, key string, opts ...mq.Option) *DAG {
 	d := &DAG{
-		name:        name,
-		key:         key,
-		nodes:       make(map[string]*Node),
-		taskContext: make(map[string]*TaskManager),
-		conditions:  make(map[FromNode]map[When]Then),
+		name:          name,
+		key:           key,
+		nodes:         make(map[string]*Node),
+		taskContext:   make(map[string]*TaskManager),
+		conditions:    make(map[FromNode]map[When]Then),
+		taskCleanupCh: make(chan string),
 	}
 	opts = append(opts, mq.WithCallback(d.onTaskCallback), mq.WithConsumerOnSubscribe(d.onConsumerJoin), mq.WithConsumerOnClose(d.onConsumerClose))
 	d.server = mq.NewBroker(opts...)
@@ -116,6 +136,7 @@ func NewDAG(name, key string, opts ...mq.Option) *DAG {
 		return nil
 	})
 	d.pool.Start(d.server.Options().NumOfWorkers())
+	go d.listenForTaskCleanup() // Start listening for task cleanup signals
 	return d
 }
 
@@ -164,16 +185,19 @@ func (tm *DAG) Start(ctx context.Context, addr string) error {
 			}
 		}()
 		for _, con := range tm.nodes {
-			if con.isReady {
-				go func(con *Node) {
+			go func(con *Node) {
+				limiter := rate.NewLimiter(rate.Every(1*time.Second), 1) // Retry every second
+				for {
 					err := con.processor.Consume(ctx)
 					if err != nil {
-						panic(err)
+						log.Printf("[ERROR] - Consumer %s failed to start: %v", con.Key, err)
+					} else {
+						log.Printf("[INFO] - Consumer %s started successfully", con.Key)
+						break
 					}
-				}(con)
-			} else {
-				log.Printf("[WARNING] - Consumer %s is not ready yet", con.Key)
-			}
+					limiter.Wait(ctx) // Wait with rate limiting before retrying
+				}
+			}(con)
 		}
 	}
 	log.Printf("DAG - HTTP_SERVER ~> started on %s", addr)
@@ -231,8 +255,8 @@ func (tm *DAG) AddDeferredNode(name, key string, firstNode ...bool) error {
 }
 
 func (tm *DAG) IsReady() bool {
-	tm.mu.Lock()
-	defer tm.mu.Unlock()
+	tm.mu.RLock()
+	defer tm.mu.RUnlock()
 	for _, node := range tm.nodes {
 		if !node.isReady {
 			return false
@@ -276,11 +300,12 @@ func (tm *DAG) addEdge(edgeType EdgeType, label, from string, targets ...string)
 
 func (tm *DAG) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 	tm.mu.Lock()
-	defer tm.mu.Unlock()
 	taskID := mq.NewID()
 	manager := NewTaskManager(tm, taskID)
 	manager.createdAt = task.CreatedAt
 	tm.taskContext[taskID] = manager
+	tm.mu.Unlock()
+
 	if tm.consumer != nil {
 		initialNode, err := tm.parseInitialNode(ctx)
 		if err != nil {
@@ -288,7 +313,9 @@ func (tm *DAG) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 		}
 		task.Topic = initialNode
 	}
-	return manager.processTask(ctx, task.Topic, task.Payload)
+	result := manager.processTask(ctx, task.Topic, task.Payload)
+	// defer tm.taskCleanup(taskID)
+	return result
 }
 
 func (tm *DAG) Process(ctx context.Context, payload []byte) mq.Result {
@@ -320,6 +347,9 @@ func (tm *DAG) Process(ctx context.Context, payload []byte) mq.Result {
 }
 
 func (tm *DAG) parseInitialNode(ctx context.Context) (string, error) {
+	tm.mu.RLock()
+	defer tm.mu.RUnlock()
+
 	val := ctx.Value("initial_node")
 	initialNode, ok := val.(string)
 	if ok {
@@ -405,12 +435,20 @@ func (tm *DAG) doConsumer(ctx context.Context, id string, action consts.CMD) {
 			err := node.processor.Pause(ctx)
 			if err == nil {
 				node.isReady = false
+				log.Printf("[INFO] - Consumer %s paused successfully", node.Key)
+			} else {
+				log.Printf("[ERROR] - Failed to pause consumer %s: %v", node.Key, err)
 			}
 		case consts.CONSUMER_RESUME:
 			err := node.processor.Resume(ctx)
 			if err == nil {
 				node.isReady = true
+				log.Printf("[INFO] - Consumer %s resumed successfully", node.Key)
+			} else {
+				log.Printf("[ERROR] - Failed to resume consumer %s: %v", node.Key, err)
 			}
 		}
+	} else {
+		log.Printf("[WARNING] - Consumer %s not found", id)
 	}
 }

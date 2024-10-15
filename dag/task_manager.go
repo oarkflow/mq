@@ -65,6 +65,7 @@ func (tm *TaskManager) dispatchFinalResult(ctx context.Context) mq.Result {
 	if tm.dag.server.NotifyHandler() != nil {
 		tm.dag.server.NotifyHandler()(ctx, rs)
 	}
+	tm.dag.taskCleanupCh <- tm.taskID
 	return rs
 }
 
@@ -199,10 +200,4 @@ func (tm *TaskManager) processNode(ctx context.Context, node *Node, payload json
 			return
 		}
 	}
-}
-
-func (tm *TaskManager) Clear() error {
-	clear(tm.results)
-	tm.nodeResults = make(map[string]mq.Result)
-	return nil
 }
