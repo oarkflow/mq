@@ -43,22 +43,32 @@ func (pq *PriorityQueue) Pop() interface{} {
 
 type Callback func(ctx context.Context, result Result) error
 
+// SchedulerConfig holds configurations for scheduled tasks
 type SchedulerConfig struct {
-	WithCallback Callback
-	WithOverlap  bool // true allows overlapping, false waits for previous execution to complete
+	Callback Callback
+	Overlap  bool // true allows overlapping, false waits for previous execution to complete
 }
 
+// ScheduledTask defines a task with scheduling configuration
 type ScheduledTask struct {
-	ctx       context.Context
-	handler   Handler
-	payload   *Task
-	interval  time.Duration
-	config    SchedulerConfig
-	stop      chan struct{}
-	execution chan struct{} // Channel to signal task execution status
+	ctx      context.Context
+	handler  Handler
+	payload  *Task
+	config   SchedulerConfig
+	schedule *Schedule // Pointer to the Schedule struct
+	stop     chan struct{}
 }
 
-// Scheduler manages scheduled tasks.
+// Schedule defines how and when a task should run
+type Schedule struct {
+	Interval   time.Duration  // e.g., every second, minute, etc. (0 for specific day tasks)
+	DayOfWeek  []time.Weekday // Specific days of the week
+	DayOfMonth []int          // Specific days of the month (1-31)
+	TimeOfDay  time.Time      // Specific time of day
+	Recurring  bool           // True for recurring tasks, false for one-time tasks
+}
+
+// Scheduler manages scheduled tasks
 type Scheduler struct {
 	tasks []ScheduledTask
 	mu    sync.Mutex
@@ -71,36 +81,90 @@ func (s *Scheduler) Start() {
 }
 
 func (s *Scheduler) schedule(task ScheduledTask) {
-	ticker := time.NewTicker(task.interval)
-	defer ticker.Stop()
+	// If Interval is positive, create a ticker for recurring execution
+	if task.schedule.Interval > 0 {
+		ticker := time.NewTicker(task.schedule.Interval)
+		defer ticker.Stop()
 
-	for {
-		select {
-		case <-ticker.C:
-			if task.config.WithOverlap || len(task.execution) == 0 { // Check if task can execute
-				task.execution <- struct{}{}
-				go func() {
-					defer func() { <-task.execution }() // Free the channel for the next execution
-					result := task.handler(task.ctx, task.payload)
-					if task.config.WithCallback != nil {
-						task.config.WithCallback(task.ctx, result)
-					}
-					fmt.Printf("Executed scheduled task: %s\n", task.payload.ID)
-				}()
+		for {
+			select {
+			case <-ticker.C:
+				s.executeTask(task)
+			case <-task.stop:
+				return
 			}
-		case <-task.stop:
-			return
+		}
+	} else {
+		// Handle scheduling based on DayOfMonth or DayOfWeek
+		if task.schedule.Recurring {
+			for {
+				now := time.Now()
+				nextRun := task.getNextRunTime(now)
+
+				// Wait until the next scheduled run
+				time.Sleep(nextRun.Sub(now))
+
+				// Execute the task
+				s.executeTask(task)
+			}
 		}
 	}
 }
 
-func (s *Scheduler) AddTask(ctx context.Context, handler Handler, payload *Task, interval time.Duration, config SchedulerConfig) {
+func (task ScheduledTask) getNextRunTime(now time.Time) time.Time {
+	if len(task.schedule.DayOfMonth) > 0 {
+		// Schedule on specific days of the month
+		for _, day := range task.schedule.DayOfMonth {
+			nextRun := time.Date(now.Year(), now.Month(), day, task.schedule.TimeOfDay.Hour(), task.schedule.TimeOfDay.Minute(), 0, 0, now.Location())
+			if nextRun.After(now) {
+				return nextRun
+			}
+		}
+		// If no next run found, schedule for the next month
+		nextMonth := now.AddDate(0, 1, 0)
+		return time.Date(nextMonth.Year(), nextMonth.Month(), task.schedule.DayOfMonth[0], task.schedule.TimeOfDay.Hour(), task.schedule.TimeOfDay.Minute(), 0, 0, now.Location())
+	}
+
+	if len(task.schedule.DayOfWeek) > 0 {
+		// Schedule on specific days of the week
+		for _, weekday := range task.schedule.DayOfWeek {
+			nextRun := nextWeekday(now, weekday).Truncate(time.Minute).Add(task.schedule.TimeOfDay.Sub(time.Time{}))
+			if nextRun.After(now) {
+				return nextRun
+			}
+		}
+	}
+
+	// If no specific days are configured, return now
+	return now
+}
+
+func nextWeekday(t time.Time, weekday time.Weekday) time.Time {
+	daysUntil := (int(weekday) - int(t.Weekday()) + 7) % 7
+	if daysUntil == 0 {
+		daysUntil = 7 // Next week if it's the same day
+	}
+	return t.AddDate(0, 0, daysUntil)
+}
+
+func (s *Scheduler) executeTask(task ScheduledTask) {
+	if task.config.Overlap || len(task.schedule.DayOfWeek) == 0 {
+		go func() {
+			result := task.handler(task.ctx, task.payload)
+			if task.config.Callback != nil {
+				task.config.Callback(task.ctx, result)
+			}
+			fmt.Printf("Executed scheduled task: %s\n", task.payload.ID)
+		}()
+	}
+}
+
+func (s *Scheduler) AddTask(ctx context.Context, handler Handler, payload *Task, config SchedulerConfig, schedule *Schedule) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	stop := make(chan struct{})
-	execution := make(chan struct{}, 1) // Buffer for one execution signal
-	s.tasks = append(s.tasks, ScheduledTask{ctx: ctx, handler: handler, payload: payload, interval: interval, stop: stop, execution: execution, config: config})
+	s.tasks = append(s.tasks, ScheduledTask{ctx: ctx, handler: handler, payload: payload, stop: stop, config: config, schedule: schedule})
 	go s.schedule(s.tasks[len(s.tasks)-1]) // Start scheduling immediately
 }
 
@@ -234,17 +298,17 @@ func (wp *Pool) adjustWorkers(newWorkerCount int) {
 }
 
 func (wp *Pool) AddTask(ctx context.Context, payload *Task, priority int) error {
-	task := &QueueTask{ctx: ctx, payload: payload, priority: priority}
-	taskSize := int64(utils.SizeOf(payload))
+	wp.taskQueueLock.Lock()
+	defer wp.taskQueueLock.Unlock()
 
+	task := &QueueTask{ctx: ctx, payload: payload, priority: priority}
+
+	taskSize := int64(utils.SizeOf(payload))
 	if wp.totalMemoryUsed+taskSize > wp.maxMemoryLoad && wp.maxMemoryLoad > 0 {
 		return fmt.Errorf("max memory load reached, cannot add task of size %d", taskSize)
 	}
 
-	wp.taskQueueLock.Lock()
-	heap.Push(&wp.taskQueue, task) // Add task to priority queue
-	wp.taskQueueLock.Unlock()
-
+	heap.Push(&wp.taskQueue, task)
 	return nil
 }
 
@@ -269,6 +333,6 @@ func (wp *Pool) AdjustWorkerCount(newWorkerCount int) {
 }
 
 func (wp *Pool) PrintMetrics() {
-	fmt.Printf("Total Tasks: %d, Completed Tasks: %d, Error Count: %d, Total Memory Used: %d bytes, Scheduled Tasks: %d\n",
+	fmt.Printf("Total Tasks: %d, Completed Tasks: %d, Error Count: %d, Total Memory Used: %d bytes, Total Scheduled Tasks: %d\n",
 		wp.totalTasks, wp.completedTasks, wp.errorCount, wp.totalMemoryUsed, len(wp.Scheduler.tasks))
 }
