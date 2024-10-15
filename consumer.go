@@ -278,3 +278,7 @@ func (c *Consumer) sendOpsMessage(ctx context.Context, cmd consts.CMD) error {
 	msg := codec.NewMessage(cmd, nil, c.queue, headers)
 	return c.send(c.conn, msg)
 }
+
+func (c *Consumer) Conn() net.Conn {
+	return c.conn
+}

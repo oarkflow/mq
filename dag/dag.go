@@ -143,7 +143,11 @@ func NewDAG(name, key string, opts ...mq.Option) *DAG {
 func (tm *DAG) callbackToConsumer(ctx context.Context, result mq.Result) {
 	if tm.consumer != nil {
 		result.Topic = tm.consumerTopic
-		tm.consumer.OnResponse(ctx, result)
+		if tm.consumer.Conn() == nil {
+			tm.onTaskCallback(ctx, result)
+		} else {
+			tm.consumer.OnResponse(ctx, result)
+		}
 	}
 }
 
@@ -313,9 +317,7 @@ func (tm *DAG) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 		}
 		task.Topic = initialNode
 	}
-	result := manager.processTask(ctx, task.Topic, task.Payload)
-	// defer tm.taskCleanup(taskID)
-	return result
+	return manager.processTask(ctx, task.Topic, task.Payload)
 }
 
 func (tm *DAG) Process(ctx context.Context, payload []byte) mq.Result {

@@ -18,7 +18,7 @@ var (
 	d = dag.NewDAG(
 		"Sample DAG",
 		"sample-dag",
-		// mq.WithSyncMode(true),
+		mq.WithSyncMode(true),
 		mq.WithNotifyResponse(tasks.NotifyResponse),
 	)
 	// d = dag.NewDAG(mq.WithSyncMode(true), mq.WithTLS(true, "./certs/server.crt", "./certs/server.key"), mq.WithCAPath("./certs/ca.cert"))
@@ -30,11 +30,11 @@ func main() {
 		"D",
 		mq.WithNotifyResponse(tasks.NotifySubDAGResponse),
 	)
-	subDag.AddNode("D", "D", tasks.Node4, true)
+	subDag.AddNode("I", "I", tasks.Node4, true)
 	subDag.AddNode("F", "F", tasks.Node6)
 	subDag.AddNode("G", "G", tasks.Node7)
 	subDag.AddNode("H", "H", tasks.Node8)
-	subDag.AddEdge("Label 2", "D", "F")
+	subDag.AddEdge("Label 2", "I", "F")
 	subDag.AddEdge("Label 4", "F", "G", "H")
 
 	d.AddNode("A", "A", tasks.Node1, true)

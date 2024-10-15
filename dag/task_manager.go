@@ -122,7 +122,7 @@ func (tm *TaskManager) handleCallback(ctx context.Context, result mq.Result) mq.
 				ctx = mq.SetHeaders(ctx, map[string]string{consts.QueueKey: target.Key})
 				tm.wg.Add(1)
 				go func(ctx context.Context, target *Node, result mq.Result) {
-					go tm.processNode(ctx, target, result.Payload)
+					tm.processNode(ctx, target, result.Payload)
 				}(ctx, target, result)
 			}
 		}
@@ -170,6 +170,13 @@ func (tm *TaskManager) appendFinalResult(result mq.Result) {
 }
 
 func (tm *TaskManager) processNode(ctx context.Context, node *Node, payload json.RawMessage) {
+	dag, isDAG := isDAGNode(node)
+	if isDAG {
+		if tm.dag.server.SyncMode() && !dag.server.SyncMode() {
+			dag.server.Options().SetSyncMode(true)
+		}
+	}
+
 	var result mq.Result
 	if tm.dag.server.SyncMode() {
 		defer func() {
@@ -188,6 +195,10 @@ func (tm *TaskManager) processNode(ctx context.Context, node *Node, payload json
 		ctx = mq.SetHeaders(ctx, map[string]string{consts.QueueKey: node.Key})
 		if tm.dag.server.SyncMode() {
 			result = node.ProcessTask(ctx, NewTask(tm.taskID, payload, node.Key))
+			if isDAG {
+				result.Topic = dag.consumerTopic
+				result.TaskID = tm.taskID
+			}
 			if result.Error != nil {
 				tm.appendFinalResult(result)
 				return
@@ -199,5 +210,14 @@ func (tm *TaskManager) processNode(ctx context.Context, node *Node, payload json
 			tm.appendFinalResult(mq.Result{Error: err})
 			return
 		}
+	}
+}
+
+func isDAGNode(node *Node) (*DAG, bool) {
+	switch node := node.processor.(type) {
+	case *DAG:
+		return node, true
+	default:
+		return nil, false
 	}
 }
