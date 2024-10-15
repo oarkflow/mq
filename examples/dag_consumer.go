@@ -14,12 +14,12 @@ func main() {
 		mq.WithSyncMode(true),
 		mq.WithNotifyResponse(tasks.NotifyResponse),
 	)
-	d.AddNode("C", "C", tasks.Node3, true)
-	d.AddNode("D", "D", tasks.Node4)
-	d.AddNode("E", "E", tasks.Node5)
-	d.AddNode("F", "F", tasks.Node6)
-	d.AddNode("G", "G", tasks.Node7)
-	d.AddNode("H", "H", tasks.Node8)
+	d.AddNode("C", "C", &tasks.Node3{}, true)
+	d.AddNode("D", "D", &tasks.Node4{})
+	d.AddNode("E", "E", &tasks.Node5{})
+	d.AddNode("F", "F", &tasks.Node6{})
+	d.AddNode("G", "G", &tasks.Node7{})
+	d.AddNode("H", "H", &tasks.Node8{})
 
 	d.AddCondition("C", map[dag.When]dag.Then{"PASS": "D", "FAIL": "E"})
 	d.AddEdge("Label 1", "B", "C")

@@ -17,6 +17,7 @@ type Result struct {
 	Topic       string          `json:"topic"`
 	TaskID      string          `json:"task_id"`
 	Status      string          `json:"status"`
+	Ctx         context.Context `json:"-"`
 	Payload     json.RawMessage `json:"payload"`
 }
 
@@ -27,15 +28,16 @@ func (r Result) Unmarshal(data any) error {
 	return json.Unmarshal(r.Payload, data)
 }
 
-func HandleError(_ context.Context, err error, status ...string) Result {
+func HandleError(ctx context.Context, err error, status ...string) Result {
 	st := "Failed"
 	if len(status) > 0 {
 		st = status[0]
 	}
 	if err == nil {
-		return Result{}
+		return Result{Ctx: ctx}
 	}
 	return Result{
+		Ctx:    ctx,
 		Status: st,
 		Error:  err,
 	}
@@ -49,6 +51,7 @@ func (r Result) WithData(status string, data []byte) Result {
 		Status:  status,
 		Payload: data,
 		Error:   nil,
+		Ctx:     r.Ctx,
 	}
 }
 
@@ -66,8 +69,6 @@ type Options struct {
 	tlsConfig            TLSConfig
 	brokerAddr           string
 	callback             []func(context.Context, Result) Result
-	aesKey               json.RawMessage
-	hmacKey              json.RawMessage
 	maxRetries           int
 	initialDelay         time.Duration
 	maxBackoff           time.Duration
@@ -76,7 +77,6 @@ type Options struct {
 	numOfWorkers         int
 	maxMemoryLoad        int64
 	syncMode             bool
-	enableEncryption     bool
 	enableWorkerPool     bool
 	respondPendingResult bool
 }
@@ -106,7 +106,6 @@ func defaultOptions() *Options {
 		maxBackoff:           20 * time.Second,
 		jitterPercent:        0.5,
 		queueSize:            100,
-		hmacKey:              []byte(`475f3adc6be9ee6f5357020e2922ff5b8f971598e175878e617d19df584bc648`),
 		numOfWorkers:         runtime.NumCPU(),
 		maxMemoryLoad:        5000000,
 	}
@@ -147,19 +146,6 @@ func WithConsumerOnSubscribe(handler func(ctx context.Context, topic, consumerNa
 func WithConsumerOnClose(handler func(ctx context.Context, topic, consumerName string)) Option {
 	return func(opts *Options) {
 		opts.consumerOnClose = handler
-	}
-}
-
-func WithSecretKey(aesKey json.RawMessage) Option {
-	return func(opts *Options) {
-		opts.aesKey = aesKey
-		opts.enableEncryption = true
-	}
-}
-
-func WithHMACKey(hmacKey json.RawMessage) Option {
-	return func(opts *Options) {
-		opts.hmacKey = hmacKey
 	}
 }
 

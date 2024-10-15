@@ -22,8 +22,10 @@ type Processor interface {
 	Pause(ctx context.Context) error
 	Resume(ctx context.Context) error
 	Stop(ctx context.Context) error
-	GetKey() string
 	Close() error
+	GetKey() string
+	SetKey(key string)
+	GetType() string
 }
 
 type Consumer struct {
@@ -60,6 +62,14 @@ func (c *Consumer) Close() error {
 
 func (c *Consumer) GetKey() string {
 	return c.id
+}
+
+func (c *Consumer) GetType() string {
+	return "consumer"
+}
+
+func (c *Consumer) SetKey(key string) {
+	c.id = key
 }
 
 func (c *Consumer) subscribe(ctx context.Context, queue string) error {

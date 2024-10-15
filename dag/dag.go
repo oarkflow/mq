@@ -77,6 +77,14 @@ type DAG struct {
 	taskCleanupCh chan string
 }
 
+func (tm *DAG) SetKey(key string) {
+	tm.key = key
+}
+
+func (tm *DAG) GetType() string {
+	return tm.key
+}
+
 func (tm *DAG) listenForTaskCleanup() {
 	for taskID := range tm.taskCleanupCh {
 		tm.mu.Lock()
@@ -121,6 +129,7 @@ func (tm *DAG) AssignTopic(topic string) {
 }
 
 func NewDAG(name, key string, opts ...mq.Option) *DAG {
+	callback := func(ctx context.Context, result mq.Result) error { return nil }
 	d := &DAG{
 		name:          name,
 		key:           key,
@@ -132,11 +141,10 @@ func NewDAG(name, key string, opts ...mq.Option) *DAG {
 	opts = append(opts, mq.WithCallback(d.onTaskCallback), mq.WithConsumerOnSubscribe(d.onConsumerJoin), mq.WithConsumerOnClose(d.onConsumerClose))
 	d.server = mq.NewBroker(opts...)
 	d.opts = opts
-	d.pool = mq.NewPool(d.server.Options().NumOfWorkers(), d.server.Options().QueueSize(), d.server.Options().MaxMemoryLoad(), d.ProcessTask, func(ctx context.Context, result mq.Result) error {
-		return nil
-	})
+	options := d.server.Options()
+	d.pool = mq.NewPool(options.NumOfWorkers(), options.QueueSize(), options.MaxMemoryLoad(), d.ProcessTask, callback)
 	d.pool.Start(d.server.Options().NumOfWorkers())
-	go d.listenForTaskCleanup() // Start listening for task cleanup signals
+	go d.listenForTaskCleanup()
 	return d
 }
 
@@ -227,10 +235,10 @@ func (tm *DAG) AddDAGNode(name string, key string, dag *DAG, firstNode ...bool) 
 	}
 }
 
-func (tm *DAG) AddNode(name, key string, handler mq.Handler, firstNode ...bool) {
+func (tm *DAG) AddNode(name, key string, handler mq.Processor, firstNode ...bool) *DAG {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
-	con := mq.NewConsumer(key, key, handler, tm.opts...)
+	con := mq.NewConsumer(key, key, handler.ProcessTask, tm.opts...)
 	tm.nodes[key] = &Node{
 		Name:      name,
 		Key:       key,
@@ -240,6 +248,7 @@ func (tm *DAG) AddNode(name, key string, handler mq.Handler, firstNode ...bool) 
 	if len(firstNode) > 0 && firstNode[0] {
 		tm.startNode = key
 	}
+	return tm
 }
 
 func (tm *DAG) AddDeferredNode(name, key string, firstNode ...bool) error {
@@ -269,18 +278,21 @@ func (tm *DAG) IsReady() bool {
 	return true
 }
 
-func (tm *DAG) AddCondition(fromNode FromNode, conditions map[When]Then) {
+func (tm *DAG) AddCondition(fromNode FromNode, conditions map[When]Then) *DAG {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 	tm.conditions[fromNode] = conditions
+	return tm
 }
 
-func (tm *DAG) AddLoop(label, from string, targets ...string) {
+func (tm *DAG) AddLoop(label, from string, targets ...string) *DAG {
 	tm.addEdge(Iterator, label, from, targets...)
+	return tm
 }
 
-func (tm *DAG) AddEdge(label, from string, targets ...string) {
+func (tm *DAG) AddEdge(label, from string, targets ...string) *DAG {
 	tm.addEdge(Simple, label, from, targets...)
+	return tm
 }
 
 func (tm *DAG) addEdge(edgeType EdgeType, label, from string, targets ...string) {
@@ -334,6 +346,9 @@ func (tm *DAG) Process(ctx context.Context, payload []byte) mq.Result {
 	if err != nil {
 		return mq.Result{Error: err}
 	}
+	if tm.server.SyncMode() {
+		ctx = mq.SetHeaders(ctx, map[string]string{consts.AwaitResponseKey: "true"})
+	}
 	task := NewTask(mq.NewID(), payload, initialNode)
 	awaitResponse, _ := mq.GetAwaitResponse(ctx)
 	if awaitResponse != "true" {
@@ -342,7 +357,9 @@ func (tm *DAG) Process(ctx context.Context, payload []byte) mq.Result {
 		if ok {
 			ctxx = mq.SetHeaders(ctxx, headers.AsMap())
 		}
-		tm.pool.AddTask(ctxx, task)
+		if err := tm.pool.AddTask(ctxx, task); err != nil {
+			return mq.Result{CreatedAt: task.CreatedAt, TaskID: task.ID, Topic: initialNode, Status: "FAILED", Error: err}
+		}
 		return mq.Result{CreatedAt: task.CreatedAt, TaskID: task.ID, Topic: initialNode, Status: "PENDING"}
 	}
 	return tm.ProcessTask(ctx, task)

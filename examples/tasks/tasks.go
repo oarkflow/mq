@@ -7,19 +7,26 @@ import (
 	"log"
 
 	"github.com/oarkflow/mq"
+	"github.com/oarkflow/mq/services"
 )
 
-func Node1(_ context.Context, task *mq.Task) mq.Result {
+type Node1 struct{ services.Operation }
+
+func (t *Node1) ProcessTask(_ context.Context, task *mq.Task) mq.Result {
 	fmt.Println("Node 1", string(task.Payload))
 	return mq.Result{Payload: task.Payload, TaskID: task.ID}
 }
 
-func Node2(_ context.Context, task *mq.Task) mq.Result {
+type Node2 struct{ services.Operation }
+
+func (t *Node2) ProcessTask(_ context.Context, task *mq.Task) mq.Result {
 	fmt.Println("Node 2", string(task.Payload))
 	return mq.Result{Payload: task.Payload, TaskID: task.ID}
 }
 
-func Node3(_ context.Context, task *mq.Task) mq.Result {
+type Node3 struct{ services.Operation }
+
+func (t *Node3) ProcessTask(_ context.Context, task *mq.Task) mq.Result {
 	var user map[string]any
 	_ = json.Unmarshal(task.Payload, &user)
 	age := int(user["age"].(float64))
@@ -32,7 +39,9 @@ func Node3(_ context.Context, task *mq.Task) mq.Result {
 	return mq.Result{Payload: resultPayload, Status: status}
 }
 
-func Node4(_ context.Context, task *mq.Task) mq.Result {
+type Node4 struct{ services.Operation }
+
+func (t *Node4) ProcessTask(_ context.Context, task *mq.Task) mq.Result {
 	var user map[string]any
 	_ = json.Unmarshal(task.Payload, &user)
 	user["node"] = "D"
@@ -40,7 +49,9 @@ func Node4(_ context.Context, task *mq.Task) mq.Result {
 	return mq.Result{Payload: resultPayload}
 }
 
-func Node5(_ context.Context, task *mq.Task) mq.Result {
+type Node5 struct{ services.Operation }
+
+func (t *Node5) ProcessTask(_ context.Context, task *mq.Task) mq.Result {
 	var user map[string]any
 	_ = json.Unmarshal(task.Payload, &user)
 	user["node"] = "E"
@@ -48,14 +59,18 @@ func Node5(_ context.Context, task *mq.Task) mq.Result {
 	return mq.Result{Payload: resultPayload}
 }
 
-func Node6(_ context.Context, task *mq.Task) mq.Result {
+type Node6 struct{ services.Operation }
+
+func (t *Node6) ProcessTask(_ context.Context, task *mq.Task) mq.Result {
 	var user map[string]any
 	_ = json.Unmarshal(task.Payload, &user)
 	resultPayload, _ := json.Marshal(map[string]any{"storage": user})
 	return mq.Result{Payload: resultPayload}
 }
 
-func Node7(_ context.Context, task *mq.Task) mq.Result {
+type Node7 struct{ services.Operation }
+
+func (t *Node7) ProcessTask(_ context.Context, task *mq.Task) mq.Result {
 	var user map[string]any
 	_ = json.Unmarshal(task.Payload, &user)
 	user["node"] = "G"
@@ -63,7 +78,9 @@ func Node7(_ context.Context, task *mq.Task) mq.Result {
 	return mq.Result{Payload: resultPayload}
 }
 
-func Node8(_ context.Context, task *mq.Task) mq.Result {
+type Node8 struct{ services.Operation }
+
+func (t *Node8) ProcessTask(_ context.Context, task *mq.Task) mq.Result {
 	var user map[string]any
 	_ = json.Unmarshal(task.Payload, &user)
 	user["node"] = "H"

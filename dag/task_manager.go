@@ -155,9 +155,15 @@ func (tm *TaskManager) handleResult(ctx context.Context, results any) mq.Result 
 		if err != nil {
 			return mq.HandleError(ctx, err)
 		}
-		return mq.Result{TaskID: tm.taskID, Payload: finalOutput, Status: status, Topic: topic}
+		return mq.Result{TaskID: tm.taskID, Payload: finalOutput, Status: status, Topic: topic, Ctx: ctx}
 	case mq.Result:
+		if res.Ctx == nil {
+			res.Ctx = ctx
+		}
 		return res
+	}
+	if rs.Ctx == nil {
+		rs.Ctx = ctx
 	}
 	return rs
 }
@@ -188,7 +194,7 @@ func (tm *TaskManager) processNode(ctx context.Context, node *Node, payload json
 	}
 	select {
 	case <-ctx.Done():
-		result = mq.Result{TaskID: tm.taskID, Topic: node.Key, Error: ctx.Err()}
+		result = mq.Result{TaskID: tm.taskID, Topic: node.Key, Error: ctx.Err(), Ctx: ctx}
 		tm.appendFinalResult(result)
 		return
 	default:
