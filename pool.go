@@ -51,12 +51,13 @@ type SchedulerConfig struct {
 
 // ScheduledTask defines a task with scheduling configuration
 type ScheduledTask struct {
-	ctx      context.Context
-	handler  Handler
-	payload  *Task
-	config   SchedulerConfig
-	schedule *Schedule // Pointer to the Schedule struct
-	stop     chan struct{}
+	ctx              context.Context
+	handler          Handler
+	payload          *Task
+	config           SchedulerConfig
+	schedule         *Schedule // Pointer to the Schedule struct
+	stop             chan struct{}
+	executionHistory []ExecutionHistory
 }
 
 // Schedule defines how and when a task should run
@@ -151,8 +152,9 @@ func (s *Scheduler) executeTask(task ScheduledTask) {
 	if task.config.Overlap || len(task.schedule.DayOfWeek) == 0 {
 		go func() {
 			result := task.handler(task.ctx, task.payload)
+			task.executionHistory = append(task.executionHistory, ExecutionHistory{Timestamp: time.Now(), Result: result})
 			if task.config.Callback != nil {
-				task.config.Callback(task.ctx, result)
+				_ = task.config.Callback(task.ctx, result)
 			}
 			fmt.Printf("Executed scheduled task: %s\n", task.payload.ID)
 		}()
@@ -335,4 +337,37 @@ func (wp *Pool) AdjustWorkerCount(newWorkerCount int) {
 func (wp *Pool) PrintMetrics() {
 	fmt.Printf("Total Tasks: %d, Completed Tasks: %d, Error Count: %d, Total Memory Used: %d bytes, Total Scheduled Tasks: %d\n",
 		wp.totalTasks, wp.completedTasks, wp.errorCount, wp.totalMemoryUsed, len(wp.Scheduler.tasks))
+}
+
+// ExecutionHistory keeps track of task execution results
+type ExecutionHistory struct {
+	Timestamp time.Time
+	Result    Result
+}
+
+// New methods to print task details
+func (s *Scheduler) PrintAllTasks() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	fmt.Println("Scheduled Tasks:")
+	for _, task := range s.tasks {
+		fmt.Printf("Task ID: %s, Next Execution: %s\n", task.payload.ID, task.getNextRunTime(time.Now()))
+	}
+}
+
+func (s *Scheduler) PrintExecutionHistory(taskID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, task := range s.tasks {
+		if task.payload.ID == taskID {
+			fmt.Printf("Execution History for Task ID: %s\n", taskID)
+			for _, history := range task.executionHistory {
+				fmt.Printf("Timestamp: %s, Result: %v\n", history.Timestamp, history.Result.Error)
+			}
+			return
+		}
+	}
+	fmt.Printf("No task found with ID: %s\n", taskID)
 }
