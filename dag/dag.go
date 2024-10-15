@@ -357,7 +357,7 @@ func (tm *DAG) Process(ctx context.Context, payload []byte) mq.Result {
 		if ok {
 			ctxx = mq.SetHeaders(ctxx, headers.AsMap())
 		}
-		if err := tm.pool.AddTask(ctxx, task); err != nil {
+		if err := tm.pool.AddTask(ctxx, task, 1); err != nil {
 			return mq.Result{CreatedAt: task.CreatedAt, TaskID: task.ID, Topic: initialNode, Status: "FAILED", Error: err}
 		}
 		return mq.Result{CreatedAt: task.CreatedAt, TaskID: task.ID, Topic: initialNode, Status: "PENDING"}
