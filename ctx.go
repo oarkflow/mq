@@ -11,9 +11,10 @@ import (
 	"time"
 
 	"github.com/oarkflow/xid"
-	"github.com/oarkflow/xsync"
 
 	"github.com/oarkflow/mq/consts"
+	"github.com/oarkflow/mq/storage"
+	"github.com/oarkflow/mq/storage/memory"
 )
 
 type Task struct {
@@ -41,7 +42,7 @@ func IsClosed(conn net.Conn) bool {
 func SetHeaders(ctx context.Context, headers map[string]string) context.Context {
 	hd, _ := GetHeaders(ctx)
 	if hd == nil {
-		hd = xsync.NewMap[string, string]()
+		hd = memory.New[string, string]()
 	}
 	for key, val := range headers {
 		hd.Set(key, val)
@@ -52,7 +53,7 @@ func SetHeaders(ctx context.Context, headers map[string]string) context.Context 
 func WithHeaders(ctx context.Context, headers map[string]string) map[string]string {
 	hd, _ := GetHeaders(ctx)
 	if hd == nil {
-		hd = xsync.NewMap[string, string]()
+		hd = memory.New[string, string]()
 	}
 	for key, val := range headers {
 		hd.Set(key, val)
@@ -60,8 +61,8 @@ func WithHeaders(ctx context.Context, headers map[string]string) map[string]stri
 	return hd.AsMap()
 }
 
-func GetHeaders(ctx context.Context) (xsync.IMap[string, string], bool) {
-	headers, ok := ctx.Value(consts.HeaderKey).(xsync.IMap[string, string])
+func GetHeaders(ctx context.Context) (storage.IMap[string, string], bool) {
+	headers, ok := ctx.Value(consts.HeaderKey).(storage.IMap[string, string])
 	return headers, ok
 }
 

@@ -37,7 +37,7 @@ func (p *Publisher) send(ctx context.Context, queue string, task Task, conn net.
 		return err
 	}
 	msg := codec.NewMessage(command, payload, queue, headers)
-	if err := codec.SendMessage(conn, msg, p.opts.aesKey, p.opts.hmacKey, p.opts.enableEncryption); err != nil {
+	if err := codec.SendMessage(conn, msg); err != nil {
 		return err
 	}
 
@@ -45,7 +45,7 @@ func (p *Publisher) send(ctx context.Context, queue string, task Task, conn net.
 }
 
 func (p *Publisher) waitForAck(conn net.Conn) error {
-	msg, err := codec.ReadMessage(conn, p.opts.aesKey, p.opts.hmacKey, p.opts.enableEncryption)
+	msg, err := codec.ReadMessage(conn)
 	if err != nil {
 		return err
 	}
@@ -58,7 +58,7 @@ func (p *Publisher) waitForAck(conn net.Conn) error {
 }
 
 func (p *Publisher) waitForResponse(conn net.Conn) Result {
-	msg, err := codec.ReadMessage(conn, p.opts.aesKey, p.opts.hmacKey, p.opts.enableEncryption)
+	msg, err := codec.ReadMessage(conn)
 	if err != nil {
 		return Result{Error: err}
 	}

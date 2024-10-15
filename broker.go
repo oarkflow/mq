@@ -10,11 +10,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/oarkflow/xsync"
-
 	"github.com/oarkflow/mq/codec"
 	"github.com/oarkflow/mq/consts"
 	"github.com/oarkflow/mq/jsonparser"
+	"github.com/oarkflow/mq/storage"
+	"github.com/oarkflow/mq/storage/memory"
 	"github.com/oarkflow/mq/utils"
 )
 
@@ -35,18 +35,18 @@ type publisher struct {
 }
 
 type Broker struct {
-	queues     xsync.IMap[string, *Queue]
-	consumers  xsync.IMap[string, *consumer]
-	publishers xsync.IMap[string, *publisher]
+	queues     storage.IMap[string, *Queue]
+	consumers  storage.IMap[string, *consumer]
+	publishers storage.IMap[string, *publisher]
 	opts       *Options
 }
 
 func NewBroker(opts ...Option) *Broker {
 	options := SetupOptions(opts...)
 	return &Broker{
-		queues:     xsync.NewMap[string, *Queue](),
-		publishers: xsync.NewMap[string, *publisher](),
-		consumers:  xsync.NewMap[string, *consumer](),
+		queues:     memory.New[string, *Queue](),
+		publishers: memory.New[string, *publisher](),
+		consumers:  memory.New[string, *consumer](),
 		opts:       options,
 	}
 }
@@ -283,11 +283,11 @@ func (b *Broker) Start(ctx context.Context) error {
 }
 
 func (b *Broker) send(conn net.Conn, msg *codec.Message) error {
-	return codec.SendMessage(conn, msg, b.opts.aesKey, b.opts.hmacKey, b.opts.enableEncryption)
+	return codec.SendMessage(conn, msg)
 }
 
 func (b *Broker) receive(c net.Conn) (*codec.Message, error) {
-	return codec.ReadMessage(c, b.opts.aesKey, b.opts.hmacKey, b.opts.enableEncryption)
+	return codec.ReadMessage(c)
 }
 
 func (b *Broker) broadcastToConsumers(ctx context.Context, msg *codec.Message) {

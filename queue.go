@@ -1,11 +1,12 @@
 package mq
 
 import (
-	"github.com/oarkflow/xsync"
+	"github.com/oarkflow/mq/storage"
+	"github.com/oarkflow/mq/storage/memory"
 )
 
 type Queue struct {
-	consumers xsync.IMap[string, *consumer]
+	consumers storage.IMap[string, *consumer]
 	tasks     chan *QueuedTask // channel to hold tasks
 	name      string
 }
@@ -13,7 +14,7 @@ type Queue struct {
 func newQueue(name string, queueSize int) *Queue {
 	return &Queue{
 		name:      name,
-		consumers: xsync.NewMap[string, *consumer](),
+		consumers: memory.New[string, *consumer](),
 		tasks:     make(chan *QueuedTask, queueSize), // buffer size for tasks
 	}
 }

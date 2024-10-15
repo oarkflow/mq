@@ -46,11 +46,11 @@ func NewConsumer(id string, queue string, handler Handler, opts ...Option) *Cons
 }
 
 func (c *Consumer) send(conn net.Conn, msg *codec.Message) error {
-	return codec.SendMessage(conn, msg, c.opts.aesKey, c.opts.hmacKey, c.opts.enableEncryption)
+	return codec.SendMessage(conn, msg)
 }
 
 func (c *Consumer) receive(conn net.Conn) (*codec.Message, error) {
-	return codec.ReadMessage(conn, c.opts.aesKey, c.opts.hmacKey, c.opts.enableEncryption)
+	return codec.ReadMessage(conn)
 }
 
 func (c *Consumer) Close() error {
@@ -66,7 +66,7 @@ func (c *Consumer) subscribe(ctx context.Context, queue string) error {
 	headers := HeadersWithConsumerID(ctx, c.id)
 	msg := codec.NewMessage(consts.SUBSCRIBE, utils.ToByte("{}"), queue, headers)
 	if err := c.send(c.conn, msg); err != nil {
-		return err
+		return fmt.Errorf("error while trying to subscribe: %v", err)
 	}
 	return c.waitForAck(c.conn)
 }
@@ -165,9 +165,6 @@ func (c *Consumer) OnResponse(ctx context.Context, result Result) error {
 		if err := c.send(c.conn, reply); err != nil {
 			return fmt.Errorf("failed to send MESSAGE_RESPONSE: %v", err)
 		}
-		if c.opts.notifyResponse != nil {
-			c.opts.notifyResponse(ctx, result)
-		}
 	}
 	return nil
 }
@@ -223,7 +220,7 @@ func (c *Consumer) Consume(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	c.pool = NewPool(c.opts.numOfWorkers, c.opts.queueSize, c.opts.maxMemoryLoad, c.ProcessTask, c.OnResponse, c.conn)
+	c.pool = NewPool(c.opts.numOfWorkers, c.opts.queueSize, c.opts.maxMemoryLoad, c.ProcessTask, c.OnResponse)
 	if err := c.subscribe(ctx, c.queue); err != nil {
 		return fmt.Errorf("failed to connect to server for queue %s: %v", c.queue, err)
 	}

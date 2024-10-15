@@ -85,6 +85,18 @@ func (o *Options) SetSyncMode(sync bool) {
 	o.syncMode = sync
 }
 
+func (o *Options) NumOfWorkers() int {
+	return o.numOfWorkers
+}
+
+func (o *Options) QueueSize() int {
+	return o.queueSize
+}
+
+func (o *Options) MaxMemoryLoad() int64 {
+	return o.maxMemoryLoad
+}
+
 func defaultOptions() *Options {
 	return &Options{
 		brokerAddr:           ":8080",
