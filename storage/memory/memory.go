@@ -6,6 +6,8 @@ import (
 	"github.com/oarkflow/mq/storage"
 )
 
+var _ storage.IMap[string, any] = (*Map[string, any])(nil)
+
 type Map[K comparable, V any] struct {
 	data map[K]V
 	mu   sync.RWMutex
