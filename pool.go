@@ -82,7 +82,6 @@ func (s *Scheduler) Start() {
 }
 
 func (s *Scheduler) schedule(task ScheduledTask) {
-	// If Interval is positive, create a ticker for recurring execution
 	if task.schedule.Interval > 0 {
 		ticker := time.NewTicker(task.schedule.Interval)
 		defer ticker.Stop()
@@ -95,19 +94,15 @@ func (s *Scheduler) schedule(task ScheduledTask) {
 				return
 			}
 		}
-	} else {
-		// Handle scheduling based on DayOfMonth or DayOfWeek
-		if task.schedule.Recurring {
-			for {
-				now := time.Now()
-				nextRun := task.getNextRunTime(now)
+	} else if task.schedule.Recurring {
+		for {
+			now := time.Now()
+			nextRun := task.getNextRunTime(now)
 
-				// Wait until the next scheduled run
-				time.Sleep(nextRun.Sub(now))
-
-				// Execute the task
-				s.executeTask(task)
+			if nextRun.After(now) {
+				time.Sleep(nextRun.Sub(now)) // Sleep until the next scheduled time
 			}
+			s.executeTask(task)
 		}
 	}
 }
@@ -230,6 +225,7 @@ func (wp *Pool) Start(numWorkers int) {
 	go wp.monitorWorkerAdjustments() // Monitor worker changes
 }
 
+// Worker logic
 func (wp *Pool) worker() {
 	defer wp.wg.Done()
 	for {
@@ -239,7 +235,6 @@ func (wp *Pool) worker() {
 		default:
 			wp.taskQueueLock.Lock()
 			if len(wp.taskQueue) > 0 && !wp.paused {
-				// Pop the highest priority task
 				task := heap.Pop(&wp.taskQueue).(*QueueTask)
 				wp.taskQueueLock.Unlock()
 
@@ -264,6 +259,7 @@ func (wp *Pool) worker() {
 				wp.totalMemoryUsed -= taskSize
 			} else {
 				wp.taskQueueLock.Unlock()
+				time.Sleep(10 * time.Millisecond) // Sleep briefly to prevent busy waiting
 			}
 		}
 	}

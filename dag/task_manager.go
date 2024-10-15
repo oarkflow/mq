@@ -188,7 +188,9 @@ func (tm *TaskManager) processNode(ctx context.Context, node *Node, payload json
 	var result mq.Result
 	if tm.dag.server.SyncMode() {
 		defer func() {
-			tm.appendFinalResult(result)
+			tm.mutex.Lock()
+			tm.nodeResults[node.Key] = result
+			tm.mutex.Unlock()
 			tm.handleCallback(ctx, result)
 		}()
 	}
