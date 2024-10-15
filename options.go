@@ -13,6 +13,7 @@ import (
 type Result struct {
 	CreatedAt   time.Time       `json:"created_at"`
 	ProcessedAt time.Time       `json:"processed_at,omitempty"`
+	Latency     string          `json:"latency"`
 	Error       error           `json:"error,omitempty"`
 	Topic       string          `json:"topic"`
 	TaskID      string          `json:"task_id"`

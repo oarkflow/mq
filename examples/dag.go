@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"time"
+	"io"
+	"net/http"
 
+	"github.com/oarkflow/mq/consts"
 	"github.com/oarkflow/mq/examples/tasks"
 	"github.com/oarkflow/mq/services"
 
@@ -38,18 +40,11 @@ func setup(f *dag.DAG) {
 
 func sendData(f *dag.DAG) {
 	data := []map[string]any{
-		{
-			"phone": "+123456789",
-			"email": "abc.xyz@gmail.com",
-		},
-		{
-			"phone": "+98765412",
-			"email": "xyz.abc@gmail.com",
-		},
+		{"phone": "+123456789", "email": "abc.xyz@gmail.com"}, {"phone": "+98765412", "email": "xyz.abc@gmail.com"},
 	}
 	bt, _ := json.Marshal(data)
 	result := f.Process(context.Background(), bt)
-	fmt.Println(string(result.Payload), result)
+	fmt.Println(string(result.Payload))
 }
 
 func sync() {
@@ -61,13 +56,63 @@ func sync() {
 func async() {
 	f := dag.NewDAG("Sample DAG", "sample-dag", mq.WithNotifyResponse(tasks.NotifyResponse))
 	setup(f)
-	go func() {
-		err := f.Start(context.TODO(), ":8083")
-		if err != nil {
-			panic(err)
+
+	requestHandler := func(requestType string) func(w http.ResponseWriter, r *http.Request) {
+		return func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodPost {
+				http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
+				return
+			}
+			var payload []byte
+			if r.Body != nil {
+				defer r.Body.Close()
+				var err error
+				payload, err = io.ReadAll(r.Body)
+				if err != nil {
+					http.Error(w, "Failed to read request body", http.StatusBadRequest)
+					return
+				}
+			} else {
+				http.Error(w, "Empty request body", http.StatusBadRequest)
+				return
+			}
+			ctx := r.Context()
+			if requestType == "request" {
+				ctx = mq.SetHeaders(ctx, map[string]string{consts.AwaitResponseKey: "true"})
+			}
+			// ctx = context.WithValue(ctx, "initial_node", "E")
+			rs := f.Process(ctx, payload)
+			if rs.Error != nil {
+				http.Error(w, fmt.Sprintf("[DAG Error] - %v", rs.Error), http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(rs)
 		}
-	}()
-	time.Sleep(3 * time.Second)
-	sendData(f)
-	time.Sleep(10 * time.Second)
+	}
+
+	http.HandleFunc("POST /publish", requestHandler("publish"))
+	http.HandleFunc("POST /request", requestHandler("request"))
+	http.HandleFunc("/pause-consumer/{id}", func(writer http.ResponseWriter, request *http.Request) {
+		id := request.PathValue("id")
+		if id != "" {
+			f.PauseConsumer(request.Context(), id)
+		}
+	})
+	http.HandleFunc("/resume-consumer/{id}", func(writer http.ResponseWriter, request *http.Request) {
+		id := request.PathValue("id")
+		if id != "" {
+			f.ResumeConsumer(request.Context(), id)
+		}
+	})
+	http.HandleFunc("/pause", func(writer http.ResponseWriter, request *http.Request) {
+		f.Pause(request.Context())
+	})
+	http.HandleFunc("/resume", func(writer http.ResponseWriter, request *http.Request) {
+		f.Resume(request.Context())
+	})
+	err := f.Start(context.TODO(), ":8083")
+	if err != nil {
+		panic(err)
+	}
 }

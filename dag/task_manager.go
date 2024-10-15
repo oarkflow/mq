@@ -35,6 +35,7 @@ func NewTaskManager(d *DAG, taskID string) *TaskManager {
 func (tm *TaskManager) updateTS(result *mq.Result) {
 	result.CreatedAt = tm.createdAt
 	result.ProcessedAt = time.Now()
+	result.Latency = fmt.Sprintf("%s", time.Since(tm.createdAt))
 }
 
 func (tm *TaskManager) processTask(ctx context.Context, nodeID string, payload json.RawMessage) mq.Result {
@@ -170,6 +171,7 @@ func (tm *TaskManager) handleResult(ctx context.Context, results any) mq.Result 
 
 func (tm *TaskManager) appendFinalResult(result mq.Result) {
 	tm.mutex.Lock()
+	tm.updateTS(&result)
 	tm.results = append(tm.results, result)
 	tm.nodeResults[result.Topic] = result
 	tm.mutex.Unlock()
@@ -186,9 +188,7 @@ func (tm *TaskManager) processNode(ctx context.Context, node *Node, payload json
 	var result mq.Result
 	if tm.dag.server.SyncMode() {
 		defer func() {
-			tm.mutex.Lock()
-			tm.nodeResults[node.Key] = result
-			tm.mutex.Unlock()
+			tm.appendFinalResult(result)
 			tm.handleCallback(ctx, result)
 		}()
 	}

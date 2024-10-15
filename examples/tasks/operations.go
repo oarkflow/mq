@@ -2,7 +2,6 @@ package tasks
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/oarkflow/json"
 
@@ -17,8 +16,6 @@ type GetData struct {
 }
 
 func (e *GetData) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
-	fmt.Println("Getting Input", string(task.Payload))
-	ctx = context.WithValue(ctx, "extra_params", map[string]any{"iphone": true})
 	return mq.Result{Payload: task.Payload, Ctx: ctx}
 }
 
@@ -27,8 +24,6 @@ type Loop struct {
 }
 
 func (e *Loop) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
-	fmt.Println(ctx.Value("extra_params"), "LOOOOOP")
-	fmt.Println("Looping...", string(task.Payload))
 	return mq.Result{Payload: task.Payload, Ctx: ctx}
 }
 
@@ -45,7 +40,6 @@ func (e *Condition) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 	switch email := data["email"].(type) {
 	case string:
 		if email == "abc.xyz@gmail.com" {
-			fmt.Println("Checking...", data, "Pass...")
 			return mq.Result{Payload: task.Payload, Status: "pass", Ctx: ctx}
 		}
 		return mq.Result{Payload: task.Payload, Status: "fail", Ctx: ctx}
@@ -62,12 +56,10 @@ func (e *PrepareEmail) ProcessTask(ctx context.Context, task *mq.Task) mq.Result
 	var data map[string]any
 	err := json.Unmarshal(task.Payload, &data)
 	if err != nil {
-		fmt.Println("Prepare Email")
 		panic(err)
 	}
 	data["email_valid"] = true
 	d, _ := json.Marshal(data)
-	fmt.Println("Preparing Email...", string(d))
 	return mq.Result{Payload: d, Ctx: ctx}
 }
 
@@ -79,10 +71,8 @@ func (e *EmailDelivery) ProcessTask(ctx context.Context, task *mq.Task) mq.Resul
 	var data map[string]any
 	err := json.Unmarshal(task.Payload, &data)
 	if err != nil {
-		fmt.Println("Email Delivery")
 		panic(err)
 	}
-	fmt.Println("Sending Email...", data)
 	return mq.Result{Payload: task.Payload, Ctx: ctx}
 }
 
@@ -96,7 +86,6 @@ func (e *SendSms) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println("Sending Sms...", data)
 	return mq.Result{Payload: task.Payload, Error: nil, Ctx: ctx}
 }
 
@@ -105,8 +94,6 @@ type StoreData struct {
 }
 
 func (e *StoreData) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
-
-	fmt.Println("Storing Data...", string(task.Payload))
 	return mq.Result{Payload: task.Payload, Ctx: ctx}
 }
 
@@ -120,7 +107,6 @@ func (e *InAppNotification) ProcessTask(ctx context.Context, task *mq.Task) mq.R
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println("In App notification...", data)
 	return mq.Result{Payload: task.Payload, Ctx: ctx}
 }
 
@@ -136,7 +122,6 @@ func (v *DataBranchHandler) ProcessTask(ctx context.Context, task *mq.Task) mq.R
 		result.Error = err
 		return result
 	}
-	fmt.Println("Data Branch...")
 	b := make(map[string]any)
 	switch branches := row["data_branch"].(type) {
 	case map[string]any:
