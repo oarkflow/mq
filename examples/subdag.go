@@ -44,7 +44,7 @@ func main() {
 
 	// Classify edges
 	// d.ClassifyEdges()
-	fmt.Println(d.SaveSVG("dag.svg"))
+	fmt.Println(d.ExportDOT())
 
 	requestHandler := func(requestType string) func(w http.ResponseWriter, r *http.Request) {
 		return func(w http.ResponseWriter, r *http.Request) {

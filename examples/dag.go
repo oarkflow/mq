@@ -50,6 +50,7 @@ func sendData(f *dag.DAG) {
 func sync() {
 	f := dag.NewDAG("Sample DAG", "sample-dag", mq.WithSyncMode(true), mq.WithNotifyResponse(tasks.NotifyResponse))
 	setup(f)
+	fmt.Println(f.ExportDOT())
 	sendData(f)
 	fmt.Println(f.SaveSVG("dag.svg"))
 }
