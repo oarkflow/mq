@@ -277,7 +277,7 @@ func (tm *DAG) AddCondition(fromNode FromNode, conditions map[When]Then) *DAG {
 	return tm
 }
 
-func (tm *DAG) AddLoop(label, from string, targets ...string) *DAG {
+func (tm *DAG) AddIterator(label, from string, targets ...string) *DAG {
 	tm.addEdge(Iterator, label, from, targets...)
 	return tm
 }

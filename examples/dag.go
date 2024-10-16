@@ -4,59 +4,47 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/oarkflow/mq/consts"
 	"io"
 	"net/http"
 
-	"github.com/oarkflow/mq/consts"
 	"github.com/oarkflow/mq/examples/tasks"
-	"github.com/oarkflow/mq/services"
 
 	"github.com/oarkflow/mq"
 	"github.com/oarkflow/mq/dag"
 )
 
 func main() {
-	sync()
-	async()
-}
+	d := dag.NewDAG(
+		"Sample DAG",
+		"sample-dag",
+		mq.WithSyncMode(true),
+		mq.WithNotifyResponse(tasks.NotifyResponse),
+	)
+	subDag := dag.NewDAG(
+		"Sub DAG",
+		"D",
+		mq.WithNotifyResponse(tasks.NotifySubDAGResponse),
+	)
+	subDag.AddNode("I", "I", &tasks.Node4{}, true)
+	subDag.AddNode("F", "F", &tasks.Node6{})
+	subDag.AddNode("G", "G", &tasks.Node7{})
+	subDag.AddNode("H", "H", &tasks.Node8{})
+	subDag.AddEdge("Label 2", "I", "F")
+	subDag.AddEdge("Label 4", "F", "G", "H")
 
-func setup(f *dag.DAG) {
-	f.
-		AddNode("Email Delivery", "email:deliver", &tasks.EmailDelivery{Operation: services.Operation{Type: "process"}}).
-		AddNode("Prepare Email", "prepare:email", &tasks.PrepareEmail{Operation: services.Operation{Type: "process"}}).
-		AddNode("Get Input", "get:input", &tasks.GetData{Operation: services.Operation{Type: "input"}}, true).
-		AddNode("Iterator Processor", "loop", &tasks.Loop{Operation: services.Operation{Type: "loop"}}).
-		AddNode("Condition", "condition", &tasks.Condition{Operation: services.Operation{Type: "condition"}}).
-		AddNode("Store data", "store:data", &tasks.StoreData{Operation: services.Operation{Type: "process"}}).
-		AddNode("Send SMS", "send:sms", &tasks.SendSms{Operation: services.Operation{Type: "process"}}).
-		AddNode("Notification", "notification", &tasks.InAppNotification{Operation: services.Operation{Type: "process"}}).
-		AddNode("Data Branch", "data-branch", &tasks.DataBranchHandler{Operation: services.Operation{Type: "condition"}}).
-		AddCondition("condition", map[dag.When]dag.Then{"pass": "email:deliver", "fail": "store:data"}).
-		AddEdge("Get input to loop", "get:input", "loop").
-		AddLoop("Loop to prepare email", "loop", "prepare:email").
-		AddEdge("Prepare Email to condition", "prepare:email", "condition").
-		AddEdge("Store Data to send sms and notification", "store:data", "send:sms", "notification")
-}
+	d.AddNode("A", "A", &tasks.Node1{}, true)
+	d.AddNode("B", "B", &tasks.Node2{})
+	d.AddNode("C", "C", &tasks.Node3{})
+	d.AddDAGNode("D", "D", subDag)
+	d.AddNode("E", "E", &tasks.Node5{})
+	d.AddIterator("Send each item", "A", "B")
+	d.AddCondition("C", map[dag.When]dag.Then{"PASS": "D", "FAIL": "E"})
+	d.AddEdge("Label 1", "B", "C")
 
-func sendData(f *dag.DAG) {
-	data := []map[string]any{
-		{"phone": "+123456789", "email": "abc.xyz@gmail.com"}, {"phone": "+98765412", "email": "xyz.abc@gmail.com"},
-	}
-	bt, _ := json.Marshal(data)
-	result := f.Process(context.Background(), bt)
-	fmt.Println(string(result.Payload))
-}
-
-func sync() {
-	f := dag.NewDAG("Sample DAG", "sample-dag", mq.WithSyncMode(true), mq.WithNotifyResponse(tasks.NotifyResponse))
-	setup(f)
-	sendData(f)
-	fmt.Println(f.SaveSVG("dag.svg"))
-}
-
-func async() {
-	f := dag.NewDAG("Sample DAG", "sample-dag", mq.WithNotifyResponse(tasks.NotifyResponse))
-	setup(f)
+	// Classify edges
+	// d.ClassifyEdges()
+	fmt.Println(d.SaveSVG("dag.svg"))
 
 	requestHandler := func(requestType string) func(w http.ResponseWriter, r *http.Request) {
 		return func(w http.ResponseWriter, r *http.Request) {
@@ -82,7 +70,7 @@ func async() {
 				ctx = mq.SetHeaders(ctx, map[string]string{consts.AwaitResponseKey: "true"})
 			}
 			// ctx = context.WithValue(ctx, "initial_node", "E")
-			rs := f.Process(ctx, payload)
+			rs := d.Process(ctx, payload)
 			if rs.Error != nil {
 				http.Error(w, fmt.Sprintf("[DAG Error] - %v", rs.Error), http.StatusInternalServerError)
 				return
@@ -97,22 +85,22 @@ func async() {
 	http.HandleFunc("/pause-consumer/{id}", func(writer http.ResponseWriter, request *http.Request) {
 		id := request.PathValue("id")
 		if id != "" {
-			f.PauseConsumer(request.Context(), id)
+			d.PauseConsumer(request.Context(), id)
 		}
 	})
 	http.HandleFunc("/resume-consumer/{id}", func(writer http.ResponseWriter, request *http.Request) {
 		id := request.PathValue("id")
 		if id != "" {
-			f.ResumeConsumer(request.Context(), id)
+			d.ResumeConsumer(request.Context(), id)
 		}
 	})
 	http.HandleFunc("/pause", func(writer http.ResponseWriter, request *http.Request) {
-		f.Pause(request.Context())
+		d.Pause(request.Context())
 	})
 	http.HandleFunc("/resume", func(writer http.ResponseWriter, request *http.Request) {
-		f.Resume(request.Context())
+		d.Resume(request.Context())
 	})
-	err := f.Start(context.TODO(), ":8083")
+	err := d.Start(context.TODO(), ":8083")
 	if err != nil {
 		panic(err)
 	}

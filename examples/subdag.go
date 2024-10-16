@@ -42,7 +42,7 @@ func main() {
 	d.AddNode("C", "C", &tasks.Node3{})
 	d.AddDAGNode("D", "D", subDag)
 	d.AddNode("E", "E", &tasks.Node5{})
-	d.AddLoop("Send each item", "A", "B")
+	d.AddIterator("Send each item", "A", "B")
 	d.AddCondition("C", map[dag.When]dag.Then{"PASS": "D", "FAIL": "E"})
 	d.AddEdge("Label 1", "B", "C")
 	// Classify edges
