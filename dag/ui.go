@@ -194,13 +194,6 @@ func (tm *DAG) ExportDOT() string {
 	return sb.String()
 }
 
-func (tm *DAG) getSubDAG(nodeKey string) (*DAG, bool) {
-	if node, ok := tm.nodes[nodeKey]; ok {
-		return isDAGNode(node)
-	}
-	return nil, false
-}
-
 func (tm *DAG) TopologicalSort() []string {
 	visited := make(map[string]bool)
 	stack := []string{}
