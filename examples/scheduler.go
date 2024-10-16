@@ -16,7 +16,7 @@ func main() {
 	pool.AddTask(context.Background(), &mq.Task{ID: "Task 1"}, 1)
 	time.Sleep(1 * time.Second)
 	pool.AddTask(context.Background(), &mq.Task{ID: "Task 2"}, 5)
-	pool.Scheduler.AddTask(ctx, &mq.Task{ID: "Every Minute Task"}, mq.WithSchedulerHandler(handler), mq.WithSchedulerCallback(callback))
+	pool.Scheduler.AddTask(ctx, &mq.Task{ID: "Every Minute Task"})
 	time.Sleep(10 * time.Minute)
 	pool.Scheduler.RemoveTask("Every Minute Task")
 	time.Sleep(5 * time.Minute)
