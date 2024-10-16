@@ -4,6 +4,8 @@ import (
 	"container/heap"
 	"context"
 	"fmt"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -63,6 +65,140 @@ type Schedule struct {
 	DayOfMonth []int
 	TimeOfDay  time.Time
 	Recurring  bool
+	CronSpec   string
+}
+
+func (s *Schedule) ToHumanReadable() string {
+	var sb strings.Builder
+	if s.CronSpec != "" {
+		cronDescription, err := parseCronSpec(s.CronSpec)
+		if err != nil {
+			sb.WriteString(fmt.Sprintf("Invalid CRON spec: %s\n", err.Error()))
+		} else {
+			sb.WriteString(fmt.Sprintf("CRON-based schedule: %s\n", cronDescription))
+		}
+	}
+	if s.Interval > 0 {
+		sb.WriteString(fmt.Sprintf("Recurring every %s\n", s.Interval))
+	}
+	if len(s.DayOfMonth) > 0 {
+		sb.WriteString("Occurs on the following days of the month: ")
+		for i, day := range s.DayOfMonth {
+			if i > 0 {
+				sb.WriteString(", ")
+			}
+			sb.WriteString(fmt.Sprintf("%d", day))
+		}
+		sb.WriteString("\n")
+	}
+	if len(s.DayOfWeek) > 0 {
+		sb.WriteString("Occurs on the following days of the week: ")
+		for i, day := range s.DayOfWeek {
+			if i > 0 {
+				sb.WriteString(", ")
+			}
+			sb.WriteString(day.String())
+		}
+		sb.WriteString("\n")
+	}
+	if !s.TimeOfDay.IsZero() {
+		sb.WriteString(fmt.Sprintf("Time of day: %s\n", s.TimeOfDay.Format("15:04")))
+	}
+	if s.Recurring {
+		sb.WriteString("This schedule is recurring.\n")
+	} else {
+		sb.WriteString("This schedule is one-time.\n")
+	}
+	if sb.Len() == 0 {
+		sb.WriteString("No schedule defined.")
+	}
+	return sb.String()
+}
+
+type CronSchedule struct {
+	Minute     string
+	Hour       string
+	DayOfMonth string
+	Month      string
+	DayOfWeek  string
+}
+
+func (c CronSchedule) String() string {
+	return fmt.Sprintf("At %s minute(s) past %s, on %s, during %s, every %s", c.Minute, c.Hour, c.DayOfWeek, c.Month, c.DayOfMonth)
+}
+
+func parseCronSpec(cronSpec string) (CronSchedule, error) {
+	parts := strings.Fields(cronSpec)
+	if len(parts) != 5 {
+		return CronSchedule{}, fmt.Errorf("invalid CRON spec: expected 5 fields, got %d", len(parts))
+	}
+	minute, err := cronFieldToString(parts[0], "minute")
+	if err != nil {
+		return CronSchedule{}, err
+	}
+	hour, err := cronFieldToString(parts[1], "hour")
+	if err != nil {
+		return CronSchedule{}, err
+	}
+	dayOfMonth, err := cronFieldToString(parts[2], "day of the month")
+	if err != nil {
+		return CronSchedule{}, err
+	}
+	month, err := cronFieldToString(parts[3], "month")
+	if err != nil {
+		return CronSchedule{}, err
+	}
+	dayOfWeek, err := cronFieldToString(parts[4], "day of the week")
+	if err != nil {
+		return CronSchedule{}, err
+	}
+	return CronSchedule{
+		Minute:     minute,
+		Hour:       hour,
+		DayOfMonth: dayOfMonth,
+		Month:      month,
+		DayOfWeek:  dayOfWeek,
+	}, nil
+}
+
+func cronFieldToString(field string, fieldName string) (string, error) {
+	switch field {
+	case "*":
+		return fmt.Sprintf("every %s", fieldName), nil
+	default:
+		values, err := parseCronValue(field)
+		if err != nil {
+			return "", fmt.Errorf("invalid %s field: %s", fieldName, err.Error())
+		}
+		return fmt.Sprintf("%s %s", strings.Join(values, ", "), fieldName), nil
+	}
+}
+
+func parseCronValue(field string) ([]string, error) {
+	var values []string
+	ranges := strings.Split(field, ",")
+	for _, r := range ranges {
+		if strings.Contains(r, "-") {
+			bounds := strings.Split(r, "-")
+			if len(bounds) != 2 {
+				return nil, fmt.Errorf("invalid range: %s", r)
+			}
+			start, err := strconv.Atoi(bounds[0])
+			if err != nil {
+				return nil, err
+			}
+			end, err := strconv.Atoi(bounds[1])
+			if err != nil {
+				return nil, err
+			}
+			for i := start; i <= end; i++ {
+				values = append(values, strconv.Itoa(i))
+			}
+		} else {
+			values = append(values, r)
+		}
+	}
+	return values, nil
 }
 
 type Scheduler struct {
@@ -101,6 +237,9 @@ func (s *Scheduler) schedule(task ScheduledTask) {
 }
 
 func (task ScheduledTask) getNextRunTime(now time.Time) time.Time {
+	if task.schedule.CronSpec != "" {
+		return task.getNextCronRunTime(now)
+	}
 	if len(task.schedule.DayOfMonth) > 0 {
 		for _, day := range task.schedule.DayOfMonth {
 			nextRun := time.Date(now.Year(), now.Month(), day, task.schedule.TimeOfDay.Hour(), task.schedule.TimeOfDay.Minute(), 0, 0, now.Location())
@@ -120,6 +259,58 @@ func (task ScheduledTask) getNextRunTime(now time.Time) time.Time {
 		}
 	}
 	return now
+}
+
+func (task ScheduledTask) getNextCronRunTime(now time.Time) time.Time {
+	cronSpecs, err := parseCronSpec(task.schedule.CronSpec)
+	if err != nil {
+		fmt.Println(fmt.Sprintf("Invalid CRON spec format: %s", err.Error()))
+		return now
+	}
+	nextRun := now
+	nextRun = task.applyCronField(nextRun, cronSpecs.Minute, "minute")
+	nextRun = task.applyCronField(nextRun, cronSpecs.Hour, "hour")
+	nextRun = task.applyCronField(nextRun, cronSpecs.DayOfMonth, "day")
+	nextRun = task.applyCronField(nextRun, cronSpecs.Month, "month")
+	nextRun = task.applyCronField(nextRun, cronSpecs.DayOfWeek, "weekday")
+	return nextRun
+}
+
+func (task ScheduledTask) applyCronField(t time.Time, fieldSpec string, unit string) time.Time {
+	switch fieldSpec {
+	case "*":
+		return t
+	default:
+		value, _ := strconv.Atoi(fieldSpec)
+		switch unit {
+		case "minute":
+			if t.Minute() > value {
+				t = t.Add(time.Hour)
+			}
+			t = time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), value, 0, 0, t.Location())
+		case "hour":
+			if t.Hour() > value {
+				t = t.AddDate(0, 0, 1)
+			}
+			t = time.Date(t.Year(), t.Month(), t.Day(), value, t.Minute(), 0, 0, t.Location())
+		case "day":
+			if t.Day() > value {
+				t = t.AddDate(0, 1, 0)
+			}
+			t = time.Date(t.Year(), t.Month(), value, t.Hour(), t.Minute(), 0, 0, t.Location())
+		case "month":
+			if int(t.Month()) > value {
+				t = t.AddDate(1, 0, 0)
+			}
+			t = time.Date(t.Year(), time.Month(value), t.Day(), t.Hour(), t.Minute(), 0, 0, t.Location())
+		case "weekday":
+			weekday := time.Weekday(value)
+			for t.Weekday() != weekday {
+				t = t.AddDate(0, 0, 1)
+			}
+		}
+		return t
+	}
 }
 
 func nextWeekday(t time.Time, weekday time.Weekday) time.Time {
