@@ -140,7 +140,7 @@ func (c *Consumer) ConsumeMessage(ctx context.Context, msg *codec.Message, conn 
 		return
 	}
 	ctx = SetHeaders(ctx, map[string]string{consts.QueueKey: msg.Queue})
-	if err := c.pool.AddTask(ctx, &task); err != nil {
+	if err := c.pool.AddTask(ctx, &task, 1); err != nil {
 		c.sendDenyMessage(ctx, task.ID, msg.Queue, err)
 		return
 	}

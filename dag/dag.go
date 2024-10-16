@@ -2,7 +2,6 @@ package dag
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -14,13 +13,6 @@ import (
 	"github.com/oarkflow/mq"
 	"github.com/oarkflow/mq/consts"
 )
-
-func NewTask(id string, payload json.RawMessage, nodeKey string) *mq.Task {
-	if id == "" {
-		id = mq.NewID()
-	}
-	return &mq.Task{ID: id, Payload: payload, Topic: nodeKey, CreatedAt: time.Now()}
-}
 
 type EdgeType int
 
@@ -349,7 +341,7 @@ func (tm *DAG) Process(ctx context.Context, payload []byte) mq.Result {
 	if tm.server.SyncMode() {
 		ctx = mq.SetHeaders(ctx, map[string]string{consts.AwaitResponseKey: "true"})
 	}
-	task := NewTask(mq.NewID(), payload, initialNode)
+	task := mq.NewTask(mq.NewID(), payload, initialNode)
 	awaitResponse, _ := mq.GetAwaitResponse(ctx)
 	if awaitResponse != "true" {
 		headers, ok := mq.GetHeaders(ctx)
@@ -357,7 +349,7 @@ func (tm *DAG) Process(ctx context.Context, payload []byte) mq.Result {
 		if ok {
 			ctxx = mq.SetHeaders(ctxx, headers.AsMap())
 		}
-		if err := tm.pool.AddTask(ctxx, task); err != nil {
+		if err := tm.pool.AddTask(ctxx, task, 0); err != nil {
 			return mq.Result{CreatedAt: task.CreatedAt, TaskID: task.ID, Topic: initialNode, Status: "FAILED", Error: err}
 		}
 		return mq.Result{CreatedAt: task.CreatedAt, TaskID: task.ID, Topic: initialNode, Status: "PENDING"}
