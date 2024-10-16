@@ -116,7 +116,7 @@ func (tm *DAG) saveImage(fileName string, arg string) error {
 		return err
 	}
 	defer func() {
-		os.Remove(dotFile)
+		_ = os.Remove(dotFile)
 	}()
 	cmd := exec.Command("dot", arg, dotFile, "-o", fileName)
 	if err := cmd.Run(); err != nil {
@@ -216,26 +216,22 @@ func (tm *DAG) ExportDOT() string {
 	return sb.String()
 }
 
-func (tm *DAG) TopologicalSort() []string {
+func (tm *DAG) TopologicalSort() (stack []string) {
 	visited := make(map[string]bool)
-	stack := []string{}
 	for _, node := range tm.nodes {
 		if !visited[node.Key] {
 			tm.topologicalSortUtil(node.Key, visited, &stack)
 		}
 	}
-
 	for i, j := 0, len(stack)-1; i < j; i, j = i+1, j-1 {
 		stack[i], stack[j] = stack[j], stack[i]
 	}
-
-	return stack
+	return
 }
 
 func (tm *DAG) topologicalSortUtil(v string, visited map[string]bool, stack *[]string) {
 	visited[v] = true
 	node := tm.nodes[v]
-
 	for _, edge := range node.Edges {
 		for _, to := range edge.To {
 			if !visited[to.Key] {
@@ -243,6 +239,5 @@ func (tm *DAG) topologicalSortUtil(v string, visited map[string]bool, stack *[]s
 			}
 		}
 	}
-
 	*stack = append(*stack, v)
 }
