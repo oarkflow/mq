@@ -44,6 +44,55 @@ func (pq *PriorityQueue) Pop() interface{} {
 
 type Callback func(ctx context.Context, result Result) error
 
+type ScheduleOptions struct {
+	Handler   Handler
+	Callback  Callback
+	Overlap   bool
+	Interval  time.Duration
+	Recurring bool
+}
+
+type SchedulerOption func(*ScheduleOptions)
+
+// Helper functions to create SchedulerOptions
+func WithSchedulerHandler(handler Handler) SchedulerOption {
+	return func(opts *ScheduleOptions) {
+		opts.Handler = handler
+	}
+}
+
+func WithSchedulerCallback(callback Callback) SchedulerOption {
+	return func(opts *ScheduleOptions) {
+		opts.Callback = callback
+	}
+}
+
+func WithOverlap() SchedulerOption {
+	return func(opts *ScheduleOptions) {
+		opts.Overlap = true
+	}
+}
+
+func WithInterval(interval time.Duration) SchedulerOption {
+	return func(opts *ScheduleOptions) {
+		opts.Interval = interval
+	}
+}
+
+func WithRecurring() SchedulerOption {
+	return func(opts *ScheduleOptions) {
+		opts.Recurring = true
+	}
+}
+
+// defaultOptions returns the default scheduling options
+func defaultSchedulerOptions() *ScheduleOptions {
+	return &ScheduleOptions{
+		Interval:  time.Minute,
+		Recurring: true,
+	}
+}
+
 type SchedulerConfig struct {
 	Callback Callback
 	Overlap  bool
@@ -204,6 +253,7 @@ func parseCronValue(field string) ([]string, error) {
 type Scheduler struct {
 	tasks []ScheduledTask
 	mu    sync.Mutex
+	pool  *Pool
 }
 
 func (s *Scheduler) Start() {
@@ -234,6 +284,10 @@ func (s *Scheduler) schedule(task ScheduledTask) {
 			s.executeTask(task)
 		}
 	}
+}
+
+func NewScheduler(pool *Pool) *Scheduler {
+	return &Scheduler{pool: pool}
 }
 
 func (task ScheduledTask) getNextRunTime(now time.Time) time.Time {
@@ -334,11 +388,40 @@ func (s *Scheduler) executeTask(task ScheduledTask) {
 	}
 }
 
-func (s *Scheduler) AddTask(ctx context.Context, handler Handler, payload *Task, config SchedulerConfig, schedule *Schedule) {
+func (s *Scheduler) AddTask(ctx context.Context, payload *Task, opts ...SchedulerOption) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	// Create a default options instance
+	options := defaultSchedulerOptions()
+	for _, opt := range opts {
+		opt(options)
+	}
+	if options.Handler == nil {
+		options.Handler = s.pool.handler
+	}
+	if options.Callback == nil {
+		options.Callback = s.pool.callback
+	}
 	stop := make(chan struct{})
-	s.tasks = append(s.tasks, ScheduledTask{ctx: ctx, handler: handler, payload: payload, stop: stop, config: config, schedule: schedule})
+
+	// Create a new ScheduledTask using the provided options
+	s.tasks = append(s.tasks, ScheduledTask{
+		ctx:     ctx,
+		handler: options.Handler,
+		payload: payload,
+		stop:    stop,
+		config: SchedulerConfig{
+			Callback: options.Callback,
+			Overlap:  options.Overlap,
+		},
+		schedule: &Schedule{
+			Interval:  options.Interval,
+			Recurring: options.Recurring,
+		},
+	})
+
+	// Start scheduling the task
 	go s.schedule(s.tasks[len(s.tasks)-1])
 }
 
@@ -369,7 +452,7 @@ type Pool struct {
 	totalTasks                int
 	numOfWorkers              int32
 	paused                    bool
-	Scheduler                 Scheduler
+	Scheduler                 *Scheduler
 	totalScheduledTasks       int
 }
 
@@ -387,6 +470,7 @@ func NewPool(
 		callback:      callback,
 		workerAdjust:  make(chan int),
 	}
+	pool.Scheduler = NewScheduler(pool)
 	heap.Init(&pool.taskQueue)
 	pool.Scheduler.Start()
 	pool.Start(numOfWorkers)
@@ -466,6 +550,9 @@ func (wp *Pool) adjustWorkers(newWorkerCount int) {
 }
 
 func (wp *Pool) AddTask(ctx context.Context, payload *Task, priority int) error {
+	if payload.ID == "" {
+		payload.ID = NewID()
+	}
 	wp.taskQueueLock.Lock()
 	defer wp.taskQueueLock.Unlock()
 	task := &QueueTask{ctx: ctx, payload: payload, priority: priority}

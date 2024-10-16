@@ -202,7 +202,7 @@ func (tm *TaskManager) processNode(ctx context.Context, node *Node, payload json
 	default:
 		ctx = mq.SetHeaders(ctx, map[string]string{consts.QueueKey: node.Key})
 		if tm.dag.server.SyncMode() {
-			result = node.ProcessTask(ctx, NewTask(tm.taskID, payload, node.Key))
+			result = node.ProcessTask(ctx, mq.NewTask(tm.taskID, payload, node.Key))
 			if isDAG {
 				result.Topic = dag.consumerTopic
 				result.TaskID = tm.taskID
@@ -213,7 +213,7 @@ func (tm *TaskManager) processNode(ctx context.Context, node *Node, payload json
 			}
 			return
 		}
-		err := tm.dag.server.Publish(ctx, NewTask(tm.taskID, payload, node.Key), node.Key)
+		err := tm.dag.server.Publish(ctx, mq.NewTask(tm.taskID, payload, node.Key), node.Key)
 		if err != nil {
 			tm.appendFinalResult(mq.Result{Error: err})
 			return
