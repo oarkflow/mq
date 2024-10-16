@@ -31,7 +31,6 @@ func main() {
 		mq.SchedulerConfig{Callback: tasks.SchedulerCallback, Overlap: false},
 		&mq.Schedule{Interval: time.Hour * 24, DayOfWeek: []time.Weekday{time.Monday, time.Wednesday, time.Friday}, Recurring: true},
 	)
-
 	pool.Scheduler.AddTask(
 		context.Background(),
 		tasks.SchedulerHandler,
