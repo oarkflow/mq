@@ -149,7 +149,7 @@ func (tm *DAG) ExportDOT() string {
 	for _, nodeKey := range sortedNodes {
 		node := tm.nodes[nodeKey]
 		nodeColor := "lightblue"
-		sb.WriteString(fmt.Sprintf(`  "%s" [label="%s", fillcolor="%s"];`, node.Key, node.Name, nodeColor))
+		sb.WriteString(fmt.Sprintf(`  "%s" [label=" %s", fillcolor="%s"];`, node.Key, node.Name, nodeColor))
 		sb.WriteString("\n")
 	}
 	for _, nodeKey := range sortedNodes {
@@ -164,7 +164,7 @@ func (tm *DAG) ExportDOT() string {
 			}
 			edgeColor := "black"
 			for _, to := range edge.To {
-				sb.WriteString(fmt.Sprintf(`  "%s" -> "%s" [label="%s", color="%s", style=%s, fontsize=10, arrowsize=0.6];`, node.Key, to.Key, edge.Label, edgeColor, edgeStyle))
+				sb.WriteString(fmt.Sprintf(`  "%s" -> "%s" [label=" %s", color="%s", style=%s, fontsize=10, arrowsize=0.6];`, node.Key, to.Key, edge.Label, edgeColor, edgeStyle))
 				sb.WriteString("\n")
 			}
 		}
@@ -172,7 +172,7 @@ func (tm *DAG) ExportDOT() string {
 	for fromNodeKey, conditions := range tm.conditions {
 		for when, then := range conditions {
 			if toNode, ok := tm.nodes[string(then)]; ok {
-				sb.WriteString(fmt.Sprintf(`  "%s" -> "%s" [label="%s", color="purple", style=dotted, fontsize=10, arrowsize=0.6];`, fromNodeKey, toNode.Key, when))
+				sb.WriteString(fmt.Sprintf(`  "%s" -> "%s" [label=" %s", color="purple", style=dotted, fontsize=10, arrowsize=0.6];`, fromNodeKey, toNode.Key, when))
 				sb.WriteString("\n")
 			}
 		}
@@ -184,7 +184,7 @@ func (tm *DAG) ExportDOT() string {
 			if subDAG != nil {
 				sb.WriteString(fmt.Sprintf(`  subgraph "cluster_%s" {`, subDAG.name))
 				sb.WriteString("\n")
-				sb.WriteString(fmt.Sprintf(`    label="%s";`, subDAG.name))
+				sb.WriteString(fmt.Sprintf(`    label=" %s";`, subDAG.name))
 				sb.WriteString("\n")
 				sb.WriteString(`    style=dashed;`)
 				sb.WriteString("\n")
@@ -193,20 +193,20 @@ func (tm *DAG) ExportDOT() string {
 				sb.WriteString(`    node [shape=rectangle, style="filled", fillcolor="lightblue", fontname="Arial", margin="0.2,0.1"];`)
 				sb.WriteString("\n")
 				for subNodeKey, subNode := range subDAG.nodes {
-					sb.WriteString(fmt.Sprintf(`    "%s" [label="%s"];`, subNodeKey, subNode.Name))
+					sb.WriteString(fmt.Sprintf(`    "%s" [label=" %s"];`, subNodeKey, subNode.Name))
 					sb.WriteString("\n")
 				}
 				for subNodeKey, subNode := range subDAG.nodes {
 					for _, edge := range subNode.Edges {
 						for _, to := range edge.To {
-							sb.WriteString(fmt.Sprintf(`    "%s" -> "%s" [label="%s", color="black", style=solid, arrowsize=0.6];`, subNodeKey, to.Key, edge.Label))
+							sb.WriteString(fmt.Sprintf(`    "%s" -> "%s" [label=" %s", color="black", style=solid, arrowsize=0.6];`, subNodeKey, to.Key, edge.Label))
 							sb.WriteString("\n")
 						}
 					}
 				}
 				sb.WriteString(`  }`)
 				sb.WriteString("\n")
-				sb.WriteString(fmt.Sprintf(`  "%s" -> "%s" [label="%s", color="black", style=solid, arrowsize=0.6];`, node.Key, subDAG.startNode, subDAG.name))
+				sb.WriteString(fmt.Sprintf(`  "%s" -> "%s" [label=" %s", color="black", style=solid, arrowsize=0.6];`, node.Key, subDAG.startNode, subDAG.name))
 				sb.WriteString("\n")
 			}
 		}
