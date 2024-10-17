@@ -72,6 +72,7 @@ type Options struct {
 	callback             []func(context.Context, Result) Result
 	maxRetries           int
 	initialDelay         time.Duration
+	storage              TaskStorage
 	maxBackoff           time.Duration
 	jitterPercent        float64
 	queueSize            int
@@ -88,6 +89,10 @@ func (o *Options) SetSyncMode(sync bool) {
 
 func (o *Options) NumOfWorkers() int {
 	return o.numOfWorkers
+}
+
+func (o *Options) Storage() TaskStorage {
+	return o.storage
 }
 
 func (o *Options) QueueSize() int {
@@ -109,6 +114,7 @@ func defaultOptions() *Options {
 		queueSize:            100,
 		numOfWorkers:         runtime.NumCPU(),
 		maxMemoryLoad:        5000000,
+		storage:              NewMemoryTaskStorage(10 * time.Minute),
 	}
 }
 

@@ -1,8 +1,6 @@
 module github.com/oarkflow/mq
 
-go 1.22.3
-
-toolchain go1.23.0
+go 1.23
 
 require (
 	github.com/oarkflow/date v0.0.4

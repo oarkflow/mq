@@ -1,6 +1,8 @@
 package mq
 
 import (
+	"context"
+
 	"github.com/oarkflow/mq/storage"
 	"github.com/oarkflow/mq/storage/memory"
 )
@@ -28,4 +30,33 @@ func (b *Broker) NewQueue(qName string) *Queue {
 	b.queues.Set(qName, q)
 	go b.dispatchWorker(q)
 	return q
+}
+
+type QueueTask struct {
+	ctx      context.Context
+	payload  *Task
+	priority int
+}
+
+type PriorityQueue []*QueueTask
+
+func (pq PriorityQueue) Len() int { return len(pq) }
+
+func (pq PriorityQueue) Less(i, j int) bool {
+	return pq[i].priority > pq[j].priority
+}
+
+func (pq PriorityQueue) Swap(i, j int) { pq[i], pq[j] = pq[j], pq[i] }
+
+func (pq *PriorityQueue) Push(x interface{}) {
+	item := x.(*QueueTask)
+	*pq = append(*pq, item)
+}
+
+func (pq *PriorityQueue) Pop() interface{} {
+	old := *pq
+	n := len(old)
+	item := old[n-1]
+	*pq = old[0 : n-1]
+	return item
 }

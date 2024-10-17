@@ -20,6 +20,7 @@ import (
 type Task struct {
 	CreatedAt   time.Time       `json:"created_at"`
 	ProcessedAt time.Time       `json:"processed_at"`
+	Expiry      time.Time       `json:"expiry"`
 	Error       error           `json:"error"`
 	ID          string          `json:"id"`
 	Topic       string          `json:"topic"`

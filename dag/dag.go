@@ -134,7 +134,7 @@ func NewDAG(name, key string, opts ...mq.Option) *DAG {
 	d.server = mq.NewBroker(opts...)
 	d.opts = opts
 	options := d.server.Options()
-	d.pool = mq.NewPool(options.NumOfWorkers(), options.QueueSize(), options.MaxMemoryLoad(), d.ProcessTask, callback)
+	d.pool = mq.NewPool(options.NumOfWorkers(), options.QueueSize(), options.MaxMemoryLoad(), d.ProcessTask, callback, options.Storage())
 	d.pool.Start(d.server.Options().NumOfWorkers())
 	go d.listenForTaskCleanup()
 	return d
@@ -349,7 +349,7 @@ func (tm *DAG) Process(ctx context.Context, payload []byte) mq.Result {
 		if ok {
 			ctxx = mq.SetHeaders(ctxx, headers.AsMap())
 		}
-		if err := tm.pool.AddTask(ctxx, task, 0); err != nil {
+		if err := tm.pool.EnqueueTask(ctxx, task, 0); err != nil {
 			return mq.Result{CreatedAt: task.CreatedAt, TaskID: task.ID, Topic: initialNode, Status: "FAILED", Error: err}
 		}
 		return mq.Result{CreatedAt: task.CreatedAt, TaskID: task.ID, Topic: initialNode, Status: "PENDING"}

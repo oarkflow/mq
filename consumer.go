@@ -37,13 +37,13 @@ type Consumer struct {
 	queue   string
 }
 
-func NewConsumer(id string, queue string, handler Handler, opts ...Option) *Consumer {
+func NewConsumer(id string, queue string, handler Processor, opts ...Option) *Consumer {
 	options := SetupOptions(opts...)
 	return &Consumer{
 		id:      id,
 		opts:    options,
 		queue:   queue,
-		handler: handler,
+		handler: handler.ProcessTask,
 	}
 }
 
@@ -140,7 +140,7 @@ func (c *Consumer) ConsumeMessage(ctx context.Context, msg *codec.Message, conn 
 		return
 	}
 	ctx = SetHeaders(ctx, map[string]string{consts.QueueKey: msg.Queue})
-	if err := c.pool.AddTask(ctx, &task, 1); err != nil {
+	if err := c.pool.EnqueueTask(ctx, &task, 1); err != nil {
 		c.sendDenyMessage(ctx, task.ID, msg.Queue, err)
 		return
 	}
@@ -230,7 +230,7 @@ func (c *Consumer) Consume(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	c.pool = NewPool(c.opts.numOfWorkers, c.opts.queueSize, c.opts.maxMemoryLoad, c.ProcessTask, c.OnResponse)
+	c.pool = NewPool(c.opts.numOfWorkers, c.opts.queueSize, c.opts.maxMemoryLoad, c.ProcessTask, c.OnResponse, c.opts.storage)
 	if err := c.subscribe(ctx, c.queue); err != nil {
 		return fmt.Errorf("failed to connect to server for queue %s: %v", c.queue, err)
 	}
