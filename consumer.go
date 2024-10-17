@@ -37,13 +37,13 @@ type Consumer struct {
 	queue   string
 }
 
-func NewConsumer(id string, queue string, handler Processor, opts ...Option) *Consumer {
+func NewConsumer(id string, queue string, handler Handler, opts ...Option) *Consumer {
 	options := SetupOptions(opts...)
 	return &Consumer{
 		id:      id,
 		opts:    options,
 		queue:   queue,
-		handler: handler.ProcessTask,
+		handler: handler,
 	}
 }
 
