@@ -231,7 +231,18 @@ func (s *Scheduler) schedule(task ScheduledTask) {
 	if task.schedule.Interval > 0 {
 		ticker := time.NewTicker(task.schedule.Interval)
 		defer ticker.Stop()
-		for {
+
+		if task.schedule.Recurring {
+			for {
+				select {
+				case <-ticker.C:
+					s.executeTask(task)
+				case <-task.stop:
+					return
+				}
+			}
+		} else {
+			// Execute once and return
 			select {
 			case <-ticker.C:
 				s.executeTask(task)
@@ -243,10 +254,12 @@ func (s *Scheduler) schedule(task ScheduledTask) {
 		for {
 			now := time.Now()
 			nextRun := task.getNextRunTime(now)
-			if nextRun.After(now) {
-				time.Sleep(nextRun.Sub(now))
+			select {
+			case <-time.After(nextRun.Sub(now)):
+				s.executeTask(task)
+			case <-task.stop:
+				return
 			}
-			s.executeTask(task)
 		}
 	}
 }
