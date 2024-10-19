@@ -11,12 +11,17 @@ import (
 func main() {
 	pool := mq.NewPool(2, 5, 1000, tasks.SchedulerHandler, tasks.SchedulerCallback, mq.NewMemoryTaskStorage(10*time.Minute))
 
-	time.Sleep(time.Millisecond)
-	pool.EnqueueTask(context.Background(), &mq.Task{ID: "Low Priority Task"}, 1)
-	pool.EnqueueTask(context.Background(), &mq.Task{ID: "Medium Priority Task"}, 5)
-	pool.EnqueueTask(context.Background(), &mq.Task{ID: "High Priority Task"}, 10)
+	for i := 0; i < 100; i++ {
+		if i%10 == 0 {
+			pool.EnqueueTask(context.Background(), &mq.Task{ID: "High Priority Task: I'm high"}, 10)
+		} else if i%15 == 0 {
+			pool.EnqueueTask(context.Background(), &mq.Task{ID: "Super High Priority Task: {}"}, 15)
+		} else {
+			pool.EnqueueTask(context.Background(), &mq.Task{ID: "Low Priority Task"}, 1)
+		}
+	}
 
-	time.Sleep(5 * time.Second)
+	time.Sleep(15 * time.Second)
 	pool.PrintMetrics()
 	pool.Stop()
 }

@@ -21,14 +21,24 @@ func newQueue(name string, queueSize int) *Queue {
 	}
 }
 
-func (b *Broker) NewQueue(qName string) *Queue {
-	q, ok := b.queues.Get(qName)
-	if ok {
-		return q
+func (b *Broker) NewQueue(name string) *Queue {
+	q := &Queue{
+		name:      name,
+		tasks:     make(chan *QueuedTask, b.opts.queueSize),
+		consumers: memory.New[string, *consumer](),
 	}
-	q = newQueue(qName, b.opts.queueSize)
-	b.queues.Set(qName, q)
+	b.queues.Set(name, q)
+
+	// Create DLQ for the queue
+	dlq := &Queue{
+		name:      name + "_dlq",
+		tasks:     make(chan *QueuedTask, b.opts.queueSize),
+		consumers: memory.New[string, *consumer](),
+	}
+	b.deadLetter.Set(name, dlq)
+
 	go b.dispatchWorker(q)
+	go b.dispatchWorker(dlq)
 	return q
 }
 

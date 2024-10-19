@@ -4,10 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 
-	"github.com/oarkflow/mq/consts"
 	"github.com/oarkflow/mq/examples/tasks"
 	"github.com/oarkflow/mq/services"
 
@@ -16,8 +14,8 @@ import (
 )
 
 func main() {
-	sync()
-	async()
+	Sync()
+	aSync()
 }
 
 func setup(f *dag.DAG) {
@@ -46,7 +44,7 @@ func sendData(f *dag.DAG) {
 	fmt.Println(string(result.Payload))
 }
 
-func sync() {
+func Sync() {
 	f := dag.NewDAG("Sample DAG", "sample-dag", mq.WithSyncMode(true), mq.WithNotifyResponse(tasks.NotifyResponse))
 	setup(f)
 	fmt.Println(f.ExportDOT())
@@ -54,46 +52,10 @@ func sync() {
 	fmt.Println(f.SaveSVG("dag.svg"))
 }
 
-func async() {
+func aSync() {
 	f := dag.NewDAG("Sample DAG", "sample-dag", mq.WithNotifyResponse(tasks.NotifyResponse))
 	setup(f)
-
-	requestHandler := func(requestType string) func(w http.ResponseWriter, r *http.Request) {
-		return func(w http.ResponseWriter, r *http.Request) {
-			if r.Method != http.MethodPost {
-				http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
-				return
-			}
-			var payload []byte
-			if r.Body != nil {
-				defer r.Body.Close()
-				var err error
-				payload, err = io.ReadAll(r.Body)
-				if err != nil {
-					http.Error(w, "Failed to read request body", http.StatusBadRequest)
-					return
-				}
-			} else {
-				http.Error(w, "Empty request body", http.StatusBadRequest)
-				return
-			}
-			ctx := r.Context()
-			if requestType == "request" {
-				ctx = mq.SetHeaders(ctx, map[string]string{consts.AwaitResponseKey: "true"})
-			}
-			// ctx = context.WithValue(ctx, "initial_node", "E")
-			rs := f.Process(ctx, payload)
-			if rs.Error != nil {
-				http.Error(w, fmt.Sprintf("[DAG Error] - %v", rs.Error), http.StatusInternalServerError)
-				return
-			}
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(rs)
-		}
-	}
-
-	http.HandleFunc("POST /publish", requestHandler("publish"))
-	http.HandleFunc("POST /request", requestHandler("request"))
+	http.HandleFunc("POST /request", f.ServeHTTP)
 	http.HandleFunc("/pause-consumer/{id}", func(writer http.ResponseWriter, request *http.Request) {
 		id := request.PathValue("id")
 		if id != "" {

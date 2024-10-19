@@ -4,11 +4,9 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/json"
 	"fmt"
 	"net"
 	"os"
-	"time"
 
 	"github.com/oarkflow/xid"
 
@@ -16,17 +14,6 @@ import (
 	"github.com/oarkflow/mq/storage"
 	"github.com/oarkflow/mq/storage/memory"
 )
-
-type Task struct {
-	CreatedAt   time.Time       `json:"created_at"`
-	ProcessedAt time.Time       `json:"processed_at"`
-	Expiry      time.Time       `json:"expiry"`
-	Error       error           `json:"error"`
-	ID          string          `json:"id"`
-	Topic       string          `json:"topic"`
-	Status      string          `json:"status"`
-	Payload     json.RawMessage `json:"payload"`
-}
 
 type Handler func(context.Context, *Task) Result
 

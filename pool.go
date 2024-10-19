@@ -29,19 +29,15 @@ type Pool struct {
 	numOfWorkers              int32
 	paused                    bool
 	scheduler                 *Scheduler
-	totalScheduledTasks       int
+	overflowBufferLock        sync.RWMutex
+	overflowBuffer            []*QueueTask
 }
 
-func NewPool(
-	numOfWorkers, taskQueueSize int,
-	maxMemoryLoad int64,
-	handler Handler,
-	callback Callback,
-	storage TaskStorage) *Pool {
+func NewPool(numOfWorkers, taskQueueSize int, maxMemoryLoad int64, handler Handler, callback Callback, storage TaskStorage) *Pool {
 	pool := &Pool{
 		taskQueue:     make(PriorityQueue, 0, taskQueueSize),
 		stop:          make(chan struct{}),
-		taskNotify:    make(chan struct{}, 1),
+		taskNotify:    make(chan struct{}, numOfWorkers), // Buffer for workers
 		maxMemoryLoad: maxMemoryLoad,
 		handler:       handler,
 		callback:      callback,
@@ -70,6 +66,7 @@ func (wp *Pool) Start(numWorkers int) {
 	}
 	atomic.StoreInt32(&wp.numOfWorkers, int32(numWorkers))
 	go wp.monitorWorkerAdjustments()
+	go wp.startOverflowDrainer()
 }
 
 func (wp *Pool) worker() {
@@ -77,44 +74,51 @@ func (wp *Pool) worker() {
 	for {
 		select {
 		case <-wp.taskNotify:
-			wp.taskQueueLock.Lock()
-			var task *QueueTask
-			if len(wp.taskQueue) > 0 && !wp.paused {
-				task = heap.Pop(&wp.taskQueue).(*QueueTask)
-			}
-			wp.taskQueueLock.Unlock()
-			if task == nil && !wp.paused {
-				var err error
-				task, err = wp.taskStorage.FetchNextTask()
-				if err != nil {
-
-					continue
-				}
-			}
-			if task != nil {
-				taskSize := int64(utils.SizeOf(task.payload))
-				wp.totalMemoryUsed += taskSize
-				wp.totalTasks++
-				result := wp.handler(task.ctx, task.payload)
-				if result.Error != nil {
-					wp.errorCount++
-				} else {
-					wp.completedTasks++
-				}
-				if wp.callback != nil {
-					if err := wp.callback(task.ctx, result); err != nil {
-						wp.errorCount++
-					}
-				}
-				if err := wp.taskStorage.DeleteTask(task.payload.ID); err != nil {
-
-				}
-				wp.totalMemoryUsed -= taskSize
-			}
+			wp.processNextTask()
 		case <-wp.stop:
 			return
 		}
 	}
+}
+
+func (wp *Pool) processNextTask() {
+	wp.taskQueueLock.Lock()
+	var task *QueueTask
+	if len(wp.taskQueue) > 0 && !wp.paused {
+		task = heap.Pop(&wp.taskQueue).(*QueueTask)
+	}
+	wp.taskQueueLock.Unlock()
+	if task == nil && !wp.paused {
+		var err error
+		task, err = wp.taskStorage.FetchNextTask()
+		if err != nil {
+			return
+		}
+	}
+	if task != nil {
+		wp.handleTask(task)
+	}
+}
+
+func (wp *Pool) handleTask(task *QueueTask) {
+	taskSize := int64(utils.SizeOf(task.payload))
+	wp.totalMemoryUsed += taskSize
+	wp.totalTasks++
+	result := wp.handler(task.ctx, task.payload)
+	if result.Error != nil {
+		wp.errorCount++
+	} else {
+		wp.completedTasks++
+	}
+	if wp.callback != nil {
+		if err := wp.callback(task.ctx, result); err != nil {
+			wp.errorCount++
+		}
+	}
+	if err := wp.taskStorage.DeleteTask(task.payload.ID); err != nil {
+		// Handle deletion error
+	}
+	wp.totalMemoryUsed -= taskSize
 }
 
 func (wp *Pool) monitorWorkerAdjustments() {
@@ -162,9 +166,12 @@ func (wp *Pool) EnqueueTask(ctx context.Context, payload *Task, priority int) er
 		return fmt.Errorf("max memory load reached, cannot add task of size %d", taskSize)
 	}
 	heap.Push(&wp.taskQueue, task)
+
+	// Non-blocking task notification
 	select {
 	case wp.taskNotify <- struct{}{}:
 	default:
+		wp.storeInOverflow(task)
 	}
 	return nil
 }
@@ -175,6 +182,45 @@ func (wp *Pool) Pause() {
 
 func (wp *Pool) Resume() {
 	wp.paused = false
+}
+
+// Overflow Handling
+func (wp *Pool) storeInOverflow(task *QueueTask) {
+	wp.overflowBufferLock.Lock()
+	wp.overflowBuffer = append(wp.overflowBuffer, task)
+	wp.overflowBufferLock.Unlock()
+}
+
+// Drains tasks from the overflow buffer when taskNotify is not full
+func (wp *Pool) startOverflowDrainer() {
+	for {
+		wp.drainOverflowBuffer()
+		select {
+		case <-wp.stop:
+			return
+		default:
+			continue
+		}
+	}
+}
+
+func (wp *Pool) drainOverflowBuffer() {
+	wp.overflowBufferLock.Lock()
+	defer wp.overflowBufferLock.Unlock()
+
+	for len(wp.overflowBuffer) > 0 {
+		select {
+		case wp.taskNotify <- struct{}{}:
+			// Move the first task from the overflow buffer to the queue
+			wp.taskQueueLock.Lock()
+			heap.Push(&wp.taskQueue, wp.overflowBuffer[0])
+			wp.overflowBuffer = wp.overflowBuffer[1:]
+			wp.taskQueueLock.Unlock()
+		default:
+			// Stop if taskNotify is full
+			return
+		}
+	}
 }
 
 func (wp *Pool) Stop() {

@@ -38,6 +38,7 @@ type Broker struct {
 	queues     storage.IMap[string, *Queue]
 	consumers  storage.IMap[string, *consumer]
 	publishers storage.IMap[string, *publisher]
+	deadLetter storage.IMap[string, *Queue] // DLQ mapping for each queue
 	opts       *Options
 }
 
@@ -47,6 +48,7 @@ func NewBroker(opts ...Option) *Broker {
 		queues:     memory.New[string, *Queue](),
 		publishers: memory.New[string, *publisher](),
 		consumers:  memory.New[string, *consumer](),
+		deadLetter: memory.New[string, *Queue](),
 		opts:       options,
 	}
 }
@@ -422,6 +424,19 @@ func (b *Broker) dispatchWorker(queue *Queue) {
 				delay = b.backoffRetry(queue, task, delay)
 			}
 		}
+		if task.RetryCount > b.opts.maxRetries {
+			b.sendToDLQ(queue, task)
+		}
+	}
+}
+
+func (b *Broker) sendToDLQ(queue *Queue, task *QueuedTask) {
+	id, _ := jsonparser.GetString(task.Message.Payload, "id")
+	if dlq, ok := b.deadLetter.Get(queue.name); ok {
+		log.Printf("Sending task %s to dead-letter queue for %s", id, queue.name)
+		dlq.tasks <- task
+	} else {
+		log.Printf("No dead-letter queue for %s, discarding task %s", queue.name, id)
 	}
 }
 
