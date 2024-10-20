@@ -446,7 +446,7 @@ func (b *Broker) dispatchTaskToConsumer(queue *Queue, task *QueuedTask) bool {
 	queue.consumers.ForEach(func(_ string, con *consumer) bool {
 		if con.state != consts.ConsumerStateActive {
 			err = fmt.Errorf("consumer %s is not active", con.id)
-			return false
+			return true
 		}
 		if err := b.send(con.conn, task.Message); err == nil {
 			consumerFound = true
