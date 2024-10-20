@@ -8,94 +8,97 @@ import (
 
 var _ storage.IMap[string, any] = (*Map[string, any])(nil)
 
+// Map is a thread-safe map using sync.Map with generics
 type Map[K comparable, V any] struct {
-	data map[K]V
-	mu   sync.RWMutex
+	m sync.Map
 }
 
+// New creates a new Map
 func New[K comparable, V any]() *Map[K, V] {
-	return &Map[K, V]{
-		data: make(map[K]V),
+	return &Map[K, V]{}
+}
+
+// Get retrieves the value for a given key
+func (g *Map[K, V]) Get(key K) (V, bool) {
+	val, ok := g.m.Load(key)
+	if !ok {
+		var zeroValue V
+		return zeroValue, false
 	}
+	return val.(V), true
 }
 
-func (m *Map[K, V]) Get(key K) (V, bool) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	val, exists := m.data[key]
-	return val, exists
+// Set adds a key-value pair to the map
+func (g *Map[K, V]) Set(key K, value V) {
+	g.m.Store(key, value)
 }
 
-func (m *Map[K, V]) Set(key K, value V) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.data[key] = value
+// Del removes a key-value pair from the map
+func (g *Map[K, V]) Del(key K) {
+	g.m.Delete(key)
 }
 
-func (m *Map[K, V]) Del(key K) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	delete(m.data, key)
+// ForEach iterates over the map
+func (g *Map[K, V]) ForEach(fn func(K, V) bool) {
+	g.m.Range(func(k, v any) bool {
+		return fn(k.(K), v.(V))
+	})
 }
 
-func (m *Map[K, V]) ForEach(f func(K, V) bool) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	for k, v := range m.data {
-		if !f(k, v) {
-			break
-		}
-	}
+// Clear removes all key-value pairs from the map
+func (g *Map[K, V]) Clear() {
+	g.ForEach(func(k K, v V) bool {
+		g.Del(k)
+		return true
+	})
 }
 
-func (m *Map[K, V]) Clear() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.data = make(map[K]V)
+// Size returns the number of key-value pairs in the map
+func (g *Map[K, V]) Size() int {
+	count := 0
+	g.ForEach(func(_ K, _ V) bool {
+		count++
+		return true
+	})
+	return count
 }
 
-func (m *Map[K, V]) Size() int {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return len(m.data)
-}
-
-func (m *Map[K, V]) Keys() []K {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	keys := make([]K, 0, len(m.data))
-	for k := range m.data {
+// Keys returns a slice of all keys in the map
+func (g *Map[K, V]) Keys() []K {
+	keys := []K{}
+	g.ForEach(func(k K, _ V) bool {
 		keys = append(keys, k)
-	}
+		return true
+	})
 	return keys
 }
 
-func (m *Map[K, V]) Values() []V {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	values := make([]V, 0, len(m.data))
-	for _, v := range m.data {
+// Values returns a slice of all values in the map
+func (g *Map[K, V]) Values() []V {
+	values := []V{}
+	g.ForEach(func(_ K, v V) bool {
 		values = append(values, v)
-	}
+		return true
+	})
 	return values
 }
 
-func (m *Map[K, V]) AsMap() map[K]V {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	copiedMap := make(map[K]V, len(m.data))
-	for k, v := range m.data {
-		copiedMap[k] = v
-	}
-	return copiedMap
+// AsMap returns a regular map containing all key-value pairs
+func (g *Map[K, V]) AsMap() map[K]V {
+	result := make(map[K]V)
+	g.ForEach(func(k K, v V) bool {
+		result[k] = v
+		return true
+	})
+	return result
 }
 
-func (m *Map[K, V]) Clone() storage.IMap[K, V] {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	clonedMap := New[K, V]()
-	for k, v := range m.data {
-		clonedMap.Set(k, v)
-	}
-	return clonedMap
+// Clone creates a shallow copy of the map
+func (g *Map[K, V]) Clone() storage.IMap[K, V] {
+	clone := New[K, V]()
+	g.ForEach(func(k K, v V) bool {
+		clone.Set(k, v)
+		return true
+	})
+	return clone
 }

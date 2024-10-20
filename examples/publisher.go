@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/oarkflow/mq"
 )
@@ -25,7 +24,6 @@ func main() {
 		Payload: payload,
 	}
 	for i := 0; i < 100; i++ {
-		time.Sleep(500 * time.Millisecond)
 		err := publisher.Publish(context.Background(), task, "queue1")
 		if err != nil {
 			panic(err)

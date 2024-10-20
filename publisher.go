@@ -37,15 +37,15 @@ func (p *Publisher) send(ctx context.Context, queue string, task Task, conn net.
 		return err
 	}
 	msg := codec.NewMessage(command, payload, queue, headers)
-	if err := codec.SendMessage(conn, msg); err != nil {
+	if err := codec.SendMessage(ctx, conn, msg); err != nil {
 		return err
 	}
 
-	return p.waitForAck(conn)
+	return p.waitForAck(ctx, conn)
 }
 
-func (p *Publisher) waitForAck(conn net.Conn) error {
-	msg, err := codec.ReadMessage(conn)
+func (p *Publisher) waitForAck(ctx context.Context, conn net.Conn) error {
+	msg, err := codec.ReadMessage(ctx, conn)
 	if err != nil {
 		return err
 	}
@@ -57,8 +57,8 @@ func (p *Publisher) waitForAck(conn net.Conn) error {
 	return fmt.Errorf("expected PUBLISH_ACK, got: %v", msg.Command)
 }
 
-func (p *Publisher) waitForResponse(conn net.Conn) Result {
-	msg, err := codec.ReadMessage(conn)
+func (p *Publisher) waitForResponse(ctx context.Context, conn net.Conn) Result {
+	msg, err := codec.ReadMessage(ctx, conn)
 	if err != nil {
 		return Result{Error: err}
 	}
@@ -103,7 +103,7 @@ func (p *Publisher) Request(ctx context.Context, queue string, task Task) Result
 	resultCh := make(chan Result)
 	go func() {
 		defer close(resultCh)
-		resultCh <- p.waitForResponse(conn)
+		resultCh <- p.waitForResponse(ctx, conn)
 	}()
 	finalResult := <-resultCh
 	return finalResult

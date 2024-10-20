@@ -36,9 +36,9 @@ func (b *Broker) NewQueue(name string) *Queue {
 		consumers: memory.New[string, *consumer](),
 	}
 	b.deadLetter.Set(name, dlq)
-
-	go b.dispatchWorker(q)
-	go b.dispatchWorker(dlq)
+	ctx := context.Background()
+	go b.dispatchWorker(ctx, q)
+	go b.dispatchWorker(ctx, dlq)
 	return q
 }
 

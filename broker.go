@@ -75,18 +75,15 @@ func (b *Broker) OnClose(ctx context.Context, conn net.Conn) error {
 		})
 	} else {
 		b.consumers.ForEach(func(consumerID string, con *consumer) bool {
-			if con.conn.RemoteAddr().String() == conn.RemoteAddr().String() &&
-				con.conn.LocalAddr().String() == conn.LocalAddr().String() {
-				if c, exists := b.consumers.Get(consumerID); exists {
-					c.conn.Close()
-					b.consumers.Del(consumerID)
-				}
+			if utils.ConnectionsEqual(conn, con.conn) {
+				con.conn.Close()
+				b.consumers.Del(consumerID)
 				b.queues.ForEach(func(_ string, queue *Queue) bool {
+					queue.consumers.Del(consumerID)
 					if _, ok := queue.consumers.Get(consumerID); ok {
 						if b.opts.consumerOnClose != nil {
 							b.opts.consumerOnClose(ctx, queue.name, consumerID)
 						}
-						queue.consumers.Del(consumerID)
 					}
 					return true
 				})
@@ -189,7 +186,7 @@ func (b *Broker) MessageResponseHandler(ctx context.Context, msg *codec.Message)
 	if !ok {
 		return
 	}
-	err := b.send(con.conn, msg)
+	err := b.send(ctx, con.conn, msg)
 	if err != nil {
 		panic(err)
 	}
@@ -202,7 +199,7 @@ func (b *Broker) Publish(ctx context.Context, task *Task, queue string) error {
 		return err
 	}
 	msg := codec.NewMessage(consts.PUBLISH, payload, queue, headers.AsMap())
-	b.broadcastToConsumers(ctx, msg)
+	b.broadcastToConsumers(msg)
 	return nil
 }
 
@@ -212,10 +209,10 @@ func (b *Broker) PublishHandler(ctx context.Context, conn net.Conn, msg *codec.M
 	log.Printf("BROKER - PUBLISH ~> received from %s on %s for Task %s", pub.id, msg.Queue, taskID)
 
 	ack := codec.NewMessage(consts.PUBLISH_ACK, utils.ToByte(fmt.Sprintf(`{"id":"%s"}`, taskID)), msg.Queue, msg.Headers)
-	if err := b.send(conn, ack); err != nil {
+	if err := b.send(ctx, conn, ack); err != nil {
 		log.Printf("Error sending PUBLISH_ACK: %v\n", err)
 	}
-	b.broadcastToConsumers(ctx, msg)
+	b.broadcastToConsumers(msg)
 	go func() {
 		select {
 		case <-ctx.Done():
@@ -227,7 +224,7 @@ func (b *Broker) PublishHandler(ctx context.Context, conn net.Conn, msg *codec.M
 func (b *Broker) SubscribeHandler(ctx context.Context, conn net.Conn, msg *codec.Message) {
 	consumerID := b.AddConsumer(ctx, msg.Queue, conn)
 	ack := codec.NewMessage(consts.SUBSCRIBE_ACK, nil, msg.Queue, msg.Headers)
-	if err := b.send(conn, ack); err != nil {
+	if err := b.send(ctx, conn, ack); err != nil {
 		log.Printf("Error sending SUBSCRIBE_ACK: %v\n", err)
 	}
 	if b.opts.consumerOnSubscribe != nil {
@@ -284,23 +281,23 @@ func (b *Broker) Start(ctx context.Context) error {
 	}
 }
 
-func (b *Broker) send(conn net.Conn, msg *codec.Message) error {
-	return codec.SendMessage(conn, msg)
+func (b *Broker) send(ctx context.Context, conn net.Conn, msg *codec.Message) error {
+	return codec.SendMessage(ctx, conn, msg)
 }
 
-func (b *Broker) receive(c net.Conn) (*codec.Message, error) {
-	return codec.ReadMessage(c)
+func (b *Broker) receive(ctx context.Context, c net.Conn) (*codec.Message, error) {
+	return codec.ReadMessage(ctx, c)
 }
 
-func (b *Broker) broadcastToConsumers(ctx context.Context, msg *codec.Message) {
+func (b *Broker) broadcastToConsumers(msg *codec.Message) {
 	if queue, ok := b.queues.Get(msg.Queue); ok {
 		task := &QueuedTask{Message: msg, RetryCount: 0}
 		queue.tasks <- task
 	}
 }
 
-func (b *Broker) waitForConsumerAck(conn net.Conn) error {
-	msg, err := b.receive(conn)
+func (b *Broker) waitForConsumerAck(ctx context.Context, conn net.Conn) error {
+	msg, err := b.receive(ctx, conn)
 	if err != nil {
 		return err
 	}
@@ -360,12 +357,12 @@ func (b *Broker) RemoveConsumer(consumerID string, queues ...string) {
 	})
 }
 
-func (b *Broker) handleConsumer(cmd consts.CMD, state consts.ConsumerState, consumerID string, queues ...string) {
+func (b *Broker) handleConsumer(ctx context.Context, cmd consts.CMD, state consts.ConsumerState, consumerID string, queues ...string) {
 	fn := func(queue *Queue) {
 		con, ok := queue.consumers.Get(consumerID)
 		if ok {
 			ack := codec.NewMessage(cmd, utils.ToByte("{}"), queue.name, map[string]string{consts.ConsumerKey: consumerID})
-			err := b.send(con.conn, ack)
+			err := b.send(ctx, con.conn, ack)
 			if err == nil {
 				con.state = state
 			}
@@ -385,20 +382,20 @@ func (b *Broker) handleConsumer(cmd consts.CMD, state consts.ConsumerState, cons
 	})
 }
 
-func (b *Broker) PauseConsumer(consumerID string, queues ...string) {
-	b.handleConsumer(consts.CONSUMER_PAUSE, consts.ConsumerStatePaused, consumerID, queues...)
+func (b *Broker) PauseConsumer(ctx context.Context, consumerID string, queues ...string) {
+	b.handleConsumer(ctx, consts.CONSUMER_PAUSE, consts.ConsumerStatePaused, consumerID, queues...)
 }
 
-func (b *Broker) ResumeConsumer(consumerID string, queues ...string) {
-	b.handleConsumer(consts.CONSUMER_RESUME, consts.ConsumerStateActive, consumerID, queues...)
+func (b *Broker) ResumeConsumer(ctx context.Context, consumerID string, queues ...string) {
+	b.handleConsumer(ctx, consts.CONSUMER_RESUME, consts.ConsumerStateActive, consumerID, queues...)
 }
 
-func (b *Broker) StopConsumer(consumerID string, queues ...string) {
-	b.handleConsumer(consts.CONSUMER_STOP, consts.ConsumerStateStopped, consumerID, queues...)
+func (b *Broker) StopConsumer(ctx context.Context, consumerID string, queues ...string) {
+	b.handleConsumer(ctx, consts.CONSUMER_STOP, consts.ConsumerStateStopped, consumerID, queues...)
 }
 
 func (b *Broker) readMessage(ctx context.Context, c net.Conn) error {
-	msg, err := b.receive(c)
+	msg, err := b.receive(ctx, c)
 	if err == nil {
 		ctx = SetHeaders(ctx, msg.Headers)
 		b.OnMessage(ctx, msg, c)
@@ -412,12 +409,12 @@ func (b *Broker) readMessage(ctx context.Context, c net.Conn) error {
 	return err
 }
 
-func (b *Broker) dispatchWorker(queue *Queue) {
+func (b *Broker) dispatchWorker(ctx context.Context, queue *Queue) {
 	delay := b.opts.initialDelay
 	for task := range queue.tasks {
 		success := false
 		for !success && task.RetryCount <= b.opts.maxRetries {
-			if b.dispatchTaskToConsumer(queue, task) {
+			if b.dispatchTaskToConsumer(ctx, queue, task) {
 				success = true
 			} else {
 				task.RetryCount++
@@ -440,7 +437,7 @@ func (b *Broker) sendToDLQ(queue *Queue, task *QueuedTask) {
 	}
 }
 
-func (b *Broker) dispatchTaskToConsumer(queue *Queue, task *QueuedTask) bool {
+func (b *Broker) dispatchTaskToConsumer(ctx context.Context, queue *Queue, task *QueuedTask) bool {
 	var consumerFound bool
 	var err error
 	queue.consumers.ForEach(func(_ string, con *consumer) bool {
@@ -448,7 +445,7 @@ func (b *Broker) dispatchTaskToConsumer(queue *Queue, task *QueuedTask) bool {
 			err = fmt.Errorf("consumer %s is not active", con.id)
 			return true
 		}
-		if err := b.send(con.conn, task.Message); err == nil {
+		if err := b.send(ctx, con.conn, task.Message); err == nil {
 			consumerFound = true
 			return false
 		}
