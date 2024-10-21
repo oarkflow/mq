@@ -65,7 +65,7 @@ func (g *Map[K, V]) Size() int {
 
 // Keys returns a slice of all keys in the map
 func (g *Map[K, V]) Keys() []K {
-	keys := []K{}
+	var keys []K
 	g.ForEach(func(k K, _ V) bool {
 		keys = append(keys, k)
 		return true
@@ -75,7 +75,7 @@ func (g *Map[K, V]) Keys() []K {
 
 // Values returns a slice of all values in the map
 func (g *Map[K, V]) Values() []V {
-	values := []V{}
+	var values []V
 	g.ForEach(func(_ K, v V) bool {
 		values = append(values, v)
 		return true

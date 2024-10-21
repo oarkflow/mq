@@ -2,9 +2,7 @@ package dag
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"sync"
@@ -81,10 +79,9 @@ func (tm *DAG) GetType() string {
 
 func (tm *DAG) listenForTaskCleanup() {
 	for taskID := range tm.taskCleanupCh {
-		tm.mu.Lock()
-		delete(tm.taskContext, taskID)
-		tm.mu.Unlock()
-		log.Printf("DAG - Task %s cleaned up", taskID)
+		if tm.server.Options().CleanTaskOnComplete() {
+			tm.taskCleanup(taskID)
+		}
 	}
 }
 
@@ -182,35 +179,6 @@ func (tm *DAG) GetStartNode() string {
 	return tm.startNode
 }
 
-func (tm *DAG) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
-		return
-	}
-	var payload []byte
-	if r.Body != nil {
-		defer r.Body.Close()
-		var err error
-		payload, err = io.ReadAll(r.Body)
-		if err != nil {
-			http.Error(w, "Failed to read request body", http.StatusBadRequest)
-			return
-		}
-	} else {
-		http.Error(w, "Empty request body", http.StatusBadRequest)
-		return
-	}
-	ctx := r.Context()
-	ctx = mq.SetHeaders(ctx, map[string]string{consts.AwaitResponseKey: "true"})
-	rs := tm.Process(ctx, payload)
-	if rs.Error != nil {
-		http.Error(w, fmt.Sprintf("[DAG Error] - %v", rs.Error), http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(rs)
-}
-
 func (tm *DAG) Start(ctx context.Context, addr string) error {
 	if !tm.server.SyncMode() {
 		go func() {
@@ -236,6 +204,7 @@ func (tm *DAG) Start(ctx context.Context, addr string) error {
 		}
 	}
 	log.Printf("DAG - HTTP_SERVER ~> started on %s", addr)
+	tm.Handlers()
 	config := tm.server.TLSConfig()
 	if config.UseTLS {
 		return http.ListenAndServeTLS(addr, config.CertPath, config.KeyPath, nil)

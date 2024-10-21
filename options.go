@@ -79,6 +79,7 @@ type Options struct {
 	numOfWorkers         int
 	maxMemoryLoad        int64
 	syncMode             bool
+	cleanTaskOnComplete  bool
 	enableWorkerPool     bool
 	respondPendingResult bool
 }
@@ -93,6 +94,10 @@ func (o *Options) NumOfWorkers() int {
 
 func (o *Options) Storage() TaskStorage {
 	return o.storage
+}
+
+func (o *Options) CleanTaskOnComplete() bool {
+	return o.cleanTaskOnComplete
 }
 
 func (o *Options) QueueSize() int {
@@ -183,6 +188,13 @@ func WithCAPath(caPath string) Option {
 func WithSyncMode(mode bool) Option {
 	return func(opts *Options) {
 		opts.syncMode = mode
+	}
+}
+
+// WithCleanTaskOnComplete -
+func WithCleanTaskOnComplete() Option {
+	return func(opts *Options) {
+		opts.cleanTaskOnComplete = true
 	}
 }
 

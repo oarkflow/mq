@@ -73,7 +73,6 @@ func (tm *DAG) dfs(v string, visited map[string]bool, discoveryTime, finishedTim
 					tm.dfs(adj.Key, visited, discoveryTime, finishedTime, timeVal)
 				}
 			}
-
 		}
 	}
 	tm.handleConditionalEdges(v, visited, discoveryTime, finishedTime, timeVal)
@@ -128,8 +127,6 @@ func (tm *DAG) saveImage(fileName string, arg string) error {
 func (tm *DAG) ExportDOT() string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf(`digraph "%s" {`, tm.name))
-	sb.WriteString("\n")
-	sb.WriteString(`  bgcolor="lightyellow";`)
 	sb.WriteString("\n")
 	sb.WriteString(fmt.Sprintf(`  label="%s";`, tm.name))
 	sb.WriteString("\n")
