@@ -20,6 +20,6 @@ func main() {
 	time.Sleep(10 * time.Minute)
 	pool.Scheduler().RemoveTask("Every Minute Task")
 	time.Sleep(5 * time.Minute)
-	pool.PrintMetrics()
+	pool.Metrics()
 	pool.Stop()
 }

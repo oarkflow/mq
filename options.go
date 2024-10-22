@@ -107,7 +107,7 @@ type TLSConfig struct {
 type Options struct {
 	consumerOnSubscribe  func(ctx context.Context, topic, consumerName string)
 	consumerOnClose      func(ctx context.Context, topic, consumerName string)
-	notifyResponse       func(context.Context, Result)
+	notifyResponse       func(context.Context, Result) error
 	tlsConfig            TLSConfig
 	brokerAddr           string
 	callback             []func(context.Context, Result) Result
@@ -175,9 +175,9 @@ func SetupOptions(opts ...Option) *Options {
 	return options
 }
 
-func WithNotifyResponse(handler func(ctx context.Context, result Result)) Option {
+func WithNotifyResponse(callback Callback) Option {
 	return func(opts *Options) {
-		opts.notifyResponse = handler
+		opts.notifyResponse = callback
 	}
 }
 

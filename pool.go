@@ -13,26 +13,35 @@ import (
 
 type Callback func(ctx context.Context, result Result) error
 
+type Metrics struct {
+	TotalTasks      int64
+	CompletedTasks  int64
+	ErrorCount      int64
+	TotalMemoryUsed int64
+	TotalScheduled  int64
+}
+
+type PoolOption struct {
+}
+
 type Pool struct {
-	taskStorage               TaskStorage
-	taskQueue                 PriorityQueue
-	taskQueueLock             sync.Mutex
-	stop                      chan struct{}
-	taskNotify                chan struct{}
-	workerAdjust              chan int
-	wg                        sync.WaitGroup
-	totalMemoryUsed           int64
-	completedTasks            int
-	errorCount, maxMemoryLoad int64
-	totalTasks                int
-	numOfWorkers              int32
-	paused                    bool
-	scheduler                 *Scheduler
-	overflowBufferLock        sync.RWMutex
-	overflowBuffer            []*QueueTask
-	taskAvailableCond         *sync.Cond
-	handler                   Handler
-	callback                  Callback
+	taskStorage        TaskStorage
+	taskQueue          PriorityQueue
+	taskQueueLock      sync.Mutex
+	stop               chan struct{}
+	taskNotify         chan struct{}
+	workerAdjust       chan int
+	wg                 sync.WaitGroup
+	maxMemoryLoad      int64
+	numOfWorkers       int32
+	metrics            Metrics
+	paused             bool
+	scheduler          *Scheduler
+	overflowBufferLock sync.RWMutex
+	overflowBuffer     []*QueueTask
+	taskAvailableCond  *sync.Cond
+	handler            Handler
+	callback           Callback
 }
 
 func NewPool(numOfWorkers, taskQueueSize int, maxMemoryLoad int64, handler Handler, callback Callback, storage TaskStorage) *Pool {
@@ -111,23 +120,23 @@ func (wp *Pool) processNextTask() {
 
 func (wp *Pool) handleTask(task *QueueTask) {
 	taskSize := int64(utils.SizeOf(task.payload))
-	wp.totalMemoryUsed += taskSize
-	wp.totalTasks++
+	wp.metrics.TotalMemoryUsed += taskSize
+	wp.metrics.TotalTasks++
 	result := wp.handler(task.ctx, task.payload)
 	if result.Error != nil {
-		wp.errorCount++
+		wp.metrics.ErrorCount++
 	} else {
-		wp.completedTasks++
+		wp.metrics.CompletedTasks++
 	}
 	if wp.callback != nil {
 		if err := wp.callback(task.ctx, result); err != nil {
-			wp.errorCount++
+			wp.metrics.ErrorCount++
 		}
 	}
 	if err := wp.taskStorage.DeleteTask(task.payload.ID); err != nil {
 		// Handle deletion error
 	}
-	wp.totalMemoryUsed -= taskSize
+	wp.metrics.TotalMemoryUsed -= taskSize
 }
 
 func (wp *Pool) monitorWorkerAdjustments() {
@@ -171,7 +180,7 @@ func (wp *Pool) EnqueueTask(ctx context.Context, payload *Task, priority int) er
 	wp.taskQueueLock.Lock()
 	defer wp.taskQueueLock.Unlock()
 	taskSize := int64(utils.SizeOf(payload))
-	if wp.totalMemoryUsed+taskSize > wp.maxMemoryLoad && wp.maxMemoryLoad > 0 {
+	if wp.metrics.TotalMemoryUsed+taskSize > wp.maxMemoryLoad && wp.maxMemoryLoad > 0 {
 		return fmt.Errorf("max memory load reached, cannot add task of size %d", taskSize)
 	}
 	heap.Push(&wp.taskQueue, task)
@@ -243,9 +252,9 @@ func (wp *Pool) AdjustWorkerCount(newWorkerCount int) {
 	}
 }
 
-func (wp *Pool) PrintMetrics() {
-	fmt.Printf("Total Tasks: %d, Completed Tasks: %d, Error Count: %d, Total Memory Used: %d bytes, Total Scheduled Tasks: %d\n",
-		wp.totalTasks, wp.completedTasks, wp.errorCount, wp.totalMemoryUsed, len(wp.scheduler.tasks))
+func (wp *Pool) Metrics() Metrics {
+	wp.metrics.TotalScheduled = int64(len(wp.scheduler.tasks))
+	return wp.metrics
 }
 
 func (wp *Pool) Scheduler() *Scheduler {

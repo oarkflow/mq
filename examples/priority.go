@@ -22,6 +22,6 @@ func main() {
 	}
 
 	time.Sleep(15 * time.Second)
-	pool.PrintMetrics()
+	pool.Metrics()
 	pool.Stop()
 }

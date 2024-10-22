@@ -15,7 +15,7 @@ func (b *Broker) SyncMode() bool {
 	return b.opts.syncMode
 }
 
-func (b *Broker) NotifyHandler() func(context.Context, Result) {
+func (b *Broker) NotifyHandler() func(context.Context, Result) error {
 	return b.opts.notifyResponse
 }
 

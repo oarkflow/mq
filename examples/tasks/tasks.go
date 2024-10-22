@@ -93,10 +93,12 @@ func Callback(_ context.Context, task mq.Result) mq.Result {
 	return mq.Result{}
 }
 
-func NotifyResponse(_ context.Context, result mq.Result) {
+func NotifyResponse(_ context.Context, result mq.Result) error {
 	log.Printf("DAG - FINAL_RESPONSE ~> TaskID: %s, Payload: %s, Topic: %s, Error: %v, Latency: %s", result.TaskID, result.Payload, result.Topic, result.Error, result.Latency)
+	return nil
 }
 
-func NotifySubDAGResponse(_ context.Context, result mq.Result) {
+func NotifySubDAGResponse(_ context.Context, result mq.Result) error {
 	log.Printf("SUB DAG - FINAL_RESPONSE ~> TaskID: %s, Payload: %s, Topic: %s, Error: %v, Latency: %s", result.TaskID, result.Payload, result.Topic, result.Error, result.Latency)
+	return nil
 }

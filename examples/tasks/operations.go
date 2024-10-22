@@ -3,7 +3,6 @@ package tasks
 import (
 	"context"
 
-	"github.com/oarkflow/errors"
 	"github.com/oarkflow/json"
 
 	"github.com/oarkflow/mq"
@@ -36,7 +35,6 @@ func (e *Condition) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 	if err != nil {
 		panic(err)
 	}
-	return mq.Result{Error: errors.New("Condition error")}
 	switch email := data["email"].(type) {
 	case string:
 		if email == "abc.xyz@gmail.com" {
