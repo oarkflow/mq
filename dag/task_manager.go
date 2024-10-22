@@ -39,6 +39,7 @@ func (tm *TaskManager) updateTS(result *mq.Result) {
 }
 
 func (tm *TaskManager) processTask(ctx context.Context, nodeID string, payload json.RawMessage) mq.Result {
+	defer mq.RecoverPanic(mq.RecoverTitle)
 	node, ok := tm.dag.nodes[nodeID]
 	if !ok {
 		return mq.Result{Error: fmt.Errorf("nodeID %s not found", nodeID)}
@@ -178,6 +179,7 @@ func (tm *TaskManager) appendFinalResult(result mq.Result) {
 }
 
 func (tm *TaskManager) processNode(ctx context.Context, node *Node, payload json.RawMessage) {
+	defer mq.RecoverPanic(mq.RecoverTitle)
 	dag, isDAG := isDAGNode(node)
 	if isDAG {
 		if tm.dag.server.SyncMode() && !dag.server.SyncMode() {

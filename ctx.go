@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 
+	"github.com/oarkflow/errors"
 	"github.com/oarkflow/xid"
 
 	"github.com/oarkflow/mq/consts"
@@ -125,4 +126,8 @@ func GetConnection(addr string, config TLSConfig) (net.Conn, error) {
 	} else {
 		return net.Dial("tcp", addr)
 	}
+}
+
+func WrapError(err error, msg, op string) error {
+	return errors.Wrap(err, msg, op)
 }

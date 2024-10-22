@@ -10,6 +10,7 @@ import (
 
 	"github.com/oarkflow/mq"
 	"github.com/oarkflow/mq/consts"
+	"github.com/oarkflow/mq/metrics"
 )
 
 type Request struct {
@@ -21,6 +22,7 @@ type Request struct {
 }
 
 func (tm *DAG) Handlers() {
+	metrics.HandleHTTP()
 	http.HandleFunc("POST /request", tm.Request)
 	http.HandleFunc("POST /publish", tm.Publish)
 	http.HandleFunc("POST /schedule", tm.Schedule)

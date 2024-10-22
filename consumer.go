@@ -146,6 +146,7 @@ func (c *Consumer) ConsumeMessage(ctx context.Context, msg *codec.Message, conn 
 }
 
 func (c *Consumer) ProcessTask(ctx context.Context, msg *Task) Result {
+	defer RecoverPanic(RecoverTitle)
 	queue, _ := GetQueue(ctx)
 	if msg.Topic == "" && queue != "" {
 		msg.Topic = queue

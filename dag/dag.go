@@ -12,6 +12,7 @@ import (
 
 	"github.com/oarkflow/mq"
 	"github.com/oarkflow/mq/consts"
+	"github.com/oarkflow/mq/metrics"
 )
 
 type EdgeType int
@@ -180,15 +181,19 @@ func (tm *DAG) GetStartNode() string {
 }
 
 func (tm *DAG) Start(ctx context.Context, addr string) error {
+	// Start the server in a separate goroutine
+	go func() {
+		defer mq.RecoverPanic(mq.RecoverTitle)
+		if err := tm.server.Start(ctx); err != nil {
+			panic(err)
+		}
+	}()
+
+	// Start the node consumers if not in sync mode
 	if !tm.server.SyncMode() {
-		go func() {
-			err := tm.server.Start(ctx)
-			if err != nil {
-				panic(err)
-			}
-		}()
 		for _, con := range tm.nodes {
 			go func(con *Node) {
+				defer mq.RecoverPanic(mq.RecoverTitle)
 				limiter := rate.NewLimiter(rate.Every(1*time.Second), 1) // Retry every second
 				for {
 					err := con.processor.Consume(ctx)
@@ -317,11 +322,20 @@ func (tm *DAG) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 	if tm.consumer != nil {
 		initialNode, err := tm.parseInitialNode(ctx)
 		if err != nil {
+			metrics.TasksErrors.WithLabelValues("unknown").Inc() // Increase error count
 			return mq.Result{Error: err}
 		}
 		task.Topic = initialNode
 	}
-	return manager.processTask(ctx, task.Topic, task.Payload)
+	result := manager.processTask(ctx, task.Topic, task.Payload)
+
+	if result.Error != nil {
+		metrics.TasksErrors.WithLabelValues(task.Topic).Inc() // Increase error count
+	} else {
+		metrics.TasksProcessed.WithLabelValues("success").Inc() // Increase processed task count
+	}
+
+	return result
 }
 
 func (tm *DAG) Process(ctx context.Context, payload []byte) mq.Result {

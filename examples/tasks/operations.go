@@ -94,6 +94,7 @@ type StoreData struct {
 }
 
 func (e *StoreData) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
+	panic("panic on store")
 	return mq.Result{Payload: task.Payload, Ctx: ctx}
 }
 

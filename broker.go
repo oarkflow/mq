@@ -263,18 +263,40 @@ func (b *Broker) Start(ctx context.Context) error {
 		log.Println("BROKER - RUNNING ~> started on", b.opts.brokerAddr)
 	}
 	defer listener.Close()
+
+	// Limit the number of concurrent connections
+	const maxConcurrentConnections = 100
+	sem := make(chan struct{}, maxConcurrentConnections)
+
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
 			b.OnError(ctx, conn, err)
+			time.Sleep(50 * time.Millisecond) // Slow down retry on errors
 			continue
 		}
+
+		// Control concurrency by using a semaphore
+		sem <- struct{}{}
 		go func(c net.Conn) {
-			defer c.Close()
+			defer func() {
+				<-sem // Release semaphore
+				c.Close()
+			}()
+
+			// Optionally set connection timeouts to prevent idle connections
+			c.SetReadDeadline(time.Now().Add(5 * time.Minute))
+
 			for {
+				// Attempt to read the message
 				err := b.readMessage(ctx, c)
 				if err != nil {
-					break
+					if netErr, ok := err.(net.Error); ok && netErr.Temporary() {
+						log.Println("Temporary network error, retrying:", netErr)
+						continue // Retry on temporary errors
+					}
+					log.Println("Connection closed due to error:", err)
+					break // Break the loop and close the connection
 				}
 			}
 		}(conn)
