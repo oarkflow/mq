@@ -238,12 +238,15 @@ func (tm *DAG) AddNode(name, key string, handler mq.Processor, firstNode ...bool
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 	con := mq.NewConsumer(key, key, handler.ProcessTask, tm.opts...)
-	tm.nodes[key] = &Node{
+	n := &Node{
 		Name:      name,
 		Key:       key,
 		processor: con,
-		isReady:   true,
 	}
+	if tm.server.SyncMode() {
+		n.isReady = true
+	}
+	tm.nodes[key] = n
 	if len(firstNode) > 0 && firstNode[0] {
 		tm.startNode = key
 	}
