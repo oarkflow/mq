@@ -188,6 +188,9 @@ func (tm *TaskManager) appendResult(result mq.Result, final bool) {
 	}
 	tm.nodeResults[result.Topic] = result
 	tm.mutex.Unlock()
+	if tm.dag.reportNodeResultCallback != nil {
+		tm.dag.reportNodeResultCallback(result)
+	}
 }
 
 func (tm *TaskManager) processNode(ctx context.Context, node *Node, payload json.RawMessage) {
@@ -202,9 +205,8 @@ func (tm *TaskManager) processNode(ctx context.Context, node *Node, payload json
 	var result mq.Result
 	if tm.dag.server.SyncMode() {
 		defer func() {
-			tm.mutex.Lock()
-			tm.nodeResults[node.Key] = result
-			tm.mutex.Unlock()
+			result.Topic = node.Key
+			tm.appendResult(result, false)
 			tm.handleCallback(ctx, result)
 		}()
 	}

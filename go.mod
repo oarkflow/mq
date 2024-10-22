@@ -3,11 +3,13 @@ module github.com/oarkflow/mq
 go 1.23
 
 require (
+	github.com/gorilla/websocket v1.5.3
 	github.com/oarkflow/date v0.0.4
 	github.com/oarkflow/dipper v0.0.6
 	github.com/oarkflow/errors v0.0.6
 	github.com/oarkflow/expr v0.0.11
 	github.com/oarkflow/json v0.0.13
+	github.com/oarkflow/sio v0.0.7
 	github.com/oarkflow/xid v1.2.5
 	github.com/prometheus/client_golang v1.20.5
 	golang.org/x/exp v0.0.0-20241009180824-f66d83c29e7c

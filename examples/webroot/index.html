@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Task Status Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom scrollbar styles */
+        .scrollbar {
+            scrollbar-width: thin;
+            scrollbar-color: #D1D5DB #E5E7EB;
+        }
+
+        .scrollbar::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .scrollbar::-webkit-scrollbar-track {
+            background: #E5E7EB;
+        }
+
+        .scrollbar::-webkit-scrollbar-thumb {
+            background-color: #D1D5DB;
+            border-radius: 9999px;
+        }
+
+        .svg-container {
+            max-width: 100%;
+            max-height: 80vh;
+            overflow: auto;
+            position: relative;
+            border: 1px solid #ccc;
+        }
+        #dag-diagram {
+            width: 100%;
+            height: auto;
+        }
+        .popover {
+            position: absolute;
+            z-index: 10;
+            display: none;
+            background-color: white;
+            border: 1px solid #E5E7EB;
+            box-shadow: 0px 0px 10px rgba(0, 0, 0, 0.1);
+            padding: 10px;
+            width: 200px;
+            border-radius: 8px;
+        }
+        .popover.visible {
+            display: block;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 flex h-screen p-4">
+
+<div class="w-screen mx-auto bg-white shadow-lg rounded-lg overflow-hidden">
+    <!-- Task Table Section -->
+    <div class="p-4">
+        <h1 class="text-xl font-semibold text-gray-700 mb-4">Task Status</h1>
+
+        <!-- Scrollable Table -->
+        <div class="max-h-64 overflow-y-auto scrollbar relative">
+            <table class="min-w-full table-auto border-collapse border border-gray-300">
+                <thead class="bg-gray-100">
+                <tr>
+                    <th class="px-4 py-2 border border-gray-300">Task ID</th>
+                    <th class="px-4 py-2 border border-gray-300">Created At</th>
+                    <th class="px-4 py-2 border border-gray-300">Processed At</th>
+                    <th class="px-4 py-2 border border-gray-300">Latency</th>
+                    <th class="px-4 py-2 border border-gray-300">Status</th>
+                    <th class="px-4 py-2 border border-gray-300">Result</th>
+                </tr>
+                </thead>
+                <tbody id="taskTableBody">
+                <!-- Dynamic rows will be appended here -->
+                </tbody>
+            </table>
+        </div>
+
+        <!-- JSON Popover -->
+        <div id="jsonPopover" class="popover w-1/2"></div>
+        <div id="svgPopover" class="popover"></div>
+    </div>
+
+    <!-- SVG Viewer Section -->
+    <div class="p-4">
+        <h2 class="text-lg font-semibold text-gray-700 mb-2">SVG Viewer</h2>
+        <div class="border border-gray-300 p-4 bg-gray-50">
+            <div id="svg-container" class="svg-container">
+                <svg id="dag-diagram" class="svg-image" xmlns="http://www.w3.org/2000/svg"></svg>
+            </div>
+        </div>
+    </div>
+</div>
+<script src="/js/socket.js"></script>
+<script>
+    (function(SS) {
+        'use strict';
+// New function to load the SVG dynamically
+        function loadSVG(url) {
+            fetch(url)
+                .then(response => response.text())
+                .then(svgContent => {
+                    const container = document.getElementById('svg-container');
+                    container.innerHTML = svgContent;  // Inject the SVG into the container
+                    attachSVGNodeEvents();
+                })
+                .catch(err => console.error('Failed to load SVG:', err));
+        }
+
+        // Call loadSVG when the page loads
+        window.onload = function() {
+            loadSVG('http://localhost:8083/ui');  // Adjust this to the correct path of your SVG
+        };
+        const tasks = {};  // Local storage for tasks
+// Attach click event listeners to all SVG nodes after loading the SVG
+        function attachSVGNodeEvents() {
+            const svgNodes = document.querySelectorAll('g.node');  // Adjust selector as per your SVG structure
+            svgNodes.forEach(node => {
+                node.addEventListener('click', handleSVGNodeClick);
+            });
+        }
+
+        // Function to handle the click on an SVG node and show the popover
+        function handleSVGNodeClick(event) {
+            const nodeId = event.currentTarget.id;  // Get the node ID (e.g., 'node_store:data')
+            const nodeData = findNodeDataById(nodeId);  // Fetch data related to the node (status, result, etc.)
+            if (nodeData) {
+                showSVGPopover(event, nodeData);
+            }
+        }
+
+        // Function to show the popover next to the clicked SVG node
+        function showSVGPopover(event, nodeData) {
+            const popover = document.getElementById('svgPopover');
+            popover.classList.add('visible');
+            popover.innerHTML = `
+                <div class="text-sm text-gray-700">
+                    <strong>Result:</strong> ${JSON.stringify(nodeData.payload)}<br>
+                    <strong>Status:</strong> ${nodeData.status}<br>
+                    <strong>Error:</strong> ${nodeData.error || 'N/A'}
+                </div>
+            `;
+            const rect = event.currentTarget.getBoundingClientRect();
+            popover.style.top = `${rect.top + window.scrollY + rect.height + 10}px`;
+            popover.style.left = `${rect.left + window.scrollX + rect.width / 2}px`;
+        }
+
+
+
+        // Function to find node data (status, result, error) by the node's ID
+        function findNodeDataById(nodeId) {
+            for (const taskId in tasks) {
+                const task = tasks[taskId];
+                const node = task.nodes.find(n => `node_${n.topic}` === nodeId);  // Ensure the ID format matches your SVG
+                if (node) {
+                    return node;
+                }
+            }
+            return null;  // Return null if no matching node is found
+        }
+
+        const addOrUpdateTask = (message, isFinal = false) => {
+            const taskTableBody = document.getElementById('taskTableBody');
+            const taskId = message.task_id;
+            const rowId = `row-${taskId}`;
+
+            // Check if task already exists
+            let existingRow = document.getElementById(rowId);
+            if (!existingRow) {
+                // Create new row if it doesn't exist
+                const row = document.createElement('tr');
+                row.id = rowId;
+                taskTableBody.insertBefore(row, taskTableBody.firstChild);
+                existingRow = row;
+            }
+
+            // Update task data
+            tasks[taskId] = tasks[taskId] || { nodes: [], final: null };
+            if (isFinal) {
+                tasks[taskId].final = message;
+            } else {
+                tasks[taskId].nodes.push(message);
+            }
+
+            // Determine the latest task status and status color
+            const latestStatus = isFinal ? message.status : message.status;
+            const statusColor = latestStatus === 'success' ? 'bg-green-100 text-green-700' :
+                latestStatus === 'fail' ? 'bg-red-100 text-red-700' :
+                    'bg-yellow-100 text-yellow-700';
+
+            // Update row content
+            existingRow.innerHTML = `
+                <td class="px-4 py-2 border border-gray-300">${taskId}</td>
+                <td class="px-4 py-2 border border-gray-300">${new Date(message.created_at).toLocaleString()}</td>
+                <td class="px-4 py-2 border border-gray-300">${new Date(message.processed_at).toLocaleString()}</td>
+                <td class="px-4 py-2 border border-gray-300">${message.latency}</td>
+                <td class="px-4 py-2 border border-gray-300 ${statusColor}">${latestStatus}</td>
+                <td class="px-4 py-2 border border-gray-300">
+                    <button class="view-btn text-blue-600 hover:underline" data-task-id='${taskId}'>
+                        View
+                    </button>
+                </td>
+            `;
+
+            attachViewButtonEvent();
+        }
+
+        let ss = new SS('ws://' + window.location.host + '/notify');
+        ss.onConnect(function() {
+            ss.emit('join', "global");
+        });
+        ss.onDisconnect(function() {
+            alert('chat disconnected');
+        });
+        ss.on('joinedRoom', function(room) {
+            console.log('Joined room: ' + room);
+        });
+
+        // Handle "message" for per-node status
+        ss.on('message', function(msg) {
+            addOrUpdateTask(msg, false);
+        });
+
+        // Handle "final-message" for final task status
+        ss.on('final-message', function(msg) {
+            addOrUpdateTask(msg, true);
+        });
+
+        // Attach event listeners to "View" buttons
+        function attachViewButtonEvent() {
+            const buttons = document.querySelectorAll('.view-btn');
+            buttons.forEach(button => {
+                button.removeEventListener('click', handleViewButtonClick);  // Remove previous listeners
+                button.addEventListener('click', handleViewButtonClick);      // Attach new listener
+            });
+        }
+
+        // Show formatted data in popover and update SVG
+        function handleViewButtonClick(event) {
+            const taskId = event.target.getAttribute('data-task-id');
+            const task = tasks[taskId];
+            showPopover(event.target, task);
+            updateSVGNodes(task);
+        }
+
+        // Function to show popover with node statuses and final status if available
+        function showPopover(target, task) {
+            const popover = document.getElementById('jsonPopover');
+            popover.classList.add('visible');
+            const rect = target.getBoundingClientRect();
+            popover.style.top = `${rect.top + window.scrollY + rect.height + 10}px`;
+            popover.style.left = `${rect.left + window.scrollX - 600}px`;
+            let popoverContent = '';
+
+            // If final status exists, display it
+            if (task.final) {
+                popoverContent += `<div class="text-sm text-gray-700">
+                    <strong>Final Status:</strong> ${task.final.status}<br>
+                    <strong>Result:</strong> ${JSON.stringify(task.final.payload)}
+                </div>`;
+            }
+            // Build table for task node statuses
+            popoverContent += `<table class="min-w-full table-auto border-collapse border border-gray-300 mb-2">
+                <thead class="bg-gray-100">
+                    <tr>
+                        <th class="px-2 py-1 border border-gray-300">Node</th>
+                        <th class="px-2 py-1 border border-gray-300">Result</th>
+                        <th class="px-2 py-1 border border-gray-300">Status</th>
+                        <th class="px-2 py-1 border border-gray-300">Error</th>
+                    </tr>
+                </thead>
+                <tbody>`;
+
+            const statusColor = (status) => status === 'success' ? 'bg-green-100 text-green-700' :
+                status === 'fail' ? 'bg-red-100 text-red-700' :
+                    'bg-yellow-100 text-yellow-700';
+            task.nodes.forEach((node) => {
+                popoverContent += `
+                    <tr>
+                        <td class="px-2 py-1 border border-gray-300">${node.topic}</td>
+                        <td class="px-2 py-1 border border-gray-300">${JSON.stringify(node.payload)}</td>
+                        <td class="px-2 py-1 border border-gray-300 ${statusColor(node.status)}">${node.status}</td>
+                        <td class="px-2 py-1 border border-gray-300">${node.error || 'N/A'}</td>
+                    </tr>`;
+            });
+
+            popoverContent += '</tbody></table>';
+            popover.innerHTML = popoverContent;
+
+            document.addEventListener('click', function handleClickOutside(event) {
+                if (!popover.contains(event.target) && event.target !== target) {
+                    popover.classList.remove('visible');
+                    document.removeEventListener('click', handleClickOutside);
+                }
+            });
+        }
+
+        // Function to update the SVG nodes based on task statuses
+        function updateSVGNodes(task) {
+            task.nodes.forEach((node) => {
+                const svgNode = document.querySelector(`#node_${node.topic.replace(':', '\\:')}`);
+                if (svgNode) {
+                    const status = node.status;
+                    const fillColor = status === 'success' ? 'green' :
+                        status === 'fail' ? 'red' : 'yellow';
+
+                    const path = svgNode.querySelector('path');
+                    if (path) {
+                        path.setAttribute('fill', fillColor);
+                    }
+                }
+            });
+        }
+
+    })(window.SS);
+</script>
+</body>
+</html>

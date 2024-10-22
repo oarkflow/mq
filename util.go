@@ -19,6 +19,10 @@ func (b *Broker) NotifyHandler() func(context.Context, Result) error {
 	return b.opts.notifyResponse
 }
 
+func (b *Broker) SetNotifyHandler(callback Callback) {
+	b.opts.notifyResponse = callback
+}
+
 func (b *Broker) HandleCallback(ctx context.Context, msg *codec.Message) {
 	if b.opts.callback != nil {
 		var result Result

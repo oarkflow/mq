@@ -3,6 +3,7 @@ package dag
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/oarkflow/mq/sio"
 	"io"
 	"net/http"
 	"os"
@@ -21,8 +22,20 @@ type Request struct {
 	Recurring bool            `json:"recurring"`
 }
 
+func (tm *DAG) SetupWS() *sio.Server {
+	ws := sio.New(sio.Config{
+		CheckOrigin:       func(r *http.Request) bool { return true },
+		EnableCompression: true,
+	})
+	WsEvents(ws)
+	tm.Notifier = ws
+	return ws
+}
+
 func (tm *DAG) Handlers() {
 	metrics.HandleHTTP()
+	http.Handle("/", http.FileServer(http.Dir("webroot")))
+	http.Handle("/notify", tm.SetupWS())
 	http.HandleFunc("POST /request", tm.Request)
 	http.HandleFunc("POST /publish", tm.Publish)
 	http.HandleFunc("POST /schedule", tm.Schedule)

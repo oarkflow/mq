@@ -3,6 +3,7 @@ package dag
 import (
 	"context"
 	"fmt"
+	"github.com/oarkflow/mq/sio"
 	"log"
 	"net/http"
 	"sync"
@@ -54,26 +55,32 @@ type (
 )
 
 type DAG struct {
-	nodes         map[string]*Node
-	server        *mq.Broker
-	consumer      *mq.Consumer
-	taskContext   map[string]*TaskManager
-	conditions    map[FromNode]map[When]Then
-	pool          *mq.Pool
-	taskCleanupCh chan string
-	name          string
-	key           string
-	startNode     string
-	consumerTopic string
-	opts          []mq.Option
-	mu            sync.RWMutex
-	paused        bool
-	Error         error
-	report        string
+	nodes                    map[string]*Node
+	server                   *mq.Broker
+	consumer                 *mq.Consumer
+	taskContext              map[string]*TaskManager
+	conditions               map[FromNode]map[When]Then
+	pool                     *mq.Pool
+	taskCleanupCh            chan string
+	name                     string
+	key                      string
+	startNode                string
+	consumerTopic            string
+	opts                     []mq.Option
+	mu                       sync.RWMutex
+	reportNodeResultCallback func(mq.Result)
+	Notifier                 *sio.Server
+	paused                   bool
+	Error                    error
+	report                   string
 }
 
 func (tm *DAG) SetKey(key string) {
 	tm.key = key
+}
+
+func (tm *DAG) ReportNodeResult(callback func(mq.Result)) {
+	tm.reportNodeResultCallback = callback
 }
 
 func (tm *DAG) GetType() string {
@@ -210,7 +217,7 @@ func (tm *DAG) Start(ctx context.Context, addr string) error {
 			}(con)
 		}
 	}
-	log.Printf("DAG - HTTP_SERVER ~> started on %s", addr)
+	log.Printf("DAG - HTTP_SERVER ~> started on http://localhost%s", addr)
 	tm.Handlers()
 	config := tm.server.TLSConfig()
 	if config.UseTLS {
@@ -517,4 +524,8 @@ func (tm *DAG) doConsumer(ctx context.Context, id string, action consts.CMD) {
 	} else {
 		log.Printf("[WARNING] - Consumer %s not found", id)
 	}
+}
+
+func (tm *DAG) SetNotifyResponse(callback mq.Callback) {
+	tm.server.SetNotifyHandler(callback)
 }

@@ -168,7 +168,7 @@ func (tm *DAG) ExportDOT() string {
 	for _, nodeKey := range sortedNodes {
 		node := tm.nodes[nodeKey]
 		nodeColor := "lightblue"
-		sb.WriteString(fmt.Sprintf(`  "%s" [label=" %s", fillcolor="%s"];`, node.Key, node.Name, nodeColor))
+		sb.WriteString(fmt.Sprintf(`  "%s" [label=" %s", fillcolor="%s", id="node_%s"];`, node.Key, node.Name, nodeColor, node.Key))
 		sb.WriteString("\n")
 	}
 	for _, nodeKey := range sortedNodes {

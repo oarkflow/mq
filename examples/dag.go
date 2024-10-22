@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-
 	"github.com/oarkflow/mq/examples/tasks"
 	"github.com/oarkflow/mq/services"
 
@@ -13,7 +12,6 @@ import (
 )
 
 func main() {
-	// Sync()
 	aSync()
 }
 
@@ -43,14 +41,20 @@ func sendData(f *dag.DAG) {
 	fmt.Println(string(result.Payload))
 }
 
-func Sync() {
-	f := dag.NewDAG("Sample DAG", "sample-dag", mq.WithCleanTaskOnComplete(), mq.WithSyncMode(true), mq.WithNotifyResponse(tasks.NotifyResponse))
-	setup(f)
-	sendData(f)
-}
-
 func aSync() {
-	f := dag.NewDAG("Sample DAG", "sample-dag", mq.WithCleanTaskOnComplete(), mq.WithNotifyResponse(tasks.NotifyResponse))
+	f := dag.NewDAG("Sample DAG", "sample-dag", mq.WithCleanTaskOnComplete())
+
+	f.SetNotifyResponse(func(ctx context.Context, result mq.Result) error {
+		if f.Notifier != nil {
+			f.Notifier.ToRoom("global", "final-message", result)
+		}
+		return nil
+	})
+	f.ReportNodeResult(func(result mq.Result) {
+		if f.Notifier != nil {
+			f.Notifier.ToRoom("global", "message", result)
+		}
+	})
 	setup(f)
 	err := f.Validate()
 	if err != nil {

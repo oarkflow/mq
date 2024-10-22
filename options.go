@@ -24,7 +24,6 @@ type Result struct {
 	Payload     json.RawMessage `json:"payload"`
 }
 
-// MarshalJSON customizes the marshaling of Result
 func (r Result) MarshalJSON() ([]byte, error) {
 	type Alias Result
 	aux := &struct {
@@ -39,7 +38,6 @@ func (r Result) MarshalJSON() ([]byte, error) {
 	return json.Marshal(aux)
 }
 
-// UnmarshalJSON customizes the unmarshalling of Result
 func (r *Result) UnmarshalJSON(data []byte) error {
 	type Alias Result
 	aux := &struct {
@@ -92,7 +90,6 @@ func (r Result) WithData(status string, data []byte) Result {
 	return Result{
 		Status:  status,
 		Payload: data,
-		Error:   nil,
 		Ctx:     r.Ctx,
 	}
 }
