@@ -71,7 +71,9 @@ func (e *EmailDelivery) ProcessTask(ctx context.Context, task *mq.Task) mq.Resul
 	if err != nil {
 		panic(err)
 	}
-	return mq.Result{Payload: task.Payload, Ctx: ctx}
+	data["email_sent"] = true
+	d, _ := json.Marshal(data)
+	return mq.Result{Payload: d, Ctx: ctx}
 }
 
 type SendSms struct {

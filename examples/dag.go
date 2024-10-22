@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
+
 	"github.com/oarkflow/mq/examples/tasks"
 	"github.com/oarkflow/mq/services"
 
@@ -54,6 +56,7 @@ func aSync() {
 		if f.Notifier != nil {
 			f.Notifier.ToRoom("global", "message", result)
 		}
+		log.Printf("DAG - FINAL_RESPONSE ~> TaskID: %s, Payload: %s, Topic: %s, Error: %v, Latency: %s", result.TaskID, result.Payload, result.Topic, result.Error, result.Latency)
 	})
 	setup(f)
 	err := f.Validate()

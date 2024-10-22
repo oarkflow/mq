@@ -57,6 +57,12 @@
 <div class="w-screen mx-auto bg-white shadow-lg rounded-lg overflow-hidden">
     <!-- Task Table Section -->
     <div class="p-4">
+        <div class="flex gap-2 bg-slate-100 p-2">
+            <div class="flex-1 flex-grow">
+                <textarea id="payload" class="w-full py-1 px-2" placeholder="Enter your JSON task here"></textarea>
+            </div>
+            <div><button id="send-request" class="py-1 px-2 bg-blue-500 text-white" type="button">Send Task</button></div>
+        </div>
         <h1 class="text-xl font-semibold text-gray-700 mb-4">Task Status</h1>
 
         <!-- Scrollable Table -->
@@ -97,6 +103,43 @@
 <script>
     (function(SS) {
         'use strict';
+
+        document.getElementById('send-request').addEventListener('click', function() {
+            const input = document.getElementById('payload')
+            // Get the value from the textarea
+            const payloadData = JSON.parse(input.value);
+
+            // Prepare the data in the required JSON structure
+            const data = {
+                payload: payloadData
+            };
+
+            // Make the POST request
+            fetch('http://localhost:8083/request', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(data),
+            })
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Network response was not ok');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    console.log('Success:', data);
+                    // Handle the response data if needed
+                })
+                .catch((error) => {
+                    console.error('Error:', error);
+                })
+                .finally(() => {
+                    input.value = ""
+                });
+        });
+
 // New function to load the SVG dynamically
         function loadSVG(url) {
             fetch(url)
@@ -146,8 +189,6 @@
             popover.style.top = `${rect.top + window.scrollY + rect.height + 10}px`;
             popover.style.left = `${rect.left + window.scrollX + rect.width / 2}px`;
         }
-
-
 
         // Function to find node data (status, result, error) by the node's ID
         function findNodeDataById(nodeId) {
