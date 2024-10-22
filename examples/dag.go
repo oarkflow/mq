@@ -52,7 +52,12 @@ func Sync() {
 func aSync() {
 	f := dag.NewDAG("Sample DAG", "sample-dag", mq.WithCleanTaskOnComplete(), mq.WithNotifyResponse(tasks.NotifyResponse))
 	setup(f)
-	err := f.Start(context.TODO(), ":8083")
+	err := f.Validate()
+	if err != nil {
+		panic(err)
+	}
+
+	err = f.Start(context.TODO(), ":8083")
 	if err != nil {
 		panic(err)
 	}

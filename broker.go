@@ -284,9 +284,6 @@ func (b *Broker) Start(ctx context.Context) error {
 				c.Close()
 			}()
 
-			// Optionally set connection timeouts to prevent idle connections
-			c.SetReadDeadline(time.Now().Add(5 * time.Minute))
-
 			for {
 				// Attempt to read the message
 				err := b.readMessage(ctx, c)

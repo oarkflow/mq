@@ -68,6 +68,8 @@ type DAG struct {
 	opts          []mq.Option
 	mu            sync.RWMutex
 	paused        bool
+	Error         error
+	report        string
 }
 
 func (tm *DAG) SetKey(key string) {
@@ -283,32 +285,47 @@ func (tm *DAG) AddCondition(fromNode FromNode, conditions map[When]Then) *DAG {
 }
 
 func (tm *DAG) AddIterator(label, from string, targets ...string) *DAG {
-	tm.addEdge(Iterator, label, from, targets...)
+	tm.Error = tm.addEdge(Iterator, label, from, targets...)
 	return tm
 }
 
 func (tm *DAG) AddEdge(label, from string, targets ...string) *DAG {
-	tm.addEdge(Simple, label, from, targets...)
+	tm.Error = tm.addEdge(Simple, label, from, targets...)
 	return tm
 }
 
-func (tm *DAG) addEdge(edgeType EdgeType, label, from string, targets ...string) {
+func (tm *DAG) addEdge(edgeType EdgeType, label, from string, targets ...string) error {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 	fromNode, ok := tm.nodes[from]
 	if !ok {
-		return
+		return fmt.Errorf("Error: 'from' node %s does not exist\n", from)
 	}
 	var nodes []*Node
 	for _, target := range targets {
 		toNode, ok := tm.nodes[target]
 		if !ok {
-			return
+			return fmt.Errorf("Error: 'from' node %s does not exist\n", target)
 		}
 		nodes = append(nodes, toNode)
 	}
 	edge := Edge{From: fromNode, To: nodes, Type: edgeType, Label: label}
 	fromNode.Edges = append(fromNode.Edges, edge)
+	return nil
+}
+
+func (tm *DAG) Validate() error {
+	report, hasCycle, err := tm.ClassifyEdges()
+	if hasCycle || err != nil {
+		tm.Error = err
+		return err
+	}
+	tm.report = report
+	return nil
+}
+
+func (tm *DAG) GetReport() string {
+	return tm.report
 }
 
 func (tm *DAG) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {

@@ -32,7 +32,8 @@ func (tm *DAG) PrintGraph() {
 	}
 }
 
-func (tm *DAG) ClassifyEdges(startNodes ...string) {
+func (tm *DAG) ClassifyEdges(startNodes ...string) (string, bool, error) {
+	builder := &strings.Builder{}
 	startNode := tm.GetStartNode()
 	tm.mu.RLock()
 	defer tm.mu.RUnlock()
@@ -43,57 +44,78 @@ func (tm *DAG) ClassifyEdges(startNodes ...string) {
 	discoveryTime := make(map[string]int)
 	finishedTime := make(map[string]int)
 	timeVal := 0
+	inRecursionStack := make(map[string]bool) // track nodes in the recursion stack for cycle detection
 	if startNode == "" {
 		firstNode := tm.findStartNode()
 		if firstNode != nil {
 			startNode = firstNode.Key
 		}
 	}
-	if startNode != "" {
-		tm.dfs(startNode, visited, discoveryTime, finishedTime, &timeVal)
+	if startNode == "" {
+		return "", false, fmt.Errorf("no start node found")
 	}
+	hasCycle, cycleErr := tm.dfs(startNode, visited, discoveryTime, finishedTime, &timeVal, inRecursionStack, builder)
+	if cycleErr != nil {
+		return builder.String(), hasCycle, cycleErr
+	}
+	return builder.String(), hasCycle, nil
 }
 
-func (tm *DAG) dfs(v string, visited map[string]bool, discoveryTime, finishedTime map[string]int, timeVal *int) {
+func (tm *DAG) dfs(v string, visited map[string]bool, discoveryTime, finishedTime map[string]int, timeVal *int, inRecursionStack map[string]bool, builder *strings.Builder) (bool, error) {
 	visited[v] = true
+	inRecursionStack[v] = true // mark node as part of recursion stack
 	*timeVal++
 	discoveryTime[v] = *timeVal
 	node := tm.nodes[v]
+	hasCycle := false
+	var err error
 	for _, edge := range node.Edges {
 		for _, adj := range edge.To {
-			switch edge.Type {
-			case Simple:
-				if !visited[adj.Key] {
-					fmt.Printf("Simple Edge: %s -> %s\n", v, adj.Key)
-					tm.dfs(adj.Key, visited, discoveryTime, finishedTime, timeVal)
+			if !visited[adj.Key] {
+				builder.WriteString(fmt.Sprintf("Traversing Edge: %s -> %s\n", v, adj.Key))
+				hasCycle, err := tm.dfs(adj.Key, visited, discoveryTime, finishedTime, timeVal, inRecursionStack, builder)
+				if err != nil {
+					return true, err
 				}
-			case Iterator:
-				if !visited[adj.Key] {
-					fmt.Printf("Iterator Edge: %s -> %s\n", v, adj.Key)
-					tm.dfs(adj.Key, visited, discoveryTime, finishedTime, timeVal)
+				if hasCycle {
+					return true, nil
 				}
+			} else if inRecursionStack[adj.Key] {
+				cycleMsg := fmt.Sprintf("Cycle detected: %s -> %s\n", v, adj.Key)
+				return true, fmt.Errorf(cycleMsg)
 			}
 		}
 	}
-	tm.handleConditionalEdges(v, visited, discoveryTime, finishedTime, timeVal)
+	hasCycle, err = tm.handleConditionalEdges(v, visited, discoveryTime, finishedTime, timeVal, inRecursionStack, builder)
+	if err != nil {
+		return true, err
+	}
 	*timeVal++
 	finishedTime[v] = *timeVal
+	inRecursionStack[v] = false // remove from recursion stack after finishing processing
+	return hasCycle, nil
 }
 
-func (tm *DAG) handleConditionalEdges(v string, visited map[string]bool, discoveryTime, finishedTime map[string]int, time *int) {
+func (tm *DAG) handleConditionalEdges(v string, visited map[string]bool, discoveryTime, finishedTime map[string]int, time *int, inRecursionStack map[string]bool, builder *strings.Builder) (bool, error) {
 	node := tm.nodes[v]
 	for when, then := range tm.conditions[FromNode(node.Key)] {
-		if targetNodeKey, ok := tm.nodes[string(then)]; ok {
-			if !visited[targetNodeKey.Key] {
-				fmt.Printf("Conditional Edge [%s]: %s -> %s\n", when, v, targetNodeKey.Key)
-				tm.dfs(targetNodeKey.Key, visited, discoveryTime, finishedTime, time)
-			} else {
-				if discoveryTime[v] > discoveryTime[targetNodeKey.Key] {
-					fmt.Printf("Conditional Loop Edge [%s]: %s -> %s\n", when, v, targetNodeKey.Key)
+		if targetNode, ok := tm.nodes[string(then)]; ok {
+			if !visited[targetNode.Key] {
+				builder.WriteString(fmt.Sprintf("Traversing Conditional Edge [%s]: %s -> %s\n", when, v, targetNode.Key))
+				hasCycle, err := tm.dfs(targetNode.Key, visited, discoveryTime, finishedTime, time, inRecursionStack, builder)
+				if err != nil {
+					return true, err
 				}
+				if hasCycle {
+					return true, nil
+				}
+			} else if inRecursionStack[targetNode.Key] {
+				cycleMsg := fmt.Sprintf("Cycle detected in Conditional Edge [%s]: %s -> %s\n", when, v, targetNode.Key)
+				return true, fmt.Errorf(cycleMsg)
 			}
 		}
 	}
+	return false, nil
 }
 
 func (tm *DAG) SaveDOTFile(filename string) error {

@@ -98,8 +98,10 @@ func (tm *TaskManager) handleCallback(ctx context.Context, result mq.Result) mq.
 	}
 	edges := tm.getConditionalEdges(node, result)
 	if len(edges) == 0 {
-		tm.appendFinalResult(result)
+		tm.appendResult(result, true)
 		return result
+	} else {
+		tm.appendResult(result, false)
 	}
 	for _, edge := range edges {
 		switch edge.Type {
@@ -107,7 +109,7 @@ func (tm *TaskManager) handleCallback(ctx context.Context, result mq.Result) mq.
 			var items []json.RawMessage
 			err := json.Unmarshal(result.Payload, &items)
 			if err != nil {
-				tm.appendFinalResult(mq.Result{TaskID: tm.taskID, Topic: node.Key, Error: err})
+				tm.appendResult(mq.Result{TaskID: tm.taskID, Topic: node.Key, Error: err}, false)
 				return result
 			}
 			for _, target := range edge.To {
@@ -170,10 +172,12 @@ func (tm *TaskManager) handleResult(ctx context.Context, results any) mq.Result 
 	return rs
 }
 
-func (tm *TaskManager) appendFinalResult(result mq.Result) {
+func (tm *TaskManager) appendResult(result mq.Result, final bool) {
 	tm.mutex.Lock()
 	tm.updateTS(&result)
-	tm.results = append(tm.results, result)
+	if final {
+		tm.results = append(tm.results, result)
+	}
 	tm.nodeResults[result.Topic] = result
 	tm.mutex.Unlock()
 }
@@ -199,7 +203,7 @@ func (tm *TaskManager) processNode(ctx context.Context, node *Node, payload json
 	select {
 	case <-ctx.Done():
 		result = mq.Result{TaskID: tm.taskID, Topic: node.Key, Error: ctx.Err(), Ctx: ctx}
-		tm.appendFinalResult(result)
+		tm.appendResult(result, false)
 		return
 	default:
 		ctx = mq.SetHeaders(ctx, map[string]string{consts.QueueKey: node.Key})
@@ -210,14 +214,14 @@ func (tm *TaskManager) processNode(ctx context.Context, node *Node, payload json
 				result.TaskID = tm.taskID
 			}
 			if result.Error != nil {
-				tm.appendFinalResult(result)
+				tm.appendResult(result, false)
 				return
 			}
 			return
 		}
 		err := tm.dag.server.Publish(ctx, mq.NewTask(tm.taskID, payload, node.Key), node.Key)
 		if err != nil {
-			tm.appendFinalResult(mq.Result{Error: err})
+			tm.appendResult(mq.Result{Error: err}, false)
 			return
 		}
 	}

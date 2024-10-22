@@ -5,8 +5,6 @@ import (
 
 	"github.com/oarkflow/json"
 
-	"github.com/oarkflow/dipper"
-
 	"github.com/oarkflow/mq"
 	"github.com/oarkflow/mq/services"
 )
@@ -108,39 +106,4 @@ func (e *InAppNotification) ProcessTask(ctx context.Context, task *mq.Task) mq.R
 		panic(err)
 	}
 	return mq.Result{Payload: task.Payload, Ctx: ctx}
-}
-
-type DataBranchHandler struct{ services.Operation }
-
-func (v *DataBranchHandler) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
-	ctx = context.WithValue(ctx, "extra_params", map[string]any{"iphone": true})
-	var row map[string]any
-	var result mq.Result
-	result.Payload = task.Payload
-	err := json.Unmarshal(result.Payload, &row)
-	if err != nil {
-		result.Error = err
-		return result
-	}
-	b := make(map[string]any)
-	switch branches := row["data_branch"].(type) {
-	case map[string]any:
-		for field, handler := range branches {
-			data, err := dipper.Get(row, field)
-			if err != nil {
-				break
-			}
-			b[handler.(string)] = data
-		}
-		break
-	}
-	br, err := json.Marshal(b)
-	if err != nil {
-		result.Error = err
-		return result
-	}
-	result.Status = "branches"
-	result.Payload = br
-	result.Ctx = ctx
-	return result
 }
