@@ -138,10 +138,6 @@ func (tm *DAG) request(w http.ResponseWriter, r *http.Request, async bool) {
 	} else {
 		rs = tm.Process(ctx, request.Payload)
 	}
-	if rs.Error != nil {
-		http.Error(w, fmt.Sprintf("[DAG Error] - %v", rs.Error), http.StatusInternalServerError)
-		return
-	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(rs)
 }

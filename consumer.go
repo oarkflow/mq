@@ -169,12 +169,10 @@ func (c *Consumer) OnResponse(ctx context.Context, result Result) error {
 			result.Status = "SUCCESS"
 		}
 	}
-	if result.Payload != nil || result.Error != nil {
-		bt, _ := json.Marshal(result)
-		reply := codec.NewMessage(consts.MESSAGE_RESPONSE, bt, result.Topic, headers)
-		if err := c.send(ctx, c.conn, reply); err != nil {
-			return fmt.Errorf("failed to send MESSAGE_RESPONSE: %v", err)
-		}
+	bt, _ := json.Marshal(result)
+	reply := codec.NewMessage(consts.MESSAGE_RESPONSE, bt, result.Topic, headers)
+	if err := c.send(ctx, c.conn, reply); err != nil {
+		return fmt.Errorf("failed to send MESSAGE_RESPONSE: %v", err)
 	}
 	return nil
 }

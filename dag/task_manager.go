@@ -91,9 +91,16 @@ func (tm *TaskManager) getConditionalEdges(node *Node, result mq.Result) []Edge 
 }
 
 func (tm *TaskManager) handleCallback(ctx context.Context, result mq.Result) mq.Result {
-	defer tm.wg.Done()
+	defer func() {
+		tm.wg.Done()
+		mq.RecoverPanic(mq.RecoverTitle)
+	}()
 	node, ok := tm.dag.nodes[result.Topic]
 	if !ok {
+		return result
+	}
+	if result.Error != nil {
+		tm.appendResult(result, true)
 		return result
 	}
 	edges := tm.getConditionalEdges(node, result)
@@ -203,7 +210,7 @@ func (tm *TaskManager) processNode(ctx context.Context, node *Node, payload json
 	select {
 	case <-ctx.Done():
 		result = mq.Result{TaskID: tm.taskID, Topic: node.Key, Error: ctx.Err(), Ctx: ctx}
-		tm.appendResult(result, false)
+		tm.appendResult(result, true)
 		return
 	default:
 		ctx = mq.SetHeaders(ctx, map[string]string{consts.QueueKey: node.Key})
@@ -214,14 +221,14 @@ func (tm *TaskManager) processNode(ctx context.Context, node *Node, payload json
 				result.TaskID = tm.taskID
 			}
 			if result.Error != nil {
-				tm.appendResult(result, false)
+				tm.appendResult(result, true)
 				return
 			}
 			return
 		}
 		err := tm.dag.server.Publish(ctx, mq.NewTask(tm.taskID, payload, node.Key), node.Key)
 		if err != nil {
-			tm.appendResult(mq.Result{Error: err}, false)
+			tm.appendResult(mq.Result{Error: err}, true)
 			return
 		}
 	}

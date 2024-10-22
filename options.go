@@ -7,6 +7,8 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/oarkflow/errors"
+
 	"github.com/oarkflow/mq/consts"
 )
 
@@ -14,12 +16,51 @@ type Result struct {
 	CreatedAt   time.Time       `json:"created_at"`
 	ProcessedAt time.Time       `json:"processed_at,omitempty"`
 	Latency     string          `json:"latency"`
-	Error       error           `json:"error,omitempty"`
+	Error       error           `json:"-"` // Keep error as an error type
 	Topic       string          `json:"topic"`
 	TaskID      string          `json:"task_id"`
 	Status      string          `json:"status"`
 	Ctx         context.Context `json:"-"`
 	Payload     json.RawMessage `json:"payload"`
+}
+
+// MarshalJSON customizes the marshaling of Result
+func (r Result) MarshalJSON() ([]byte, error) {
+	type Alias Result
+	aux := &struct {
+		ErrorMsg string `json:"error"`
+		Alias
+	}{
+		Alias: (Alias)(r),
+	}
+	if r.Error != nil {
+		aux.ErrorMsg = r.Error.Error()
+	}
+	return json.Marshal(aux)
+}
+
+// UnmarshalJSON customizes the unmarshalling of Result
+func (r *Result) UnmarshalJSON(data []byte) error {
+	type Alias Result
+	aux := &struct {
+		ErrMsg string `json:"error,omitempty"`
+		*Alias
+	}{
+		Alias: (*Alias)(r),
+	}
+
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+
+	// Restore the error from string to error type
+	if aux.ErrMsg != "" {
+		r.Error = errors.New(aux.ErrMsg)
+	} else {
+		r.Error = nil
+	}
+
+	return nil
 }
 
 func (r Result) Unmarshal(data any) error {
