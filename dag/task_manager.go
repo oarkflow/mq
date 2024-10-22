@@ -14,6 +14,7 @@ import (
 type TaskManager struct {
 	createdAt   time.Time
 	processedAt time.Time
+	status      string
 	dag         *DAG
 	nodeResults map[string]mq.Result
 	wg          *WaitGroup

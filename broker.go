@@ -38,7 +38,7 @@ type Broker struct {
 	queues     storage.IMap[string, *Queue]
 	consumers  storage.IMap[string, *consumer]
 	publishers storage.IMap[string, *publisher]
-	deadLetter storage.IMap[string, *Queue] // DLQ mapping for each queue
+	deadLetter storage.IMap[string, *Queue]
 	opts       *Options
 }
 
@@ -241,7 +241,6 @@ func (b *Broker) SubscribeHandler(ctx context.Context, conn net.Conn, msg *codec
 func (b *Broker) Start(ctx context.Context) error {
 	var listener net.Listener
 	var err error
-
 	if b.opts.tlsConfig.UseTLS {
 		cert, err := tls.LoadX509KeyPair(b.opts.tlsConfig.CertPath, b.opts.tlsConfig.KeyPath)
 		if err != nil {
@@ -263,37 +262,30 @@ func (b *Broker) Start(ctx context.Context) error {
 		log.Println("BROKER - RUNNING ~> started on", b.opts.brokerAddr)
 	}
 	defer listener.Close()
-
-	// Limit the number of concurrent connections
 	const maxConcurrentConnections = 100
 	sem := make(chan struct{}, maxConcurrentConnections)
-
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
 			b.OnError(ctx, conn, err)
-			time.Sleep(50 * time.Millisecond) // Slow down retry on errors
+			time.Sleep(50 * time.Millisecond)
 			continue
 		}
-
-		// Control concurrency by using a semaphore
 		sem <- struct{}{}
 		go func(c net.Conn) {
 			defer func() {
-				<-sem // Release semaphore
+				<-sem
 				c.Close()
 			}()
-
 			for {
-				// Attempt to read the message
 				err := b.readMessage(ctx, c)
 				if err != nil {
 					if netErr, ok := err.(net.Error); ok && netErr.Temporary() {
 						log.Println("Temporary network error, retrying:", netErr)
-						continue // Retry on temporary errors
+						continue
 					}
 					log.Println("Connection closed due to error:", err)
-					break // Break the loop and close the connection
+					break
 				}
 			}
 		}(conn)

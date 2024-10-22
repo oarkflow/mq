@@ -71,6 +71,10 @@ func (c *Consumer) SetKey(key string) {
 	c.id = key
 }
 
+func (c *Consumer) Metrics() Metrics {
+	return c.pool.Metrics()
+}
+
 func (c *Consumer) subscribe(ctx context.Context, queue string) error {
 	headers := HeadersWithConsumerID(ctx, c.id)
 	msg := codec.NewMessage(consts.SUBSCRIBE, utils.ToByte("{}"), queue, headers)

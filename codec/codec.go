@@ -56,7 +56,6 @@ func SendMessage(ctx context.Context, conn net.Conn, msg *Message) error {
 	if err != nil {
 		return err
 	}
-
 	totalLength := 4 + len(data)
 	buffer := byteBufferPool.Get().([]byte)
 	if cap(buffer) < totalLength {
@@ -65,10 +64,8 @@ func SendMessage(ctx context.Context, conn net.Conn, msg *Message) error {
 		buffer = buffer[:totalLength]
 	}
 	defer byteBufferPool.Put(buffer)
-
 	binary.BigEndian.PutUint32(buffer[:4], uint32(len(data)))
 	copy(buffer[4:], data)
-
 	writer := bufio.NewWriter(conn)
 	select {
 	case <-ctx.Done():
@@ -78,7 +75,6 @@ func SendMessage(ctx context.Context, conn net.Conn, msg *Message) error {
 			return err
 		}
 	}
-
 	return writer.Flush()
 }
 

@@ -358,24 +358,31 @@ func (tm *DAG) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 	return result
 }
 
-func (tm *DAG) Process(ctx context.Context, payload []byte) mq.Result {
+func (tm *DAG) check(ctx context.Context, payload []byte) (context.Context, *mq.Task, error) {
 	tm.mu.RLock()
 	if tm.paused {
 		tm.mu.RUnlock()
-		return mq.Result{Error: fmt.Errorf("unable to process task, error: DAG is not accepting any task")}
+		return ctx, nil, fmt.Errorf("unable to process task, error: DAG is not accepting any task")
 	}
 	tm.mu.RUnlock()
 	if !tm.IsReady() {
-		return mq.Result{Error: fmt.Errorf("unable to process task, error: DAG is not ready yet")}
+		return ctx, nil, fmt.Errorf("unable to process task, error: DAG is not ready yet")
 	}
 	initialNode, err := tm.parseInitialNode(ctx)
 	if err != nil {
-		return mq.Result{Error: err}
+		return ctx, nil, err
 	}
 	if tm.server.SyncMode() {
 		ctx = mq.SetHeaders(ctx, map[string]string{consts.AwaitResponseKey: "true"})
 	}
-	task := mq.NewTask(mq.NewID(), payload, initialNode)
+	return ctx, mq.NewTask(mq.NewID(), payload, initialNode), nil
+}
+
+func (tm *DAG) Process(ctx context.Context, payload []byte) mq.Result {
+	ctx, task, err := tm.check(ctx, payload)
+	if err != nil {
+		return mq.Result{Error: fmt.Errorf("unable to process task, error: DAG is not accepting any task")}
+	}
 	awaitResponse, _ := mq.GetAwaitResponse(ctx)
 	if awaitResponse != "true" {
 		headers, ok := mq.GetHeaders(ctx)
@@ -384,38 +391,25 @@ func (tm *DAG) Process(ctx context.Context, payload []byte) mq.Result {
 			ctxx = mq.SetHeaders(ctxx, headers.AsMap())
 		}
 		if err := tm.pool.EnqueueTask(ctxx, task, 0); err != nil {
-			return mq.Result{CreatedAt: task.CreatedAt, TaskID: task.ID, Topic: initialNode, Status: "FAILED", Error: err}
+			return mq.Result{CreatedAt: task.CreatedAt, TaskID: task.ID, Topic: task.Topic, Status: "FAILED", Error: err}
 		}
-		return mq.Result{CreatedAt: task.CreatedAt, TaskID: task.ID, Topic: initialNode, Status: "PENDING"}
+		return mq.Result{CreatedAt: task.CreatedAt, TaskID: task.ID, Topic: task.Topic, Status: "PENDING"}
 	}
 	return tm.ProcessTask(ctx, task)
 }
 
 func (tm *DAG) ScheduleTask(ctx context.Context, payload []byte, opts ...mq.SchedulerOption) mq.Result {
-	tm.mu.RLock()
-	if tm.paused {
-		tm.mu.RUnlock()
+	ctx, task, err := tm.check(ctx, payload)
+	if err != nil {
 		return mq.Result{Error: fmt.Errorf("unable to process task, error: DAG is not accepting any task")}
 	}
-	tm.mu.RUnlock()
-	if !tm.IsReady() {
-		return mq.Result{Error: fmt.Errorf("unable to process task, error: DAG is not ready yet")}
-	}
-	initialNode, err := tm.parseInitialNode(ctx)
-	if err != nil {
-		return mq.Result{Error: err}
-	}
-	if tm.server.SyncMode() {
-		ctx = mq.SetHeaders(ctx, map[string]string{consts.AwaitResponseKey: "true"})
-	}
-	task := mq.NewTask(mq.NewID(), payload, initialNode)
 	headers, ok := mq.GetHeaders(ctx)
 	ctxx := context.Background()
 	if ok {
 		ctxx = mq.SetHeaders(ctxx, headers.AsMap())
 	}
 	tm.pool.Scheduler().AddTask(ctxx, task, opts...)
-	return mq.Result{CreatedAt: task.CreatedAt, TaskID: task.ID, Topic: initialNode, Status: "PENDING"}
+	return mq.Result{CreatedAt: task.CreatedAt, TaskID: task.ID, Topic: task.Topic, Status: "PENDING"}
 }
 
 func (tm *DAG) parseInitialNode(ctx context.Context) (string, error) {
