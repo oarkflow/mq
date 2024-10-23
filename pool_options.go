@@ -19,6 +19,12 @@ func WithTaskTimeout(t time.Duration) PoolOption {
 	}
 }
 
+func WithCompletionCallback(callback func()) PoolOption {
+	return func(p *Pool) {
+		p.completionCallback = callback
+	}
+}
+
 func WithMaxMemoryLoad(maxMemoryLoad int64) PoolOption {
 	return func(p *Pool) {
 		p.maxMemoryLoad = maxMemoryLoad
