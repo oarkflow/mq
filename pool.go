@@ -4,10 +4,11 @@ import (
 	"container/heap"
 	"context"
 	"fmt"
+	"log"
 	"sync"
 	"sync/atomic"
 	"time"
-
+	
 	"github.com/oarkflow/mq/utils"
 )
 
@@ -40,6 +41,7 @@ type Pool struct {
 	handler            Handler
 	callback           Callback
 	batchSize          int
+	timeout            time.Duration
 }
 
 func NewPool(numOfWorkers int, opts ...PoolOption) *Pool {
@@ -47,6 +49,7 @@ func NewPool(numOfWorkers int, opts ...PoolOption) *Pool {
 		stop:       make(chan struct{}),
 		taskNotify: make(chan struct{}, numOfWorkers),
 		batchSize:  1,
+		timeout:    10 * time.Second,
 	}
 	pool.scheduler = NewScheduler(pool)
 	pool.taskAvailableCond = sync.NewCond(&sync.Mutex{})
@@ -122,18 +125,23 @@ func (wp *Pool) processNextBatch() {
 }
 
 func (wp *Pool) handleTask(task *QueueTask) {
+	ctx, cancel := context.WithTimeout(task.ctx, 10*time.Second) // Timeout for task
+	defer cancel()
+	
 	taskSize := int64(utils.SizeOf(task.payload))
 	wp.metrics.TotalMemoryUsed += taskSize
 	wp.metrics.TotalTasks++
-	result := wp.handler(task.ctx, task.payload)
+	result := wp.handler(ctx, task.payload)
 	if result.Error != nil {
 		wp.metrics.ErrorCount++
+		log.Printf("Error processing task %s: %v", task.payload.ID, result.Error)
 	} else {
 		wp.metrics.CompletedTasks++
 	}
 	if wp.callback != nil {
-		if err := wp.callback(task.ctx, result); err != nil {
+		if err := wp.callback(ctx, result); err != nil {
 			wp.metrics.ErrorCount++
+			log.Printf("Error in callback for task %s: %v", task.payload.ID, err)
 		}
 	}
 	_ = wp.taskStorage.DeleteTask(task.payload.ID)
@@ -192,9 +200,19 @@ func (wp *Pool) EnqueueTask(ctx context.Context, payload *Task, priority int) er
 	return nil
 }
 
-func (wp *Pool) Pause() { wp.paused = true }
+func (wp *Pool) Pause() {
+	wp.paused = true
+	wp.taskAvailableCond.L.Lock()
+	wp.taskAvailableCond.Broadcast() // Notify all waiting workers
+	wp.taskAvailableCond.L.Unlock()
+}
 
-func (wp *Pool) Resume() { wp.paused = false }
+func (wp *Pool) Resume() {
+	wp.paused = false
+	wp.taskAvailableCond.L.Lock()
+	wp.taskAvailableCond.Broadcast() // Notify all waiting workers
+	wp.taskAvailableCond.L.Unlock()
+}
 
 func (wp *Pool) storeInOverflow(task *QueueTask) {
 	wp.overflowBufferLock.Lock()

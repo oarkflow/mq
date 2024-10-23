@@ -1,11 +1,21 @@
 package mq
 
+import (
+	"time"
+)
+
 type PoolOption func(*Pool)
 
 func WithTaskQueueSize(size int) PoolOption {
 	return func(p *Pool) {
 		// Initialize the task queue with the specified size
 		p.taskQueue = make(PriorityQueue, 0, size)
+	}
+}
+
+func WithTaskTimeout(t time.Duration) PoolOption {
+	return func(p *Pool) {
+		p.timeout = t
 	}
 }
 
