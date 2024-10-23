@@ -9,7 +9,13 @@ import (
 )
 
 func main() {
-	pool := mq.NewPool(2, 5, 1000, tasks.SchedulerHandler, tasks.SchedulerCallback, mq.NewMemoryTaskStorage(10*time.Minute))
+	pool := mq.NewPool(2,
+		mq.WithTaskQueueSize(5),
+		mq.WithMaxMemoryLoad(1000),
+		mq.WithHandler(tasks.SchedulerHandler),
+		mq.WithPoolCallback(tasks.SchedulerCallback),
+		mq.WithTaskStorage(mq.NewMemoryTaskStorage(10*time.Minute)),
+	)
 
 	for i := 0; i < 100; i++ {
 		if i%10 == 0 {

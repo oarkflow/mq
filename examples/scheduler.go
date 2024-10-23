@@ -11,7 +11,13 @@ import (
 func main() {
 	handler := tasks.SchedulerHandler
 	callback := tasks.SchedulerCallback
-	pool := mq.NewPool(3, 5, 1000, handler, callback, mq.NewMemoryTaskStorage(10*time.Minute))
+	pool := mq.NewPool(3,
+		mq.WithTaskQueueSize(5),
+		mq.WithMaxMemoryLoad(1000),
+		mq.WithHandler(handler),
+		mq.WithPoolCallback(callback),
+		mq.WithTaskStorage(mq.NewMemoryTaskStorage(10*time.Minute)),
+	)
 	ctx := context.Background()
 	pool.EnqueueTask(context.Background(), &mq.Task{ID: "Task 1"}, 1)
 	time.Sleep(1 * time.Second)

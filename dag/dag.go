@@ -3,11 +3,12 @@ package dag
 import (
 	"context"
 	"fmt"
-	"github.com/oarkflow/mq/sio"
 	"log"
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/oarkflow/mq/sio"
 
 	"golang.org/x/time/rate"
 
@@ -143,7 +144,14 @@ func NewDAG(name, key string, opts ...mq.Option) *DAG {
 	d.server = mq.NewBroker(opts...)
 	d.opts = opts
 	options := d.server.Options()
-	d.pool = mq.NewPool(options.NumOfWorkers(), options.QueueSize(), options.MaxMemoryLoad(), d.ProcessTask, callback, options.Storage())
+	d.pool = mq.NewPool(
+		options.NumOfWorkers(),
+		mq.WithTaskQueueSize(options.QueueSize()),
+		mq.WithMaxMemoryLoad(options.MaxMemoryLoad()),
+		mq.WithHandler(d.ProcessTask),
+		mq.WithPoolCallback(callback),
+		mq.WithTaskStorage(options.Storage()),
+	)
 	d.pool.Start(d.server.Options().NumOfWorkers())
 	go d.listenForTaskCleanup()
 	return d
