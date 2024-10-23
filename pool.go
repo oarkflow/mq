@@ -47,15 +47,17 @@ type Pool struct {
 	completionCallback     CompletionCallback
 	taskCompletionNotifier sync.WaitGroup
 	idleTimeout            time.Duration
+	backoffDuration        time.Duration // Duration to back off for overflow tasks
 }
 
 func NewPool(numOfWorkers int, opts ...PoolOption) *Pool {
 	pool := &Pool{
-		stop:        make(chan struct{}),
-		taskNotify:  make(chan struct{}, numOfWorkers),
-		batchSize:   1,
-		timeout:     10 * time.Second,
-		idleTimeout: 5 * time.Minute,
+		stop:            make(chan struct{}),
+		taskNotify:      make(chan struct{}, numOfWorkers),
+		batchSize:       1,
+		timeout:         10 * time.Second,
+		idleTimeout:     5 * time.Minute,
+		backoffDuration: 2 * time.Second, // Initial backoff duration
 	}
 	pool.scheduler = NewScheduler(pool)
 	pool.taskAvailableCond = sync.NewCond(&sync.Mutex{})
@@ -145,6 +147,7 @@ func (wp *Pool) handleTask(task *QueueTask) {
 	if result.Error != nil {
 		wp.metrics.ErrorCount++
 		log.Printf("Error processing task %s: %v", task.payload.ID, result.Error)
+		wp.backoffAndStore(task) // Backoff and store in overflow
 	} else {
 		wp.metrics.CompletedTasks++
 	}
@@ -156,6 +159,11 @@ func (wp *Pool) handleTask(task *QueueTask) {
 	}
 	_ = wp.taskStorage.DeleteTask(task.payload.ID)
 	wp.metrics.TotalMemoryUsed -= taskSize
+}
+
+func (wp *Pool) backoffAndStore(task *QueueTask) {
+	wp.storeInOverflow(task)
+	time.Sleep(wp.backoffDuration) // Apply backoff delay
 }
 
 func (wp *Pool) monitorIdleWorkers() {
