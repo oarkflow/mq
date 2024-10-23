@@ -43,10 +43,11 @@ func (b *Broker) NewQueue(name string) *Queue {
 }
 
 type QueueTask struct {
-	ctx      context.Context
-	payload  *Task
-	priority int
-	index    int // The index in the heap
+	ctx        context.Context
+	payload    *Task
+	retryCount int
+	priority   int
+	index      int // The index in the heap
 }
 
 type PriorityQueue []*QueueTask
