@@ -13,7 +13,7 @@ import (
 )
 
 type Callback func(ctx context.Context, result Result) error
-type CompletionCallback func() // Called when all tasks are completed
+type CompletionCallback func()
 
 type Metrics struct {
 	TotalTasks      int64
@@ -21,6 +21,7 @@ type Metrics struct {
 	ErrorCount      int64
 	TotalMemoryUsed int64
 	TotalScheduled  int64
+	ExecutionTime   int64
 }
 
 type Pool struct {
@@ -45,14 +46,16 @@ type Pool struct {
 	timeout                time.Duration
 	completionCallback     CompletionCallback
 	taskCompletionNotifier sync.WaitGroup
+	idleTimeout            time.Duration
 }
 
 func NewPool(numOfWorkers int, opts ...PoolOption) *Pool {
 	pool := &Pool{
-		stop:       make(chan struct{}),
-		taskNotify: make(chan struct{}, numOfWorkers),
-		batchSize:  1,
-		timeout:    10 * time.Second,
+		stop:        make(chan struct{}),
+		taskNotify:  make(chan struct{}, numOfWorkers),
+		batchSize:   1,
+		timeout:     10 * time.Second,
+		idleTimeout: 5 * time.Minute,
 	}
 	pool.scheduler = NewScheduler(pool)
 	pool.taskAvailableCond = sync.NewCond(&sync.Mutex{})
@@ -84,6 +87,7 @@ func (wp *Pool) Start(numWorkers int) {
 	atomic.StoreInt32(&wp.numOfWorkers, int32(numWorkers))
 	go wp.monitorWorkerAdjustments()
 	go wp.startOverflowDrainer()
+	go wp.monitorIdleWorkers()
 }
 
 func (wp *Pool) worker() {
@@ -123,21 +127,21 @@ func (wp *Pool) processNextBatch() {
 			wp.handleTask(task)
 		}
 	}
-
-	// Check if all tasks are completed
 	if len(tasks) > 0 {
 		wp.taskCompletionNotifier.Done()
 	}
 }
 
 func (wp *Pool) handleTask(task *QueueTask) {
-	ctx, cancel := context.WithTimeout(task.ctx, wp.timeout) // Timeout for task
+	ctx, cancel := context.WithTimeout(task.ctx, wp.timeout)
 	defer cancel()
-
 	taskSize := int64(utils.SizeOf(task.payload))
 	wp.metrics.TotalMemoryUsed += taskSize
 	wp.metrics.TotalTasks++
+	startTime := time.Now()
 	result := wp.handler(ctx, task.payload)
+	executionTime := time.Since(startTime).Milliseconds()
+	atomic.AddInt64(&wp.metrics.ExecutionTime, executionTime)
 	if result.Error != nil {
 		wp.metrics.ErrorCount++
 		log.Printf("Error processing task %s: %v", task.payload.ID, result.Error)
@@ -152,6 +156,27 @@ func (wp *Pool) handleTask(task *QueueTask) {
 	}
 	_ = wp.taskStorage.DeleteTask(task.payload.ID)
 	wp.metrics.TotalMemoryUsed -= taskSize
+}
+
+func (wp *Pool) monitorIdleWorkers() {
+	for {
+		select {
+		case <-wp.stop:
+			return
+		default:
+			time.Sleep(wp.idleTimeout)
+			wp.adjustIdleWorkers()
+		}
+	}
+}
+
+func (wp *Pool) adjustIdleWorkers() {
+	currentWorkers := atomic.LoadInt32(&wp.numOfWorkers)
+	if currentWorkers > 1 {
+		atomic.StoreInt32(&wp.numOfWorkers, currentWorkers-1)
+		wp.wg.Add(1)
+		go wp.worker()
+	}
 }
 
 func (wp *Pool) monitorWorkerAdjustments() {
@@ -201,7 +226,7 @@ func (wp *Pool) EnqueueTask(ctx context.Context, payload *Task, priority int) er
 	}
 	heap.Push(&wp.taskQueue, task)
 	wp.Dispatch(wp.taskAvailableCond.Signal)
-	wp.taskCompletionNotifier.Add(1) // Increment the counter for task completion
+	wp.taskCompletionNotifier.Add(1)
 	return nil
 }
 
@@ -263,7 +288,6 @@ func (wp *Pool) Stop() {
 	close(wp.stop)
 	wp.wg.Wait()
 
-	// Wait for all tasks to complete
 	wp.taskCompletionNotifier.Wait()
 	if wp.completionCallback != nil {
 		wp.completionCallback()
