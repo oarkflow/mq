@@ -38,11 +38,11 @@ func (e *Condition) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 	switch email := data["email"].(type) {
 	case string:
 		if email == "abc.xyz@gmail.com" {
-			return mq.Result{Payload: task.Payload, Status: "pass", Ctx: ctx}
+			return mq.Result{Payload: task.Payload, ConditionStatus: "pass", Ctx: ctx}
 		}
-		return mq.Result{Payload: task.Payload, Status: "fail", Ctx: ctx}
+		return mq.Result{Payload: task.Payload, ConditionStatus: "fail", Ctx: ctx}
 	default:
-		return mq.Result{Payload: task.Payload, Status: "fail", Ctx: ctx}
+		return mq.Result{Payload: task.Payload, ConditionStatus: "fail", Ctx: ctx}
 	}
 }
 

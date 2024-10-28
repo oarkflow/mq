@@ -75,9 +75,9 @@ func (tm *TaskManager) dispatchFinalResult(ctx context.Context) mq.Result {
 func (tm *TaskManager) getConditionalEdges(node *Node, result mq.Result) []Edge {
 	edges := make([]Edge, len(node.Edges))
 	copy(edges, node.Edges)
-	if result.Status != "" {
+	if result.ConditionStatus != "" {
 		if conditions, ok := tm.dag.conditions[FromNode(result.Topic)]; ok {
-			if targetNodeKey, ok := conditions[When(result.Status)]; ok {
+			if targetNodeKey, ok := conditions[When(result.ConditionStatus)]; ok {
 				if targetNode, ok := tm.dag.nodes[string(targetNodeKey)]; ok {
 					edges = append(edges, Edge{From: node, To: []*Node{targetNode}})
 				}
@@ -91,7 +91,7 @@ func (tm *TaskManager) getConditionalEdges(node *Node, result mq.Result) []Edge 
 	return edges
 }
 
-func (tm *TaskManager) handleCallback(ctx context.Context, result mq.Result) mq.Result {
+func (tm *TaskManager) handleNextTask(ctx context.Context, result mq.Result) mq.Result {
 	defer func() {
 		tm.wg.Done()
 		mq.RecoverPanic(mq.RecoverTitle)
@@ -207,7 +207,7 @@ func (tm *TaskManager) processNode(ctx context.Context, node *Node, payload json
 		defer func() {
 			result.Topic = node.Key
 			tm.appendResult(result, false)
-			tm.handleCallback(ctx, result)
+			tm.handleNextTask(ctx, result)
 		}()
 	}
 	select {

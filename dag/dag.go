@@ -170,7 +170,7 @@ func (tm *DAG) callbackToConsumer(ctx context.Context, result mq.Result) {
 
 func (tm *DAG) onTaskCallback(ctx context.Context, result mq.Result) mq.Result {
 	if taskContext, ok := tm.taskContext[result.TaskID]; ok && result.Topic != "" {
-		return taskContext.handleCallback(ctx, result)
+		return taskContext.handleNextTask(ctx, result)
 	}
 	return mq.Result{}
 }

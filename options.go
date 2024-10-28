@@ -13,15 +13,16 @@ import (
 )
 
 type Result struct {
-	CreatedAt   time.Time       `json:"created_at"`
-	ProcessedAt time.Time       `json:"processed_at,omitempty"`
-	Latency     string          `json:"latency"`
-	Error       error           `json:"-"` // Keep error as an error type
-	Topic       string          `json:"topic"`
-	TaskID      string          `json:"task_id"`
-	Status      string          `json:"status"`
-	Ctx         context.Context `json:"-"`
-	Payload     json.RawMessage `json:"payload"`
+	CreatedAt       time.Time       `json:"created_at"`
+	ProcessedAt     time.Time       `json:"processed_at,omitempty"`
+	Latency         string          `json:"latency"`
+	Error           error           `json:"-"` // Keep error as an error type
+	Topic           string          `json:"topic"`
+	TaskID          string          `json:"task_id"`
+	Status          string          `json:"status"`
+	ConditionStatus string          `json:"condition_status"`
+	Ctx             context.Context `json:"-"`
+	Payload         json.RawMessage `json:"payload"`
 }
 
 func (r Result) MarshalJSON() ([]byte, error) {
@@ -50,8 +51,6 @@ func (r *Result) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err
 	}
-
-	// Restore the error from string to error type
 	if aux.ErrMsg != "" {
 		r.Error = errors.New(aux.ErrMsg)
 	} else {
