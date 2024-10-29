@@ -131,9 +131,10 @@ func (wp *Pool) processNextBatch() {
 			wp.handleTask(task)
 		}
 	}
-	if len(tasks) > 0 {
-		wp.taskCompletionNotifier.Done()
-	}
+	// @TODO - Why was this done?
+	//if len(tasks) > 0 {
+	//	wp.taskCompletionNotifier.Done()
+	//}
 }
 
 func (wp *Pool) handleTask(task *QueueTask) {

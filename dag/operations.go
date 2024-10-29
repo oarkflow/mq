@@ -30,3 +30,28 @@ func AvailableHandlers() []string {
 	}
 	return op
 }
+
+type List struct {
+	mu       *sync.RWMutex
+	Handlers map[string]*DAG
+}
+
+var dags = &List{mu: &sync.RWMutex{}, Handlers: make(map[string]*DAG)}
+
+func AddDAG(key string, handler *DAG) {
+	dags.mu.Lock()
+	dags.Handlers[key] = handler
+	dags.mu.Unlock()
+}
+
+func GetDAG(key string) *DAG {
+	return dags.Handlers[key]
+}
+
+func AvailableDAG() []string {
+	var op []string
+	for opt := range dags.Handlers {
+		op = append(op, opt)
+	}
+	return op
+}

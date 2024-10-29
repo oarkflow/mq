@@ -28,7 +28,7 @@ type Result struct {
 func (r Result) MarshalJSON() ([]byte, error) {
 	type Alias Result
 	aux := &struct {
-		ErrorMsg string `json:"error"`
+		ErrorMsg string `json:"error,omitempty"`
 		Alias
 	}{
 		Alias: (Alias)(r),

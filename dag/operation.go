@@ -19,6 +19,20 @@ import (
 	"github.com/oarkflow/mq"
 )
 
+type Processor interface {
+	mq.Processor
+	SetConfig(Payload)
+}
+
+type Condition interface {
+	Match(data any) bool
+}
+
+type ConditionProcessor interface {
+	Processor
+	SetConditions(map[string]Condition)
+}
+
 type Provider struct {
 	Mapping       map[string]any `json:"mapping"`
 	UpdateMapping map[string]any `json:"update_mapping"`
@@ -47,19 +61,19 @@ type Operation struct {
 	Payload         Payload
 }
 
-func (e *Operation) Consume(ctx context.Context) error {
+func (e *Operation) Consume(_ context.Context) error {
 	return nil
 }
 
-func (e *Operation) Pause(ctx context.Context) error {
+func (e *Operation) Pause(_ context.Context) error {
 	return nil
 }
 
-func (e *Operation) Resume(ctx context.Context) error {
+func (e *Operation) Resume(_ context.Context) error {
 	return nil
 }
 
-func (e *Operation) Stop(ctx context.Context) error {
+func (e *Operation) Stop(_ context.Context) error {
 	return nil
 }
 
@@ -67,11 +81,11 @@ func (e *Operation) Close() error {
 	return nil
 }
 
-func (e *Operation) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
+func (e *Operation) ProcessTask(_ context.Context, task *mq.Task) mq.Result {
 	return mq.Result{Payload: task.Payload}
 }
 
-func (e *Operation) SetPayload(payload Payload) {
+func (e *Operation) SetConfig(payload Payload) {
 	e.Payload = payload
 	e.GeneratedFields = slices.Compact(append(e.GeneratedFields, payload.GeneratedFields...))
 }
