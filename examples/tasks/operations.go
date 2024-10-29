@@ -6,11 +6,11 @@ import (
 	"github.com/oarkflow/json"
 
 	"github.com/oarkflow/mq"
-	"github.com/oarkflow/mq/services"
+	"github.com/oarkflow/mq/dag"
 )
 
 type GetData struct {
-	services.Operation
+	dag.Operation
 }
 
 func (e *GetData) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
@@ -18,7 +18,7 @@ func (e *GetData) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 }
 
 type Loop struct {
-	services.Operation
+	dag.Operation
 }
 
 func (e *Loop) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
@@ -26,7 +26,7 @@ func (e *Loop) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 }
 
 type Condition struct {
-	services.Operation
+	dag.Operation
 }
 
 func (e *Condition) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
@@ -47,7 +47,7 @@ func (e *Condition) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 }
 
 type PrepareEmail struct {
-	services.Operation
+	dag.Operation
 }
 
 func (e *PrepareEmail) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
@@ -62,7 +62,7 @@ func (e *PrepareEmail) ProcessTask(ctx context.Context, task *mq.Task) mq.Result
 }
 
 type EmailDelivery struct {
-	services.Operation
+	dag.Operation
 }
 
 func (e *EmailDelivery) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
@@ -77,7 +77,7 @@ func (e *EmailDelivery) ProcessTask(ctx context.Context, task *mq.Task) mq.Resul
 }
 
 type SendSms struct {
-	services.Operation
+	dag.Operation
 }
 
 func (e *SendSms) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
@@ -90,7 +90,7 @@ func (e *SendSms) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 }
 
 type StoreData struct {
-	services.Operation
+	dag.Operation
 }
 
 func (e *StoreData) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
@@ -98,7 +98,7 @@ func (e *StoreData) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 }
 
 type InAppNotification struct {
-	services.Operation
+	dag.Operation
 }
 
 func (e *InAppNotification) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {

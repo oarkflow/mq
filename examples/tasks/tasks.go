@@ -7,24 +7,24 @@ import (
 	"log"
 
 	"github.com/oarkflow/mq"
-	"github.com/oarkflow/mq/services"
+	"github.com/oarkflow/mq/dag"
 )
 
-type Node1 struct{ services.Operation }
+type Node1 struct{ dag.Operation }
 
 func (t *Node1) ProcessTask(_ context.Context, task *mq.Task) mq.Result {
 	fmt.Println("Node 1", string(task.Payload))
 	return mq.Result{Payload: task.Payload, TaskID: task.ID}
 }
 
-type Node2 struct{ services.Operation }
+type Node2 struct{ dag.Operation }
 
 func (t *Node2) ProcessTask(_ context.Context, task *mq.Task) mq.Result {
 	fmt.Println("Node 2", string(task.Payload))
 	return mq.Result{Payload: task.Payload, TaskID: task.ID}
 }
 
-type Node3 struct{ services.Operation }
+type Node3 struct{ dag.Operation }
 
 func (t *Node3) ProcessTask(_ context.Context, task *mq.Task) mq.Result {
 	var user map[string]any
@@ -39,7 +39,7 @@ func (t *Node3) ProcessTask(_ context.Context, task *mq.Task) mq.Result {
 	return mq.Result{Payload: resultPayload, Status: status}
 }
 
-type Node4 struct{ services.Operation }
+type Node4 struct{ dag.Operation }
 
 func (t *Node4) ProcessTask(_ context.Context, task *mq.Task) mq.Result {
 	var user map[string]any
@@ -49,7 +49,7 @@ func (t *Node4) ProcessTask(_ context.Context, task *mq.Task) mq.Result {
 	return mq.Result{Payload: resultPayload}
 }
 
-type Node5 struct{ services.Operation }
+type Node5 struct{ dag.Operation }
 
 func (t *Node5) ProcessTask(_ context.Context, task *mq.Task) mq.Result {
 	var user map[string]any
@@ -59,7 +59,7 @@ func (t *Node5) ProcessTask(_ context.Context, task *mq.Task) mq.Result {
 	return mq.Result{Payload: resultPayload}
 }
 
-type Node6 struct{ services.Operation }
+type Node6 struct{ dag.Operation }
 
 func (t *Node6) ProcessTask(_ context.Context, task *mq.Task) mq.Result {
 	var user map[string]any
@@ -68,7 +68,7 @@ func (t *Node6) ProcessTask(_ context.Context, task *mq.Task) mq.Result {
 	return mq.Result{Payload: resultPayload}
 }
 
-type Node7 struct{ services.Operation }
+type Node7 struct{ dag.Operation }
 
 func (t *Node7) ProcessTask(_ context.Context, task *mq.Task) mq.Result {
 	var user map[string]any
@@ -78,7 +78,7 @@ func (t *Node7) ProcessTask(_ context.Context, task *mq.Task) mq.Result {
 	return mq.Result{Payload: resultPayload}
 }
 
-type Node8 struct{ services.Operation }
+type Node8 struct{ dag.Operation }
 
 func (t *Node8) ProcessTask(_ context.Context, task *mq.Task) mq.Result {
 	var user map[string]any

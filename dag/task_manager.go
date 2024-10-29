@@ -92,6 +92,11 @@ func (tm *TaskManager) getConditionalEdges(node *Node, result mq.Result) []Edge 
 }
 
 func (tm *TaskManager) handleNextTask(ctx context.Context, result mq.Result) mq.Result {
+	if result.Ctx != nil {
+		if headers, ok := mq.GetHeaders(ctx); ok {
+			ctx = mq.SetHeaders(result.Ctx, headers.AsMap())
+		}
+	}
 	defer func() {
 		tm.wg.Done()
 		mq.RecoverPanic(mq.RecoverTitle)

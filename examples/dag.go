@@ -6,11 +6,9 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/oarkflow/mq/examples/tasks"
-	"github.com/oarkflow/mq/services"
-
 	"github.com/oarkflow/mq"
 	"github.com/oarkflow/mq/dag"
+	"github.com/oarkflow/mq/examples/tasks"
 )
 
 func main() {
@@ -19,14 +17,14 @@ func main() {
 
 func setup(f *dag.DAG) {
 	f.
-		AddNode("Email Delivery", "email:deliver", &tasks.EmailDelivery{Operation: services.Operation{Type: "process"}}).
-		AddNode("Prepare Email", "prepare:email", &tasks.PrepareEmail{Operation: services.Operation{Type: "process"}}).
-		AddNode("Get Input", "get:input", &tasks.GetData{Operation: services.Operation{Type: "input"}}, true).
-		AddNode("Iterator Processor", "loop", &tasks.Loop{Operation: services.Operation{Type: "loop"}}).
-		AddNode("Condition", "condition", &tasks.Condition{Operation: services.Operation{Type: "condition"}}).
-		AddNode("Store data", "store:data", &tasks.StoreData{Operation: services.Operation{Type: "process"}}).
-		AddNode("Send SMS", "send:sms", &tasks.SendSms{Operation: services.Operation{Type: "process"}}).
-		AddNode("Notification", "notification", &tasks.InAppNotification{Operation: services.Operation{Type: "process"}}).
+		AddNode("Email Delivery", "email:deliver", &tasks.EmailDelivery{Operation: dag.Operation{Type: "process"}}).
+		AddNode("Prepare Email", "prepare:email", &tasks.PrepareEmail{Operation: dag.Operation{Type: "process"}}).
+		AddNode("Get Input", "get:input", &tasks.GetData{Operation: dag.Operation{Type: "input"}}, true).
+		AddNode("Iterator Processor", "loop", &tasks.Loop{Operation: dag.Operation{Type: "loop"}}).
+		AddNode("Condition", "condition", &tasks.Condition{Operation: dag.Operation{Type: "condition"}}).
+		AddNode("Store data", "store:data", &tasks.StoreData{Operation: dag.Operation{Type: "process"}}).
+		AddNode("Send SMS", "send:sms", &tasks.SendSms{Operation: dag.Operation{Type: "process"}}).
+		AddNode("Notification", "notification", &tasks.InAppNotification{Operation: dag.Operation{Type: "process"}}).
 		AddCondition("condition", map[dag.When]dag.Then{"pass": "email:deliver", "fail": "store:data"}).
 		AddEdge("Get input to loop", "get:input", "loop").
 		AddIterator("Loop to prepare email", "loop", "prepare:email").
