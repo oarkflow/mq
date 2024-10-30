@@ -126,7 +126,7 @@ func (tm *DAG) GetKey() string {
 }
 
 func (tm *DAG) AssignTopic(topic string) {
-	tm.consumer = mq.NewConsumer(topic, topic, tm.ProcessTask, mq.WithRespondPendingResult(false))
+	tm.consumer = mq.NewConsumer(topic, topic, tm.ProcessTask, mq.WithRespondPendingResult(false), mq.WithBrokerURL(tm.server.URL()))
 	tm.consumerTopic = topic
 }
 

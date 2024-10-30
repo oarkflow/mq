@@ -483,3 +483,7 @@ func (b *Broker) backoffRetry(queue *Queue, task *QueuedTask, delay time.Duratio
 	}
 	return delay
 }
+
+func (b *Broker) URL() string {
+	return b.opts.brokerAddr
+}
