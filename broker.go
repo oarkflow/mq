@@ -40,6 +40,7 @@ type Broker struct {
 	publishers storage.IMap[string, *publisher]
 	deadLetter storage.IMap[string, *Queue]
 	opts       *Options
+	listener   net.Listener
 }
 
 func NewBroker(opts ...Option) *Broker {
@@ -102,7 +103,9 @@ func (b *Broker) OnClose(ctx context.Context, conn net.Conn) error {
 }
 
 func (b *Broker) OnError(_ context.Context, conn net.Conn, err error) {
-	fmt.Println("Error reading from connection:", err, conn.RemoteAddr())
+	if conn != nil {
+		fmt.Println("Error reading from connection:", err, conn.RemoteAddr())
+	}
 }
 
 func (b *Broker) OnMessage(ctx context.Context, msg *codec.Message, conn net.Conn) {
@@ -261,7 +264,8 @@ func (b *Broker) Start(ctx context.Context) error {
 		}
 		log.Println("BROKER - RUNNING ~> started on", b.opts.brokerAddr)
 	}
-	defer listener.Close()
+	b.listener = listener
+	defer b.Close()
 	const maxConcurrentConnections = 100
 	sem := make(chan struct{}, maxConcurrentConnections)
 	for {
@@ -486,4 +490,9 @@ func (b *Broker) backoffRetry(queue *Queue, task *QueuedTask, delay time.Duratio
 
 func (b *Broker) URL() string {
 	return b.opts.brokerAddr
+}
+
+func (b *Broker) Close() error {
+	log.Printf("Broker is closing...")
+	return b.listener.Close()
 }

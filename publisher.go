@@ -89,7 +89,7 @@ func (p *Publisher) onError(ctx context.Context, conn net.Conn, err error) {
 	fmt.Println("Error reading from publisher connection:", err, conn.RemoteAddr())
 }
 
-func (p *Publisher) Request(ctx context.Context, queue string, task Task) Result {
+func (p *Publisher) Request(ctx context.Context, task Task, queue string) Result {
 	ctx = SetHeaders(ctx, map[string]string{
 		consts.AwaitResponseKey: "true",
 	})
