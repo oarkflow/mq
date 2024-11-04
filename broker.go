@@ -493,6 +493,13 @@ func (b *Broker) URL() string {
 }
 
 func (b *Broker) Close() error {
-	log.Printf("Broker is closing...")
-	return b.listener.Close()
+	if b != nil && b.listener != nil {
+		log.Printf("Broker is closing...")
+		return b.listener.Close()
+	}
+	return nil
+}
+
+func (b *Broker) SetURL(url string) {
+	b.opts.brokerAddr = url
 }

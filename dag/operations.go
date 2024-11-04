@@ -48,6 +48,13 @@ func GetDAG(key string) *DAG {
 	return dags.Handlers[key]
 }
 
+func ClearDAG() {
+	dags.mu.Lock()
+	clear(dags.Handlers)
+	dags.mu.Unlock()
+	dags.Handlers = make(map[string]*DAG)
+}
+
 func AvailableDAG() []string {
 	var op []string
 	for opt := range dags.Handlers {
