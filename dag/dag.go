@@ -234,7 +234,7 @@ func (tm *DAG) Start(ctx context.Context, addr string) error {
 	return http.ListenAndServe(addr, nil)
 }
 
-func (tm *DAG) AddDAGNode(name string, key string, dag *DAG, firstNode ...bool) {
+func (tm *DAG) AddDAGNode(name string, key string, dag *DAG, firstNode ...bool) *DAG {
 	dag.AssignTopic(key)
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
@@ -247,6 +247,7 @@ func (tm *DAG) AddDAGNode(name string, key string, dag *DAG, firstNode ...bool) 
 	if len(firstNode) > 0 && firstNode[0] {
 		tm.startNode = key
 	}
+	return tm
 }
 
 func (tm *DAG) AddNode(name, key string, handler mq.Processor, firstNode ...bool) *DAG {

@@ -5,9 +5,9 @@ import (
 	"context"
 	"encoding/binary"
 	"net"
-	"sync"
 
 	"github.com/oarkflow/mq/consts"
+	"github.com/oarkflow/mq/internal/bpool"
 )
 
 type Message struct {
@@ -45,33 +45,28 @@ func Deserialize(data []byte) (*Message, error) {
 	return &msg, nil
 }
 
-var byteBufferPool = sync.Pool{
-	New: func() interface{} {
-		return make([]byte, 0, 4096)
-	},
-}
-
 func SendMessage(ctx context.Context, conn net.Conn, msg *Message) error {
 	data, err := msg.Serialize()
 	if err != nil {
 		return err
 	}
 	totalLength := 4 + len(data)
-	buffer := byteBufferPool.Get().([]byte)
-	if cap(buffer) < totalLength {
-		buffer = make([]byte, totalLength)
+	buffer := bpool.Get()
+	defer bpool.Put(buffer)
+	buffer.Reset()
+	if cap(buffer.B) < totalLength {
+		buffer.B = make([]byte, totalLength)
 	} else {
-		buffer = buffer[:totalLength]
+		buffer.B = buffer.B[:totalLength]
 	}
-	defer byteBufferPool.Put(buffer)
-	binary.BigEndian.PutUint32(buffer[:4], uint32(len(data)))
-	copy(buffer[4:], data)
+	binary.BigEndian.PutUint32(buffer.B[:4], uint32(len(data)))
+	copy(buffer.B[4:], data)
 	writer := bufio.NewWriter(conn)
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
 	default:
-		if _, err := writer.Write(buffer); err != nil {
+		if _, err := writer.Write(buffer.B[:totalLength]); err != nil {
 			return err
 		}
 	}
@@ -84,20 +79,26 @@ func ReadMessage(ctx context.Context, conn net.Conn) (*Message, error) {
 		return nil, err
 	}
 	length := binary.BigEndian.Uint32(lengthBytes)
-	data := byteBufferPool.Get().([]byte)[:length]
-	defer byteBufferPool.Put(data)
+	buffer := bpool.Get()
+	defer bpool.Put(buffer)
+	buffer.Reset()
+	if cap(buffer.B) < int(length) {
+		buffer.B = make([]byte, length)
+	} else {
+		buffer.B = buffer.B[:length]
+	}
 	totalRead := 0
 	for totalRead < int(length) {
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		default:
-			n, err := conn.Read(data[totalRead:])
+			n, err := conn.Read(buffer.B[totalRead:])
 			if err != nil {
 				return nil, err
 			}
 			totalRead += n
 		}
 	}
-	return Deserialize(data[:length])
+	return Deserialize(buffer.B[:length])
 }
