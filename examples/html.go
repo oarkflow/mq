@@ -1,9 +1,12 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"github.com/oarkflow/mq/dag/v2"
+	"log"
+	"net/http"
 )
 
 func main() {
@@ -115,6 +118,10 @@ func main() {
 	graph.AddEdge("manualVerificationPage", "denyVerification")
 	graph.AddEdge("verifyApproved", "approveCustomer")
 	graph.AddEdge("denyVerification", "verificationLinkPage")
+
+	http.HandleFunc("/verify", func(w http.ResponseWriter, r *http.Request) {
+		verifyHandler(w, r, graph.Tm)
+	})
 	graph.Start()
 }
 
@@ -124,4 +131,34 @@ func isValidEmail(email string) bool {
 
 func isValidPhone(phone string) bool {
 	return phone != ""
+}
+
+func verifyHandler(w http.ResponseWriter, r *http.Request, tm *v2.TaskManager) {
+	taskID := r.URL.Query().Get("taskID")
+	if taskID == "" {
+		http.Error(w, "Missing taskID", http.StatusBadRequest)
+		return
+	}
+	task, exists := tm.GetTask(taskID)
+	if !exists {
+		http.Error(w, "Task not found", http.StatusNotFound)
+		return
+	}
+	data := map[string]any{
+		"email_verified": "true",
+	}
+	bt, _ := json.Marshal(data)
+	task.Payload = bt
+	log.Printf("Email for taskID %s successfully verified.", task.ID)
+	nextNode, exists := tm.Graph.Nodes["dashboard"]
+	if !exists {
+		http.Error(w, "Dashboard Operation not found", http.StatusInternalServerError)
+		return
+	}
+	result := nextNode.ProcessTask(context.Background(), task)
+	if result.Error != nil {
+		http.Error(w, result.Error.Error(), http.StatusInternalServerError)
+		return
+	}
+	fmt.Fprintf(w, string(result.Payload))
 }

@@ -74,7 +74,7 @@ func (n *Operation) GetNodeType() string {
 type Graph struct {
 	Nodes map[string]Node
 	Edges map[string][]string
-	tm    *TaskManager
+	Tm    *TaskManager
 }
 
 func NewGraph() *Graph {
@@ -83,22 +83,19 @@ func NewGraph() *Graph {
 		Edges: make(map[string][]string),
 	}
 	tm := NewTaskManager(g)
-	g.tm = tm
+	g.Tm = tm
 	return g
 }
 
 func (g *Graph) Start() {
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		startTaskHandler(w, r, g.tm)
+		startTaskHandler(w, r, g.Tm)
 	})
 	http.HandleFunc("/render", func(w http.ResponseWriter, r *http.Request) {
-		renderHandler(w, r, g.tm)
+		renderHandler(w, r, g.Tm)
 	})
 	http.HandleFunc("/submit", func(w http.ResponseWriter, r *http.Request) {
-		submitHandler(w, r, g.tm)
-	})
-	http.HandleFunc("/verify", func(w http.ResponseWriter, r *http.Request) {
-		verifyHandler(w, r, g.tm)
+		submitHandler(w, r, g.Tm)
 	})
 
 	fmt.Println("Server starting on :8080...")
@@ -258,34 +255,4 @@ func submitHandler(w http.ResponseWriter, r *http.Request, tm *TaskManager) {
 func startTaskHandler(w http.ResponseWriter, r *http.Request, tm *TaskManager) {
 	task := tm.StartTask()
 	http.Redirect(w, r, fmt.Sprintf("/render?taskID=%s", task.ID), http.StatusFound)
-}
-
-func verifyHandler(w http.ResponseWriter, r *http.Request, tm *TaskManager) {
-	taskID := r.URL.Query().Get("taskID")
-	if taskID == "" {
-		http.Error(w, "Missing taskID", http.StatusBadRequest)
-		return
-	}
-	task, exists := tm.GetTask(taskID)
-	if !exists {
-		http.Error(w, "Task not found", http.StatusNotFound)
-		return
-	}
-	data := map[string]any{
-		"email_verified": "true",
-	}
-	bt, _ := json.Marshal(data)
-	task.Payload = bt
-	log.Printf("Email for taskID %s successfully verified.", task.ID)
-	nextNode, exists := tm.Graph.Nodes["dashboard"]
-	if !exists {
-		http.Error(w, "Dashboard Operation not found", http.StatusInternalServerError)
-		return
-	}
-	result := nextNode.ProcessTask(context.Background(), task)
-	if result.Error != nil {
-		http.Error(w, result.Error.Error(), http.StatusInternalServerError)
-		return
-	}
-	fmt.Fprintf(w, string(result.Payload))
 }
