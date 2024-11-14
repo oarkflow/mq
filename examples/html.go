@@ -58,7 +58,6 @@ func (n *PageNode) ProcessTask(ctx context.Context, task *Task) Result {
 		"request_data": data,
 		"taskID":       task.ID,
 	})
-	fmt.Println(rs, err, data)
 	if err != nil {
 		return Result{Error: err}
 	}
@@ -303,14 +302,14 @@ func main() {
 		Func: func(task *Task) Result {
 			var inputs map[string]string
 			if err := json.Unmarshal(task.Payload, &inputs); err != nil {
-				return Result{ConditionStatus: "customRegistration", Payload: []byte("Invalid input format")}
+				return Result{ConditionStatus: "customRegistration", Error: fmt.Errorf("Invalid input format")}
 			}
 
 			email, phone := inputs["email"], inputs["phone"]
 			if !isValidEmail(email) || !isValidPhone(phone) {
 				return Result{
 					ConditionStatus: "customRegistration",
-					Payload:         []byte("Invalid email or phone number. Please try again."),
+					Error:           fmt.Errorf("Invalid email or phone number. Please try again."),
 				}
 			}
 			return Result{ConditionStatus: "checkManualVerification"}
@@ -321,7 +320,7 @@ func main() {
 		Func: func(task *Task) Result {
 			var inputs map[string]string
 			if err := json.Unmarshal(task.Payload, &inputs); err != nil {
-				return Result{ConditionStatus: "customRegistration", Payload: []byte("Invalid input format")}
+				return Result{ConditionStatus: "customRegistration", Error: fmt.Errorf("Invalid input format")}
 			}
 			city := inputs["city"]
 			if city != "Kathmandu" {
