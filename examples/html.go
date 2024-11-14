@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/oarkflow/jet"
 	"log"
 	"math/rand"
 	"net/http"
@@ -23,7 +24,7 @@ type Node interface {
 
 type Result struct {
 	ConditionStatus string
-	Message         string
+	Payload         json.RawMessage
 	Error           error
 }
 
@@ -40,8 +41,28 @@ type PageNode struct {
 }
 
 func (n *PageNode) ProcessTask(ctx context.Context, task *Task) Result {
-	contentWithTaskID := strings.ReplaceAll(n.Content, "{{taskID}}", task.ID)
-	return Result{Message: contentWithTaskID}
+	var data map[string]any
+	if task.Payload != nil {
+		err := json.Unmarshal(task.Payload, &data)
+		if err != nil {
+			return Result{Error: err}
+		}
+	}
+	if data == nil {
+		data = make(map[string]any)
+	}
+	parser := jet.NewWithMemory(jet.WithDelims("{{", "}}"))
+	data["taskID"] = task.ID
+	tmpl := fmt.Sprintf("%s<br><h1>Request</h1><p>{{request_data|writeJson}}</p>", n.Content)
+	rs, err := parser.ParseTemplate(tmpl, map[string]any{
+		"request_data": data,
+		"taskID":       task.ID,
+	})
+	fmt.Println(rs, err, data)
+	if err != nil {
+		return Result{Error: err}
+	}
+	return Result{Payload: []byte(rs)}
 }
 
 func (n *PageNode) GetNodeType() string {
@@ -153,8 +174,7 @@ func processNode(w http.ResponseWriter, r *http.Request, task *Task, tm *TaskMan
 		result := node.ProcessTask(context.Background(), task)
 		log.Printf("Node %s processed. Result ConditionStatus: %s", task.CurrentNodeID, result.ConditionStatus)
 		if node.GetNodeType() == PageType {
-			contentWithTaskID := strings.ReplaceAll(result.Message, "{{taskID}}", task.ID)
-			fmt.Fprintf(w, contentWithTaskID)
+			fmt.Fprintf(w, string(result.Payload))
 			return
 		}
 		if result.Error != nil {
@@ -268,8 +288,7 @@ func verifyHandler(w http.ResponseWriter, r *http.Request, tm *TaskManager) {
 		http.Error(w, result.Error.Error(), http.StatusInternalServerError)
 		return
 	}
-	contentWithTaskID := strings.ReplaceAll(result.Message, "{{taskID}}", task.ID)
-	fmt.Fprintf(w, contentWithTaskID)
+	fmt.Fprintf(w, string(result.Payload))
 }
 
 func main() {
@@ -284,14 +303,14 @@ func main() {
 		Func: func(task *Task) Result {
 			var inputs map[string]string
 			if err := json.Unmarshal(task.Payload, &inputs); err != nil {
-				return Result{ConditionStatus: "customRegistration", Message: "Invalid input format"}
+				return Result{ConditionStatus: "customRegistration", Payload: []byte("Invalid input format")}
 			}
 
 			email, phone := inputs["email"], inputs["phone"]
 			if !isValidEmail(email) || !isValidPhone(phone) {
 				return Result{
 					ConditionStatus: "customRegistration",
-					Message:         "Invalid email or phone number. Please try again.",
+					Payload:         []byte("Invalid email or phone number. Please try again."),
 				}
 			}
 			return Result{ConditionStatus: "checkManualVerification"}
@@ -302,7 +321,7 @@ func main() {
 		Func: func(task *Task) Result {
 			var inputs map[string]string
 			if err := json.Unmarshal(task.Payload, &inputs); err != nil {
-				return Result{ConditionStatus: "customRegistration", Message: "Invalid input format"}
+				return Result{ConditionStatus: "customRegistration", Payload: []byte("Invalid input format")}
 			}
 			city := inputs["city"]
 			if city != "Kathmandu" {
