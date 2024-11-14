@@ -66,7 +66,7 @@ func (tm *TaskManager) dispatchFinalResult(ctx context.Context) mq.Result {
 	tm.updateTS(&rs)
 	tm.dag.callbackToConsumer(ctx, rs)
 	if tm.dag.server.NotifyHandler() != nil {
-		tm.dag.server.NotifyHandler()(ctx, rs)
+		_ = tm.dag.server.NotifyHandler()(ctx, rs)
 	}
 	tm.dag.taskCleanupCh <- tm.taskID
 	return rs
