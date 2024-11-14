@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"math/rand"
@@ -29,7 +30,7 @@ type Result struct {
 type Task struct {
 	ID            string
 	CurrentNodeID string
-	Inputs        map[string]string
+	Payload       json.RawMessage
 	FinalResult   string
 }
 
@@ -39,7 +40,8 @@ type PageNode struct {
 }
 
 func (n *PageNode) ProcessTask(ctx context.Context, task *Task) Result {
-	return Result{Message: n.Content}
+	contentWithTaskID := strings.ReplaceAll(n.Content, "{{taskID}}", task.ID)
+	return Result{Message: contentWithTaskID}
 }
 
 func (n *PageNode) GetNodeType() string {
@@ -106,7 +108,6 @@ func (tm *TaskManager) StartTask() *Task {
 	task := &Task{
 		ID:            taskID,
 		CurrentNodeID: "customRegistration",
-		Inputs:        make(map[string]string),
 	}
 	tm.tasks[taskID] = task
 	return task
@@ -144,52 +145,36 @@ func generateTaskID() string {
 func processNode(w http.ResponseWriter, r *http.Request, task *Task, tm *TaskManager) {
 	for {
 		log.Printf("Processing taskID: %s, Current Node: %s", task.ID, task.CurrentNodeID)
-
-		// Retrieve the current node
 		node, exists := tm.graph.Nodes[task.CurrentNodeID]
 		if !exists {
 			http.Error(w, "Node not found", http.StatusInternalServerError)
 			return
 		}
-
-		// Process the task with the current node
 		result := node.ProcessTask(context.Background(), task)
 		log.Printf("Node %s processed. Result ConditionStatus: %s", task.CurrentNodeID, result.ConditionStatus)
-
-		// If the node type is PageType, render the content with the task ID and return
 		if node.GetNodeType() == PageType {
 			contentWithTaskID := strings.ReplaceAll(result.Message, "{{taskID}}", task.ID)
 			fmt.Fprintf(w, contentWithTaskID)
 			return
 		}
-
-		// Handle any processing error
 		if result.Error != nil {
 			http.Error(w, result.Error.Error(), http.StatusInternalServerError)
 			return
 		}
-
-		// Determine the next node ID
 		nextNodeID := result.ConditionStatus
 		if nextNodeID == "" {
-			// If ConditionStatus is empty, try to find the next node in the DAG's edges
 			edges := tm.graph.Edges[task.CurrentNodeID]
 			if len(edges) > 0 {
-				nextNodeID = edges[0] // Get the first edge's destination as the next node
+				nextNodeID = edges[0]
 				log.Printf("No ConditionStatus found, following edge to next node: %s", nextNodeID)
 			} else {
-				// If no edges are found, the process is complete
 				log.Printf("Task %s completed. Final result: %s", task.ID, task.FinalResult)
 				fmt.Fprintf(w, "<html><body><h1>Process Completed</h1><p>%s</p></body></html>", task.FinalResult)
 				return
 			}
 		}
-
-		// Update the task with the new node ID and persist the task state
 		task.CurrentNodeID = nextNodeID
 		tm.UpdateTask(task)
-
-		// Check if the next node is a PageType and handle redirection if necessary
 		if nextNode, nextExists := tm.graph.Nodes[nextNodeID]; nextExists && nextNode.GetNodeType() == PageType {
 			log.Printf("Redirecting to next page: %s", nextNodeID)
 			http.Redirect(w, r, fmt.Sprintf("/render?taskID=%s", task.ID), http.StatusFound)
@@ -220,26 +205,26 @@ func submitHandler(w http.ResponseWriter, r *http.Request, tm *TaskManager) {
 		http.Error(w, "Failed to parse form data", http.StatusBadRequest)
 		return
 	}
-	task.Inputs = make(map[string]string)
+	inputData := make(map[string]string)
 	for key, values := range r.Form {
 		if len(values) > 0 {
-			task.Inputs[key] = values[0]
+			inputData[key] = values[0]
 		}
 	}
-	nextNodes, exists := tm.GetNextNode(task)
+	rawInputs, _ := json.Marshal(inputData)
+	task.Payload = rawInputs
+	nextNode, exists := tm.GetNextNode(task)
 	if !exists {
 		log.Printf("Task %s completed. Final result: %s", task.ID, task.FinalResult)
 		fmt.Fprintf(w, "<html><body><h1>Process Completed</h1><p>%s</p></body></html>", task.FinalResult)
 		return
 	}
-
-	switch nextNodes := nextNodes.(type) {
+	switch nextNode := nextNode.(type) {
 	case *PageNode:
-		task.CurrentNodeID = nextNodes.ID
+		task.CurrentNodeID = nextNode.ID
 	case *FunctionNode:
-		task.CurrentNodeID = nextNodes.ID
+		task.CurrentNodeID = nextNode.ID
 	}
-	fmt.Println(task.CurrentNodeID)
 	processNode(w, r, task, tm)
 }
 
@@ -249,11 +234,11 @@ func startTaskHandler(w http.ResponseWriter, r *http.Request, tm *TaskManager) {
 }
 
 func isValidEmail(email string) bool {
-	return true
+	return email != ""
 }
 
 func isValidPhone(phone string) bool {
-	return true
+	return phone != ""
 }
 
 func verifyHandler(w http.ResponseWriter, r *http.Request, tm *TaskManager) {
@@ -267,7 +252,11 @@ func verifyHandler(w http.ResponseWriter, r *http.Request, tm *TaskManager) {
 		http.Error(w, "Task not found", http.StatusNotFound)
 		return
 	}
-	task.Inputs["email_verified"] = "true"
+	data := map[string]any{
+		"email_verified": "true",
+	}
+	bt, _ := json.Marshal(data)
+	task.Payload = bt
 	log.Printf("Email for taskID %s successfully verified.", task.ID)
 	nextNode, exists := tm.graph.Nodes["dashboard"]
 	if !exists {
@@ -293,7 +282,12 @@ func main() {
 	checkValidityNode := &FunctionNode{
 		ID: "checkValidity",
 		Func: func(task *Task) Result {
-			email, phone := task.Inputs["email"], task.Inputs["phone"]
+			var inputs map[string]string
+			if err := json.Unmarshal(task.Payload, &inputs); err != nil {
+				return Result{ConditionStatus: "customRegistration", Message: "Invalid input format"}
+			}
+
+			email, phone := inputs["email"], inputs["phone"]
 			if !isValidEmail(email) || !isValidPhone(phone) {
 				return Result{
 					ConditionStatus: "customRegistration",
@@ -306,7 +300,11 @@ func main() {
 	checkManualVerificationNode := &FunctionNode{
 		ID: "checkManualVerification",
 		Func: func(task *Task) Result {
-			city := task.Inputs["city"]
+			var inputs map[string]string
+			if err := json.Unmarshal(task.Payload, &inputs); err != nil {
+				return Result{ConditionStatus: "customRegistration", Message: "Invalid input format"}
+			}
+			city := inputs["city"]
 			if city != "Kathmandu" {
 				return Result{ConditionStatus: "manualVerificationPage"}
 			}
