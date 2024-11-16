@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+
 	"github.com/oarkflow/mq"
 	"github.com/oarkflow/mq/dag"
 	"github.com/oarkflow/mq/examples/tasks"
@@ -35,13 +36,15 @@ func setup(f *dag.DAG) {
 		AddNode("Email Delivery", "email:deliver", &tasks.EmailDelivery{Operation: dag.Operation{Type: "process"}}).
 		AddNode("Prepare Email", "prepare:email", &tasks.PrepareEmail{Operation: dag.Operation{Type: "process"}}).
 		AddNode("Get Input", "get:input", &tasks.GetData{Operation: dag.Operation{Type: "input"}}, true).
+		AddNode("Final Data", "final", &tasks.Final{Operation: dag.Operation{Type: "page"}}).
 		AddNode("Iterator Processor", "loop", &tasks.Loop{Operation: dag.Operation{Type: "loop"}}).
 		AddNode("Condition", "condition", &tasks.Condition{Operation: dag.Operation{Type: "condition"}}).
 		AddDAGNode("Persistent", "persistent", subDAG()).
 		AddEdge("Get input to loop", "get:input", "loop").
 		AddIterator("Loop to prepare email", "loop", "prepare:email").
 		AddEdge("Prepare Email to condition", "prepare:email", "condition").
-		AddCondition("condition", map[dag.When]dag.Then{"pass": "email:deliver", "fail": "persistent"})
+		AddCondition("condition", map[dag.When]dag.Then{"pass": "email:deliver", "fail": "persistent"}).
+		AddEdge("Final", "loop", "final")
 }
 
 func sendData(f *dag.DAG) {

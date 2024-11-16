@@ -109,3 +109,15 @@ func (e *InAppNotification) ProcessTask(ctx context.Context, task *mq.Task) mq.R
 	}
 	return mq.Result{Payload: task.Payload, Ctx: ctx}
 }
+
+type Final struct {
+	dag.Operation
+}
+
+func (e *Final) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
+	rs := map[string]any{
+		"content": `<strong>Processed successfully!</strong>`,
+	}
+	bt, _ := json.Marshal(rs)
+	return mq.Result{Payload: bt, Ctx: ctx}
+}

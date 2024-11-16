@@ -22,6 +22,7 @@ type TaskManager struct {
 	topic       string
 	result      mq.Result
 
+	iteratorNodes  map[string][]Edge
 	taskNodeStatus storage.IMap[string, *taskNodeStatus]
 }
 
@@ -33,6 +34,7 @@ func NewTaskManager(d *DAG, taskID string, iteratorNodes map[string][]Edge) *Tas
 		dag:            d,
 		taskNodeStatus: memory.New[string, *taskNodeStatus](),
 		taskID:         taskID,
+		iteratorNodes:  iteratorNodes,
 		wg:             NewWaitGroup(),
 	}
 }

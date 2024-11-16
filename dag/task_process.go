@@ -152,28 +152,35 @@ func (tm *TaskManager) handleNextTask(ctx context.Context, result mq.Result) mq.
 	for _, edge := range edges {
 		switch edge.Type {
 		case Simple:
-			tm.SetTotalItems(getTopic(ctx, edge.From.Key), len(edge.To))
-			index, _ := mq.GetHeader(ctx, "index")
-			if index != "" && strings.Contains(index, "__") {
-				index = strings.Split(index, "__")[1]
-			} else {
-				index = "0"
+			if _, ok := tm.iteratorNodes[edge.From.Key]; ok {
+				continue
 			}
-			for _, target := range edge.To {
-				tm.wg.Add(1)
-				go func(ctx context.Context, target *Node, result mq.Result) {
-					ctxx := context.Background()
-					if headers, ok := mq.GetHeaders(ctx); ok {
-						headers.Set(consts.QueueKey, target.Key)
-						headers.Set("index", fmt.Sprintf("%s__%s", target.Key, index))
-						ctxx = mq.SetHeaders(ctxx, headers.AsMap())
-					}
-					tm.processNode(ctxx, target, result.Payload)
-				}(ctx, target, result)
-			}
+			tm.processEdge(ctx, edge, result)
 		}
 	}
 	return result
+}
+
+func (tm *TaskManager) processEdge(ctx context.Context, edge Edge, result mq.Result) {
+	tm.SetTotalItems(getTopic(ctx, edge.From.Key), len(edge.To))
+	index, _ := mq.GetHeader(ctx, "index")
+	if index != "" && strings.Contains(index, "__") {
+		index = strings.Split(index, "__")[1]
+	} else {
+		index = "0"
+	}
+	for _, target := range edge.To {
+		tm.wg.Add(1)
+		go func(ctx context.Context, target *Node, result mq.Result) {
+			ctxx := context.Background()
+			if headers, ok := mq.GetHeaders(ctx); ok {
+				headers.Set(consts.QueueKey, target.Key)
+				headers.Set("index", fmt.Sprintf("%s__%s", target.Key, index))
+				ctxx = mq.SetHeaders(ctxx, headers.AsMap())
+			}
+			tm.processNode(ctxx, target, result.Payload)
+		}(ctx, target, result)
+	}
 }
 
 func (tm *TaskManager) getConditionalEdges(node *Node, result mq.Result) []Edge {
