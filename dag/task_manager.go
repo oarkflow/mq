@@ -22,14 +22,11 @@ type TaskManager struct {
 	topic       string
 	result      mq.Result
 
-	iteratorNodes  map[string][]Edge
+	iteratorNodes  storage.IMap[string, []Edge]
 	taskNodeStatus storage.IMap[string, *taskNodeStatus]
 }
 
-func NewTaskManager(d *DAG, taskID string, iteratorNodes map[string][]Edge) *TaskManager {
-	if iteratorNodes == nil {
-		iteratorNodes = make(map[string][]Edge)
-	}
+func NewTaskManager(d *DAG, taskID string, iteratorNodes storage.IMap[string, []Edge]) *TaskManager {
 	return &TaskManager{
 		dag:            d,
 		taskNodeStatus: memory.New[string, *taskNodeStatus](),

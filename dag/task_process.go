@@ -152,7 +152,7 @@ func (tm *TaskManager) handleNextTask(ctx context.Context, result mq.Result) mq.
 	for _, edge := range edges {
 		switch edge.Type {
 		case Simple:
-			if _, ok := tm.iteratorNodes[edge.From.Key]; ok {
+			if _, ok := tm.iteratorNodes.Get(edge.From.Key); ok {
 				continue
 			}
 			tm.processEdge(ctx, edge, result)

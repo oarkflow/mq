@@ -73,7 +73,6 @@ type DAG struct {
 	taskContext              storage.IMap[string, *TaskManager]
 	nodes                    map[string]*Node
 	iteratorNodes            storage.IMap[string, []Edge]
-	iNodes                   map[string][]Edge
 	conditions               map[FromNode]map[When]Then
 	pool                     *mq.Pool
 	taskCleanupCh            chan string
@@ -367,7 +366,7 @@ func (tm *DAG) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 	}
 	manager, exists := tm.taskContext.Get(task.ID)
 	if !exists {
-		manager = NewTaskManager(tm, task.ID, tm.iNodes)
+		manager = NewTaskManager(tm, task.ID, tm.iteratorNodes)
 		manager.createdAt = task.CreatedAt
 		tm.taskContext.Set(task.ID, manager)
 	}
@@ -426,10 +425,6 @@ func (tm *DAG) check(ctx context.Context, payload []byte) (context.Context, *mq.
 	}
 	if taskID == "" {
 		taskID = mq.NewID()
-	}
-	if tm.iNodes == nil {
-		tm.iNodes = tm.iteratorNodes.AsMap()
-		tm.iteratorNodes.Clear()
 	}
 	return ctx, mq.NewTask(taskID, payload, initialNode), nil
 }

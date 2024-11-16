@@ -72,9 +72,33 @@ func (tm *TaskManager) ChangeNodeStatus(ctx context.Context, nodeID string, stat
 	if !ok || nodeStatus == nil {
 		return
 	}
+
 	nodeStatus.markAs(rs, status)
 	switch status {
-	case Completed, Failed:
+	case Completed:
+		canProceed := false
+		edges, ok := tm.iteratorNodes.Get(topic)
+		if ok {
+			if len(edges) == 0 {
+				canProceed = true
+			} else {
+				nodeStatus.status = Processing
+				nodeStatus.totalItems = 1
+				nodeStatus.itemResults.Clear()
+				for _, edge := range edges {
+					tm.processEdge(ctx, edge, rs)
+				}
+				tm.iteratorNodes.Del(topic)
+			}
+		}
+		if canProceed || !ok {
+			if topic == tm.dag.startNode {
+				tm.result = rs
+			} else {
+				tm.markParentTask(ctx, topic, nodeID, status, rs)
+			}
+		}
+	case Failed:
 		if topic == tm.dag.startNode {
 			tm.result = rs
 		} else {
