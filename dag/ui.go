@@ -8,8 +8,6 @@ import (
 )
 
 func (tm *DAG) PrintGraph() {
-	tm.mu.RLock()
-	defer tm.mu.RUnlock()
 	fmt.Println("DAG Graph structure:")
 	for _, node := range tm.nodes {
 		fmt.Printf("Node: %s (%s) -> ", node.Name, node.Key)
@@ -35,8 +33,6 @@ func (tm *DAG) PrintGraph() {
 func (tm *DAG) ClassifyEdges(startNodes ...string) (string, bool, error) {
 	builder := &strings.Builder{}
 	startNode := tm.GetStartNode()
-	tm.mu.RLock()
-	defer tm.mu.RUnlock()
 	if len(startNodes) > 0 && startNodes[0] != "" {
 		startNode = startNodes[0]
 	}

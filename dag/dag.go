@@ -3,9 +3,10 @@ package dag
 import (
 	"context"
 	"fmt"
+	"github.com/oarkflow/mq/storage"
+	"github.com/oarkflow/mq/storage/memory"
 	"log"
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/oarkflow/mq/sio"
@@ -66,11 +67,11 @@ type (
 )
 
 type DAG struct {
-	nodes                    map[string]*Node
 	server                   *mq.Broker
 	consumer                 *mq.Consumer
-	taskContext              map[string]*TaskManager
-	iteratorNodes            map[string]struct{}
+	taskContext              storage.IMap[string, *TaskManager]
+	nodes                    map[string]*Node
+	iteratorNodes            storage.IMap[string, []Edge]
 	conditions               map[FromNode]map[When]Then
 	pool                     *mq.Pool
 	taskCleanupCh            chan string
@@ -79,7 +80,6 @@ type DAG struct {
 	startNode                string
 	consumerTopic            string
 	opts                     []mq.Option
-	mu                       sync.RWMutex
 	reportNodeResultCallback func(mq.Result)
 	Notifier                 *sio.Server
 	paused                   bool
@@ -108,9 +108,7 @@ func (tm *DAG) listenForTaskCleanup() {
 }
 
 func (tm *DAG) taskCleanup(taskID string) {
-	tm.mu.Lock()
-	defer tm.mu.Unlock()
-	delete(tm.taskContext, taskID)
+	tm.taskContext.Del(taskID)
 	log.Printf("DAG - Task %s cleaned up", taskID)
 }
 
@@ -147,8 +145,8 @@ func NewDAG(name, key string, opts ...mq.Option) *DAG {
 		name:          name,
 		key:           key,
 		nodes:         make(map[string]*Node),
-		iteratorNodes: make(map[string]struct{}),
-		taskContext:   make(map[string]*TaskManager),
+		iteratorNodes: memory.New[string, []Edge](),
+		taskContext:   memory.New[string, *TaskManager](),
 		conditions:    make(map[FromNode]map[When]Then),
 		taskCleanupCh: make(chan string),
 	}
@@ -181,7 +179,7 @@ func (tm *DAG) callbackToConsumer(ctx context.Context, result mq.Result) {
 }
 
 func (tm *DAG) onTaskCallback(ctx context.Context, result mq.Result) mq.Result {
-	if taskContext, ok := tm.taskContext[result.TaskID]; ok && result.Topic != "" {
+	if taskContext, ok := tm.taskContext.Get(result.TaskID); ok && result.Topic != "" {
 		return taskContext.handleNextTask(ctx, result)
 	}
 	return mq.Result{}
@@ -248,8 +246,6 @@ func (tm *DAG) Start(ctx context.Context, addr string) error {
 
 func (tm *DAG) AddDAGNode(name string, key string, dag *DAG, firstNode ...bool) *DAG {
 	dag.AssignTopic(key)
-	tm.mu.Lock()
-	defer tm.mu.Unlock()
 	tm.nodes[key] = &Node{
 		Name:      name,
 		Key:       key,
@@ -263,8 +259,6 @@ func (tm *DAG) AddDAGNode(name string, key string, dag *DAG, firstNode ...bool) 
 }
 
 func (tm *DAG) AddNode(name, key string, handler mq.Processor, firstNode ...bool) *DAG {
-	tm.mu.Lock()
-	defer tm.mu.Unlock()
 	con := mq.NewConsumer(key, key, handler.ProcessTask, tm.opts...)
 	n := &Node{
 		Name:      name,
@@ -288,8 +282,6 @@ func (tm *DAG) AddDeferredNode(name, key string, firstNode ...bool) error {
 	if tm.server.SyncMode() {
 		return fmt.Errorf("DAG cannot have deferred node in Sync Mode")
 	}
-	tm.mu.Lock()
-	defer tm.mu.Unlock()
 	tm.nodes[key] = &Node{
 		Name: name,
 		Key:  key,
@@ -301,8 +293,6 @@ func (tm *DAG) AddDeferredNode(name, key string, firstNode ...bool) error {
 }
 
 func (tm *DAG) IsReady() bool {
-	tm.mu.RLock()
-	defer tm.mu.RUnlock()
 	for _, node := range tm.nodes {
 		if !node.isReady {
 			return false
@@ -312,17 +302,13 @@ func (tm *DAG) IsReady() bool {
 }
 
 func (tm *DAG) AddCondition(fromNode FromNode, conditions map[When]Then) *DAG {
-	tm.mu.Lock()
-	defer tm.mu.Unlock()
 	tm.conditions[fromNode] = conditions
 	return tm
 }
 
 func (tm *DAG) AddIterator(label, from string, targets ...string) *DAG {
 	tm.Error = tm.addEdge(Iterator, label, from, targets...)
-	tm.mu.Lock()
-	tm.iteratorNodes[from] = struct{}{}
-	tm.mu.Unlock()
+	tm.iteratorNodes.Set(from, []Edge{})
 	return tm
 }
 
@@ -332,8 +318,6 @@ func (tm *DAG) AddEdge(label, from string, targets ...string) *DAG {
 }
 
 func (tm *DAG) addEdge(edgeType EdgeType, label, from string, targets ...string) error {
-	tm.mu.Lock()
-	defer tm.mu.Unlock()
 	fromNode, ok := tm.nodes[from]
 	if !ok {
 		return fmt.Errorf("Error: 'from' node %s does not exist\n", from)
@@ -348,6 +332,12 @@ func (tm *DAG) addEdge(edgeType EdgeType, label, from string, targets ...string)
 	}
 	edge := Edge{From: fromNode, To: nodes, Type: edgeType, Label: label}
 	fromNode.Edges = append(fromNode.Edges, edge)
+	if edgeType != Iterator {
+		if edges, ok := tm.iteratorNodes.Get(fromNode.Key); ok {
+			edges = append(edges, edge)
+			tm.iteratorNodes.Set(fromNode.Key, edges)
+		}
+	}
 	return nil
 }
 
@@ -366,17 +356,15 @@ func (tm *DAG) GetReport() string {
 }
 
 func (tm *DAG) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
-	tm.mu.Lock()
 	if task.ID == "" {
 		task.ID = mq.NewID()
 	}
-	manager, exists := tm.taskContext[task.ID]
+	manager, exists := tm.taskContext.Get(task.ID)
 	if !exists {
-		manager = NewTaskManager(tm, task.ID, tm.iteratorNodes)
+		manager = NewTaskManager(tm, task.ID, tm.iteratorNodes.AsMap())
 		manager.createdAt = task.CreatedAt
-		tm.taskContext[task.ID] = manager
+		tm.taskContext.Set(task.ID, manager)
 	}
-	tm.mu.Unlock()
 
 	if tm.consumer != nil {
 		initialNode, err := tm.parseInitialNode(ctx)
@@ -424,10 +412,8 @@ func (tm *DAG) check(ctx context.Context, payload []byte) (context.Context, *mq.
 		ctx = mq.SetHeaders(ctx, map[string]string{consts.AwaitResponseKey: "true"})
 	}
 	taskID := GetTaskID(ctx)
-	tm.mu.RLock()
-	defer tm.mu.RUnlock()
 	if taskID != "" {
-		if _, exists := tm.taskContext[taskID]; !exists {
+		if _, exists := tm.taskContext.Get(taskID); !exists {
 			return ctx, nil, fmt.Errorf("provided task ID doesn't exist")
 		}
 	}
@@ -472,9 +458,6 @@ func (tm *DAG) ScheduleTask(ctx context.Context, payload []byte, opts ...mq.Sche
 }
 
 func (tm *DAG) parseInitialNode(ctx context.Context) (string, error) {
-	tm.mu.RLock()
-	defer tm.mu.RUnlock()
-
 	val := ctx.Value("initial_node")
 	initialNode, ok := val.(string)
 	if ok {
@@ -522,15 +505,11 @@ func (tm *DAG) findStartNode() *Node {
 }
 
 func (tm *DAG) Pause(_ context.Context) error {
-	tm.mu.Lock()
-	defer tm.mu.Unlock()
 	tm.paused = true
 	return nil
 }
 
 func (tm *DAG) Resume(_ context.Context) error {
-	tm.mu.Lock()
-	defer tm.mu.Unlock()
 	tm.paused = false
 	return nil
 }
@@ -580,4 +559,48 @@ func (tm *DAG) doConsumer(ctx context.Context, id string, action consts.CMD) {
 
 func (tm *DAG) SetNotifyResponse(callback mq.Callback) {
 	tm.server.SetNotifyHandler(callback)
+}
+
+func (tm *DAG) GetNextNodes(key string) ([]*Node, error) {
+	node, exists := tm.nodes[key]
+	if !exists {
+		return nil, fmt.Errorf("Node with key %s does not exist", key)
+	}
+	var successors []*Node
+	for _, edge := range node.Edges {
+		successors = append(successors, edge.To...)
+	}
+	if conds, exists := tm.conditions[FromNode(key)]; exists {
+		for _, targetKey := range conds {
+			if targetNode, exists := tm.nodes[string(targetKey)]; exists {
+				successors = append(successors, targetNode)
+			}
+		}
+	}
+	return successors, nil
+}
+
+func (tm *DAG) GetPreviousNodes(key string) ([]*Node, error) {
+	var predecessors []*Node
+	for _, node := range tm.nodes {
+		for _, edge := range node.Edges {
+			for _, target := range edge.To {
+				if target.Key == key {
+					predecessors = append(predecessors, node)
+				}
+			}
+		}
+	}
+	for fromNode, conds := range tm.conditions {
+		for _, targetKey := range conds {
+			if string(targetKey) == key {
+				node, exists := tm.nodes[string(fromNode)]
+				if !exists {
+					return nil, fmt.Errorf("Node with key %s does not exist", fromNode)
+				}
+				predecessors = append(predecessors, node)
+			}
+		}
+	}
+	return predecessors, nil
 }

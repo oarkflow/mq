@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/oarkflow/mq/storage"
+	"github.com/oarkflow/mq/storage/memory"
 	"sync"
 	"time"
 
@@ -11,30 +13,32 @@ import (
 )
 
 type TaskManager struct {
-	createdAt     time.Time
-	processedAt   time.Time
-	status        string
-	dag           *DAG
-	nodeResults   map[string]mq.Result
-	wg            *WaitGroup
-	taskID        string
-	results       []mq.Result
-	iteratorNodes map[string]struct{}
-	mutex         sync.Mutex
-	topic         string
+	createdAt   time.Time
+	processedAt time.Time
+	status      string
+	dag         *DAG
+	taskID      string
+
+	taskNodeStatus storage.IMap[string, *taskNodeStatus]
+	results        []mq.Result
+	iteratorNodes  map[string][]Edge
+
+	wg    *WaitGroup
+	mutex sync.Mutex
+	topic string
 }
 
-func NewTaskManager(d *DAG, taskID string, iteratorNodes map[string]struct{}) *TaskManager {
+func NewTaskManager(d *DAG, taskID string, iteratorNodes map[string][]Edge) *TaskManager {
 	if iteratorNodes == nil {
-		iteratorNodes = make(map[string]struct{})
+		iteratorNodes = make(map[string][]Edge)
 	}
 	return &TaskManager{
-		dag:           d,
-		nodeResults:   make(map[string]mq.Result),
-		results:       make([]mq.Result, 0),
-		taskID:        taskID,
-		iteratorNodes: iteratorNodes,
-		wg:            NewWaitGroup(),
+		dag:            d,
+		results:        make([]mq.Result, 0),
+		taskNodeStatus: memory.New[string, *taskNodeStatus](),
+		taskID:         taskID,
+		iteratorNodes:  iteratorNodes,
+		wg:             NewWaitGroup(),
 	}
 }
 
@@ -105,10 +109,15 @@ func (tm *TaskManager) appendResult(result mq.Result, final bool) {
 	if final {
 		tm.results = append(tm.results, result)
 	}
-	tm.nodeResults[result.Topic] = result
 	tm.mutex.Unlock()
 	if tm.dag.reportNodeResultCallback != nil {
 		tm.dag.reportNodeResultCallback(result)
+	}
+}
+
+func (tm *TaskManager) SetTotalItems(topic string, i int) {
+	if nodeStatus, ok := tm.taskNodeStatus.Get(topic); ok {
+		nodeStatus.totalItems = i
 	}
 }
 

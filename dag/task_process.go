@@ -6,10 +6,13 @@ import (
 	"fmt"
 	"github.com/oarkflow/mq"
 	"github.com/oarkflow/mq/consts"
+	"strings"
 	"time"
 )
 
 func (tm *TaskManager) processNode(ctx context.Context, node *Node, payload json.RawMessage) {
+	topic := getTopic(ctx, node.Key)
+	tm.taskNodeStatus.Set(topic, newNodeStatus(topic))
 	defer mq.RecoverPanic(mq.RecoverTitle)
 	dag, isDAG := isDAGNode(node)
 	if isDAG {
@@ -17,7 +20,7 @@ func (tm *TaskManager) processNode(ctx context.Context, node *Node, payload json
 			dag.server.Options().SetSyncMode(true)
 		}
 	}
-
+	tm.ChangeNodeStatus(ctx, node.Key, Processing, mq.Result{Payload: payload, Topic: node.Key})
 	var result mq.Result
 	if tm.dag.server.SyncMode() {
 		defer func() {
@@ -30,6 +33,7 @@ func (tm *TaskManager) processNode(ctx context.Context, node *Node, payload json
 	case <-ctx.Done():
 		result = mq.Result{TaskID: tm.taskID, Topic: node.Key, Error: ctx.Err(), Ctx: ctx}
 		tm.appendResult(result, true)
+		tm.ChangeNodeStatus(ctx, node.Key, Failed, result)
 		return
 	default:
 		ctx = mq.SetHeaders(ctx, map[string]string{consts.QueueKey: node.Key})
@@ -41,6 +45,7 @@ func (tm *TaskManager) processNode(ctx context.Context, node *Node, payload json
 			}
 			if result.Error != nil {
 				tm.appendResult(result, true)
+				tm.ChangeNodeStatus(ctx, node.Key, Failed, result)
 				return
 			}
 			return
@@ -48,6 +53,7 @@ func (tm *TaskManager) processNode(ctx context.Context, node *Node, payload json
 		err := tm.dag.server.Publish(ctx, mq.NewTask(tm.taskID, payload, node.Key), node.Key)
 		if err != nil {
 			tm.appendResult(mq.Result{Error: err}, true)
+			tm.ChangeNodeStatus(ctx, node.Key, Failed, result)
 			return
 		}
 	}
@@ -64,6 +70,12 @@ func (tm *TaskManager) processTask(ctx context.Context, nodeID string, payload j
 	}
 	tm.wg.Add(1)
 	go func() {
+		ctxx := context.Background()
+		if headers, ok := mq.GetHeaders(ctx); ok {
+			headers.Set(consts.QueueKey, node.Key)
+			headers.Set("index", fmt.Sprintf("%s__%d", node.Key, 0))
+			ctxx = mq.SetHeaders(ctxx, headers.AsMap())
+		}
 		go tm.processNode(ctx, node, payload)
 	}()
 	tm.wg.Wait()
@@ -91,11 +103,13 @@ func (tm *TaskManager) handleNextTask(ctx context.Context, result mq.Result) mq.
 	}
 	if result.Error != nil {
 		tm.appendResult(result, true)
+		tm.ChangeNodeStatus(ctx, node.Key, Failed, result)
 		return result
 	}
 	edges := tm.getConditionalEdges(node, result)
 	if len(edges) == 0 {
 		tm.appendResult(result, true)
+		tm.ChangeNodeStatus(ctx, node.Key, Completed, result)
 		return result
 	} else {
 		tm.appendResult(result, false)
@@ -110,15 +124,23 @@ func (tm *TaskManager) handleNextTask(ctx context.Context, result mq.Result) mq.
 			err := json.Unmarshal(result.Payload, &items)
 			if err != nil {
 				tm.appendResult(mq.Result{TaskID: tm.taskID, Topic: node.Key, Error: err}, false)
+				result.Error = err
+				tm.ChangeNodeStatus(ctx, node.Key, Failed, result)
 				return result
 			}
+			tm.SetTotalItems(getTopic(ctx, edge.From.Key), len(items)*len(edge.To))
 			for _, target := range edge.To {
-				for _, item := range items {
-					ctx = mq.SetHeaders(ctx, map[string]string{consts.QueueKey: target.Key})
+				for i, item := range items {
 					tm.wg.Add(1)
-					go func(ctx context.Context, target *Node, item json.RawMessage) {
-						tm.processNode(ctx, target, item)
-					}(ctx, target, item)
+					go func(ctx context.Context, target *Node, item json.RawMessage, i int) {
+						ctxx := context.Background()
+						if headers, ok := mq.GetHeaders(ctx); ok {
+							headers.Set(consts.QueueKey, target.Key)
+							headers.Set("index", fmt.Sprintf("%s__%d", target.Key, i))
+							ctxx = mq.SetHeaders(ctxx, headers.AsMap())
+						}
+						tm.processNode(ctxx, target, item)
+					}(ctx, target, item, i)
 				}
 			}
 		}
@@ -126,11 +148,23 @@ func (tm *TaskManager) handleNextTask(ctx context.Context, result mq.Result) mq.
 	for _, edge := range edges {
 		switch edge.Type {
 		case Simple:
+			tm.SetTotalItems(getTopic(ctx, edge.From.Key), len(edge.To))
+			index, _ := mq.GetHeader(ctx, "index")
+			if index != "" && strings.Contains(index, "__") {
+				index = strings.Split(index, "__")[1]
+			} else {
+				index = "0"
+			}
 			for _, target := range edge.To {
-				ctx = mq.SetHeaders(ctx, map[string]string{consts.QueueKey: target.Key})
 				tm.wg.Add(1)
 				go func(ctx context.Context, target *Node, result mq.Result) {
-					tm.processNode(ctx, target, result.Payload)
+					ctxx := context.Background()
+					if headers, ok := mq.GetHeaders(ctx); ok {
+						headers.Set(consts.QueueKey, target.Key)
+						headers.Set("index", fmt.Sprintf("%s__%s", target.Key, index))
+						ctxx = mq.SetHeaders(ctxx, headers.AsMap())
+					}
+					tm.processNode(ctxx, target, result.Payload)
 				}(ctx, target, result)
 			}
 		}
@@ -158,10 +192,6 @@ func (tm *TaskManager) getConditionalEdges(node *Node, result mq.Result) []Edge 
 }
 
 func (tm *TaskManager) renderResult(ctx context.Context) mq.Result {
-	if rs, ok := tm.nodeResults[tm.topic]; ok {
-		tm.updateTS(&rs)
-		return rs
-	}
 	var rs mq.Result
 	if len(tm.results) == 1 {
 		rs = tm.handleResult(ctx, tm.results[0])

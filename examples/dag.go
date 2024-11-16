@@ -20,7 +20,7 @@ func main() {
 }
 
 func subDAG() *dag.DAG {
-	f := dag.NewDAG("Sub DAG", "sub-dag", mq.WithCleanTaskOnComplete(), mq.WithSyncMode(true))
+	f := dag.NewDAG("Sub DAG", "sub-dag", mq.WithSyncMode(true))
 	f.
 		AddNode("Store data", "store:data", &tasks.StoreData{Operation: dag.Operation{Type: "process"}}, true).
 		AddNode("Send SMS", "send:sms", &tasks.SendSms{Operation: dag.Operation{Type: "process"}}).
@@ -38,10 +38,10 @@ func setup(f *dag.DAG) {
 		AddNode("Iterator Processor", "loop", &tasks.Loop{Operation: dag.Operation{Type: "loop"}}).
 		AddNode("Condition", "condition", &tasks.Condition{Operation: dag.Operation{Type: "condition"}}).
 		AddDAGNode("Persistent", "persistent", subDAG()).
-		AddCondition("condition", map[dag.When]dag.Then{"pass": "email:deliver", "fail": "persistent"}).
 		AddEdge("Get input to loop", "get:input", "loop").
 		AddIterator("Loop to prepare email", "loop", "prepare:email").
-		AddEdge("Prepare Email to condition", "prepare:email", "condition")
+		AddEdge("Prepare Email to condition", "prepare:email", "condition").
+		AddCondition("condition", map[dag.When]dag.Then{"pass": "email:deliver", "fail": "persistent"})
 }
 
 func sendData(f *dag.DAG) {
