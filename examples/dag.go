@@ -4,15 +4,19 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
-
 	"github.com/oarkflow/mq"
 	"github.com/oarkflow/mq/dag"
 	"github.com/oarkflow/mq/examples/tasks"
 )
 
 func main() {
-	aSync()
+	f := dag.NewDAG("Sample DAG", "sample-dag", mq.WithSyncMode(true))
+	setup(f)
+	err := f.Validate()
+	if err != nil {
+		panic(err)
+	}
+	sendData(f)
 }
 
 func subDAG() *dag.DAG {
@@ -46,31 +50,4 @@ func sendData(f *dag.DAG) {
 	bt, _ := json.Marshal(data)
 	result := f.Process(context.Background(), bt)
 	fmt.Println(string(result.Payload))
-}
-
-func aSync() {
-	f := dag.NewDAG("Sample DAG", "sample-dag", mq.WithCleanTaskOnComplete())
-
-	f.SetNotifyResponse(func(ctx context.Context, result mq.Result) error {
-		if f.Notifier != nil {
-			f.Notifier.ToRoom("global", "final-message", result)
-		}
-		return nil
-	})
-	f.ReportNodeResult(func(result mq.Result) {
-		if f.Notifier != nil {
-			f.Notifier.ToRoom("global", "message", result)
-		}
-		log.Printf("DAG - FINAL_RESPONSE ~> TaskID: %s, Payload: %s, Topic: %s, Error: %v, Latency: %s", result.TaskID, result.Payload, result.Topic, result.Error, result.Latency)
-	})
-	setup(f)
-	err := f.Validate()
-	if err != nil {
-		panic(err)
-	}
-
-	err = f.Start(context.TODO(), ":8083")
-	if err != nil {
-		panic(err)
-	}
 }
