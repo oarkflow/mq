@@ -71,12 +71,13 @@ func (tm *TaskManager) ChangeNodeStatus(ctx context.Context, nodeID string, stat
 	if !ok || nodeStatus == nil {
 		return
 	}
+	fmt.Println(nodeID, status, string(rs.Payload))
 	nodeStatus.markAs(rs, status)
 	switch status {
 	case Completed, Failed:
-		// tm.markParentTask(ctx, topic, nodeID, status, rs)
+		tm.markParentTask(ctx, topic, nodeID, status, rs)
 	}
-	fmt.Println(topic, "Topic", status, nodeStatus.node, string(nodeStatus.result.Payload))
+	// fmt.Println(topic, "Topic", status, nodeStatus.node, string(nodeStatus.result.Payload))
 }
 
 func (tm *TaskManager) markParentTask(ctx context.Context, topic, nodeID string, status NodeStatus, rs mq.Result) {
@@ -100,11 +101,7 @@ func (tm *TaskManager) markParentTask(ctx context.Context, topic, nodeID string,
 			parentNodeStatus.itemResults.Set(nodeID, rs)
 			if parentNodeStatus.IsDone() {
 				rt := tm.prepareResult(ctx, parentNodeStatus)
-				fmt.Println("Parent result", parentKey, nodeID, string(rt.Payload), status)
 				tm.ChangeNodeStatus(ctx, parentKey, status, rt)
-			} else {
-
-				fmt.Println("Parent result Nto done", parentKey, nodeID, string(rs.Payload), status)
 			}
 		}
 	}
