@@ -3,11 +3,12 @@ package dag
 import (
 	"context"
 	"fmt"
-	"github.com/oarkflow/mq/storage"
-	"github.com/oarkflow/mq/storage/memory"
 	"log"
 	"net/http"
 	"time"
+
+	"github.com/oarkflow/mq/storage"
+	"github.com/oarkflow/mq/storage/memory"
 
 	"github.com/oarkflow/mq/sio"
 
@@ -85,6 +86,7 @@ type DAG struct {
 	paused                   bool
 	Error                    error
 	report                   string
+	index                    string
 }
 
 func (tm *DAG) SetKey(key string) {
@@ -359,6 +361,9 @@ func (tm *DAG) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 	if task.ID == "" {
 		task.ID = mq.NewID()
 	}
+	if index, ok := mq.GetHeader(ctx, "index"); ok {
+		tm.index = index
+	}
 	manager, exists := tm.taskContext.Get(task.ID)
 	if !exists {
 		manager = NewTaskManager(tm, task.ID, tm.iteratorNodes.AsMap())
@@ -387,13 +392,14 @@ func (tm *DAG) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 		}
 	}
 	result := manager.processTask(ctx, task.Topic, task.Payload)
-
+	if result.Ctx != nil && tm.index != "" {
+		result.Ctx = mq.SetHeaders(result.Ctx, map[string]string{"index": tm.index})
+	}
 	if result.Error != nil {
 		metrics.TasksErrors.WithLabelValues(task.Topic).Inc() // Increase error count
 	} else {
 		metrics.TasksProcessed.WithLabelValues("success").Inc() // Increase processed task count
 	}
-
 	return result
 }
 

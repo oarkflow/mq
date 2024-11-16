@@ -4,10 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
+
 	"github.com/oarkflow/mq"
 	"github.com/oarkflow/mq/storage"
 	"github.com/oarkflow/mq/storage/memory"
-	"strings"
 )
 
 type NodeStatus int
@@ -71,13 +72,15 @@ func (tm *TaskManager) ChangeNodeStatus(ctx context.Context, nodeID string, stat
 	if !ok || nodeStatus == nil {
 		return
 	}
-	fmt.Println(nodeID, status, string(rs.Payload))
 	nodeStatus.markAs(rs, status)
 	switch status {
 	case Completed, Failed:
-		tm.markParentTask(ctx, topic, nodeID, status, rs)
+		if topic == tm.dag.startNode {
+			tm.result = rs
+		} else {
+			tm.markParentTask(ctx, topic, nodeID, status, rs)
+		}
 	}
-	// fmt.Println(topic, "Topic", status, nodeStatus.node, string(nodeStatus.result.Payload))
 }
 
 func (tm *TaskManager) markParentTask(ctx context.Context, topic, nodeID string, status NodeStatus, rs mq.Result) {

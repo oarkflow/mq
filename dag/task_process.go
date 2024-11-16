@@ -4,10 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/oarkflow/mq"
-	"github.com/oarkflow/mq/consts"
 	"strings"
 	"time"
+
+	"github.com/oarkflow/mq"
+	"github.com/oarkflow/mq/consts"
 )
 
 func (tm *TaskManager) processNode(ctx context.Context, node *Node, payload json.RawMessage) {
@@ -24,9 +25,16 @@ func (tm *TaskManager) processNode(ctx context.Context, node *Node, payload json
 	var result mq.Result
 	if tm.dag.server.SyncMode() {
 		defer func() {
-			result.Topic = node.Key
-			tm.appendResult(result, false)
-			tm.handleNextTask(ctx, result)
+			if isDAG {
+				result.Topic = dag.consumerTopic
+				result.TaskID = tm.taskID
+				tm.appendResult(result, false)
+				tm.handleNextTask(result.Ctx, result)
+			} else {
+				result.Topic = node.Key
+				tm.appendResult(result, false)
+				tm.handleNextTask(ctx, result)
+			}
 		}()
 	}
 	select {
@@ -39,10 +47,6 @@ func (tm *TaskManager) processNode(ctx context.Context, node *Node, payload json
 		ctx = mq.SetHeaders(ctx, map[string]string{consts.QueueKey: node.Key})
 		if tm.dag.server.SyncMode() {
 			result = node.ProcessTask(ctx, mq.NewTask(tm.taskID, payload, node.Key))
-			if isDAG {
-				result.Topic = dag.consumerTopic
-				result.TaskID = tm.taskID
-			}
 			if result.Error != nil {
 				tm.appendResult(result, true)
 				tm.ChangeNodeStatus(ctx, node.Key, Failed, result)

@@ -4,10 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/oarkflow/mq/storage"
-	"github.com/oarkflow/mq/storage/memory"
 	"sync"
 	"time"
+
+	"github.com/oarkflow/mq/storage"
+	"github.com/oarkflow/mq/storage/memory"
 
 	"github.com/oarkflow/mq"
 )
@@ -23,9 +24,10 @@ type TaskManager struct {
 	results        []mq.Result
 	iteratorNodes  map[string][]Edge
 
-	wg    *WaitGroup
-	mutex sync.Mutex
-	topic string
+	wg     *WaitGroup
+	mutex  sync.Mutex
+	topic  string
+	result mq.Result
 }
 
 func NewTaskManager(d *DAG, taskID string, iteratorNodes map[string][]Edge) *TaskManager {
@@ -49,20 +51,14 @@ func (tm *TaskManager) updateTS(result *mq.Result) {
 }
 
 func (tm *TaskManager) dispatchFinalResult(ctx context.Context) mq.Result {
-	var rs mq.Result
-	if len(tm.results) == 1 {
-		rs = tm.handleResult(ctx, tm.results[0])
-	} else {
-		rs = tm.handleResult(ctx, tm.results)
-	}
-	tm.updateTS(&rs)
-	tm.dag.callbackToConsumer(ctx, rs)
+	tm.updateTS(&tm.result)
+	tm.dag.callbackToConsumer(ctx, tm.result)
 	if tm.dag.server.NotifyHandler() != nil {
-		_ = tm.dag.server.NotifyHandler()(ctx, rs)
+		_ = tm.dag.server.NotifyHandler()(ctx, tm.result)
 	}
 	tm.dag.taskCleanupCh <- tm.taskID
-	tm.topic = rs.Topic
-	return rs
+	tm.topic = tm.result.Topic
+	return tm.result
 }
 
 func (tm *TaskManager) handleResult(ctx context.Context, results any) mq.Result {
