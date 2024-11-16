@@ -7,59 +7,7 @@ import (
 	"strings"
 
 	"github.com/oarkflow/mq"
-	"github.com/oarkflow/mq/storage"
-	"github.com/oarkflow/mq/storage/memory"
 )
-
-type NodeStatus int
-
-func (c NodeStatus) IsValid() bool { return c >= Pending && c <= Failed }
-
-func (c NodeStatus) String() string {
-	switch c {
-	case Pending:
-		return "Pending"
-	case Processing:
-		return "Processing"
-	case Completed:
-		return "Completed"
-	case Failed:
-		return "Failed"
-	}
-	return ""
-}
-
-const (
-	Pending NodeStatus = iota
-	Processing
-	Completed
-	Failed
-)
-
-type taskNodeStatus struct {
-	node        string
-	itemResults storage.IMap[string, mq.Result]
-	status      NodeStatus
-	result      mq.Result
-	totalItems  int
-}
-
-func newNodeStatus(node string) *taskNodeStatus {
-	return &taskNodeStatus{
-		node:        node,
-		itemResults: memory.New[string, mq.Result](),
-		status:      Pending,
-	}
-}
-
-func (t *taskNodeStatus) IsDone() bool {
-	return t.itemResults.Size() >= t.totalItems
-}
-
-func (t *taskNodeStatus) markAs(rs mq.Result, status NodeStatus) {
-	t.result = rs
-	t.status = status
-}
 
 func (tm *TaskManager) ChangeNodeStatus(ctx context.Context, nodeID string, status NodeStatus, rs mq.Result) {
 	topic := nodeID
@@ -171,11 +119,4 @@ func (tm *TaskManager) prepareResult(ctx context.Context, nodeStatus *taskNodeSt
 		return mq.HandleError(ctx, err)
 	}
 	return mq.Result{TaskID: tm.taskID, Payload: finalOutput, Status: status, Topic: topic, Ctx: ctx}
-}
-
-func getTopic(ctx context.Context, topic string) string {
-	if index, ok := mq.GetHeader(ctx, "index"); ok && index != "" {
-		topic = index
-	}
-	return topic
 }

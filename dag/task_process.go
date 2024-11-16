@@ -28,11 +28,11 @@ func (tm *TaskManager) processNode(ctx context.Context, node *Node, payload json
 			if isDAG {
 				result.Topic = dag.consumerTopic
 				result.TaskID = tm.taskID
-				tm.appendResult(result, false)
+				tm.reportNodeResult(result, false)
 				tm.handleNextTask(result.Ctx, result)
 			} else {
 				result.Topic = node.Key
-				tm.appendResult(result, false)
+				tm.reportNodeResult(result, false)
 				tm.handleNextTask(ctx, result)
 			}
 		}()
@@ -40,7 +40,7 @@ func (tm *TaskManager) processNode(ctx context.Context, node *Node, payload json
 	select {
 	case <-ctx.Done():
 		result = mq.Result{TaskID: tm.taskID, Topic: node.Key, Error: ctx.Err(), Ctx: ctx}
-		tm.appendResult(result, true)
+		tm.reportNodeResult(result, true)
 		tm.ChangeNodeStatus(ctx, node.Key, Failed, result)
 		return
 	default:
@@ -48,7 +48,7 @@ func (tm *TaskManager) processNode(ctx context.Context, node *Node, payload json
 		if tm.dag.server.SyncMode() {
 			result = node.ProcessTask(ctx, mq.NewTask(tm.taskID, payload, node.Key))
 			if result.Error != nil {
-				tm.appendResult(result, true)
+				tm.reportNodeResult(result, true)
 				tm.ChangeNodeStatus(ctx, node.Key, Failed, result)
 				return
 			}
@@ -56,7 +56,7 @@ func (tm *TaskManager) processNode(ctx context.Context, node *Node, payload json
 		}
 		err := tm.dag.server.Publish(ctx, mq.NewTask(tm.taskID, payload, node.Key), node.Key)
 		if err != nil {
-			tm.appendResult(mq.Result{Error: err}, true)
+			tm.reportNodeResult(mq.Result{Error: err}, true)
 			tm.ChangeNodeStatus(ctx, node.Key, Failed, result)
 			return
 		}
@@ -106,17 +106,17 @@ func (tm *TaskManager) handleNextTask(ctx context.Context, result mq.Result) mq.
 		return result
 	}
 	if result.Error != nil {
-		tm.appendResult(result, true)
+		tm.reportNodeResult(result, true)
 		tm.ChangeNodeStatus(ctx, node.Key, Failed, result)
 		return result
 	}
 	edges := tm.getConditionalEdges(node, result)
 	if len(edges) == 0 {
-		tm.appendResult(result, true)
+		tm.reportNodeResult(result, true)
 		tm.ChangeNodeStatus(ctx, node.Key, Completed, result)
 		return result
 	} else {
-		tm.appendResult(result, false)
+		tm.reportNodeResult(result, false)
 	}
 	if node.Type == Page {
 		return result
@@ -127,7 +127,7 @@ func (tm *TaskManager) handleNextTask(ctx context.Context, result mq.Result) mq.
 			var items []json.RawMessage
 			err := json.Unmarshal(result.Payload, &items)
 			if err != nil {
-				tm.appendResult(mq.Result{TaskID: tm.taskID, Topic: node.Key, Error: err}, false)
+				tm.reportNodeResult(mq.Result{TaskID: tm.taskID, Topic: node.Key, Error: err}, false)
 				result.Error = err
 				tm.ChangeNodeStatus(ctx, node.Key, Failed, result)
 				return result
