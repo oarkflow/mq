@@ -9,21 +9,48 @@ import (
 	"time"
 )
 
-func (tm *TaskManager) renderResult(ctx context.Context) mq.Result {
-	if rs, ok := tm.nodeResults[tm.topic]; ok {
-		tm.updateTS(&rs)
-		return rs
+func (tm *TaskManager) processNode(ctx context.Context, node *Node, payload json.RawMessage) {
+	defer mq.RecoverPanic(mq.RecoverTitle)
+	dag, isDAG := isDAGNode(node)
+	if isDAG {
+		if tm.dag.server.SyncMode() && !dag.server.SyncMode() {
+			dag.server.Options().SetSyncMode(true)
+		}
 	}
-	var rs mq.Result
-	if len(tm.results) == 1 {
-		rs = tm.handleResult(ctx, tm.results[0])
-	} else {
-		rs = tm.handleResult(ctx, tm.results)
+
+	var result mq.Result
+	if tm.dag.server.SyncMode() {
+		defer func() {
+			result.Topic = node.Key
+			tm.appendResult(result, false)
+			tm.handleNextTask(ctx, result)
+		}()
 	}
-	tm.updateTS(&rs)
-	tm.dag.callbackToConsumer(ctx, rs)
-	tm.topic = rs.Topic
-	return rs
+	select {
+	case <-ctx.Done():
+		result = mq.Result{TaskID: tm.taskID, Topic: node.Key, Error: ctx.Err(), Ctx: ctx}
+		tm.appendResult(result, true)
+		return
+	default:
+		ctx = mq.SetHeaders(ctx, map[string]string{consts.QueueKey: node.Key})
+		if tm.dag.server.SyncMode() {
+			result = node.ProcessTask(ctx, mq.NewTask(tm.taskID, payload, node.Key))
+			if isDAG {
+				result.Topic = dag.consumerTopic
+				result.TaskID = tm.taskID
+			}
+			if result.Error != nil {
+				tm.appendResult(result, true)
+				return
+			}
+			return
+		}
+		err := tm.dag.server.Publish(ctx, mq.NewTask(tm.taskID, payload, node.Key), node.Key)
+		if err != nil {
+			tm.appendResult(mq.Result{Error: err}, true)
+			return
+		}
+	}
 }
 
 func (tm *TaskManager) processTask(ctx context.Context, nodeID string, payload json.RawMessage) mq.Result {
@@ -45,25 +72,6 @@ func (tm *TaskManager) processTask(ctx context.Context, nodeID string, payload j
 		return tm.renderResult(ctx)
 	}
 	return tm.dispatchFinalResult(ctx)
-}
-
-func (tm *TaskManager) getConditionalEdges(node *Node, result mq.Result) []Edge {
-	edges := make([]Edge, len(node.Edges))
-	copy(edges, node.Edges)
-	if result.ConditionStatus != "" {
-		if conditions, ok := tm.dag.conditions[FromNode(result.Topic)]; ok {
-			if targetNodeKey, ok := conditions[When(result.ConditionStatus)]; ok {
-				if targetNode, ok := tm.dag.nodes[string(targetNodeKey)]; ok {
-					edges = append(edges, Edge{From: node, To: []*Node{targetNode}})
-				}
-			} else if targetNodeKey, ok = conditions["default"]; ok {
-				if targetNode, ok := tm.dag.nodes[string(targetNodeKey)]; ok {
-					edges = append(edges, Edge{From: node, To: []*Node{targetNode}})
-				}
-			}
-		}
-	}
-	return edges
 }
 
 func (tm *TaskManager) handleNextTask(ctx context.Context, result mq.Result) mq.Result {
@@ -130,46 +138,38 @@ func (tm *TaskManager) handleNextTask(ctx context.Context, result mq.Result) mq.
 	return result
 }
 
-func (tm *TaskManager) processNode(ctx context.Context, node *Node, payload json.RawMessage) {
-	defer mq.RecoverPanic(mq.RecoverTitle)
-	dag, isDAG := isDAGNode(node)
-	if isDAG {
-		if tm.dag.server.SyncMode() && !dag.server.SyncMode() {
-			dag.server.Options().SetSyncMode(true)
+func (tm *TaskManager) getConditionalEdges(node *Node, result mq.Result) []Edge {
+	edges := make([]Edge, len(node.Edges))
+	copy(edges, node.Edges)
+	if result.ConditionStatus != "" {
+		if conditions, ok := tm.dag.conditions[FromNode(result.Topic)]; ok {
+			if targetNodeKey, ok := conditions[When(result.ConditionStatus)]; ok {
+				if targetNode, ok := tm.dag.nodes[string(targetNodeKey)]; ok {
+					edges = append(edges, Edge{From: node, To: []*Node{targetNode}})
+				}
+			} else if targetNodeKey, ok = conditions["default"]; ok {
+				if targetNode, ok := tm.dag.nodes[string(targetNodeKey)]; ok {
+					edges = append(edges, Edge{From: node, To: []*Node{targetNode}})
+				}
+			}
 		}
 	}
+	return edges
+}
 
-	var result mq.Result
-	if tm.dag.server.SyncMode() {
-		defer func() {
-			result.Topic = node.Key
-			tm.appendResult(result, false)
-			tm.handleNextTask(ctx, result)
-		}()
+func (tm *TaskManager) renderResult(ctx context.Context) mq.Result {
+	if rs, ok := tm.nodeResults[tm.topic]; ok {
+		tm.updateTS(&rs)
+		return rs
 	}
-	select {
-	case <-ctx.Done():
-		result = mq.Result{TaskID: tm.taskID, Topic: node.Key, Error: ctx.Err(), Ctx: ctx}
-		tm.appendResult(result, true)
-		return
-	default:
-		ctx = mq.SetHeaders(ctx, map[string]string{consts.QueueKey: node.Key})
-		if tm.dag.server.SyncMode() {
-			result = node.ProcessTask(ctx, mq.NewTask(tm.taskID, payload, node.Key))
-			if isDAG {
-				result.Topic = dag.consumerTopic
-				result.TaskID = tm.taskID
-			}
-			if result.Error != nil {
-				tm.appendResult(result, true)
-				return
-			}
-			return
-		}
-		err := tm.dag.server.Publish(ctx, mq.NewTask(tm.taskID, payload, node.Key), node.Key)
-		if err != nil {
-			tm.appendResult(mq.Result{Error: err}, true)
-			return
-		}
+	var rs mq.Result
+	if len(tm.results) == 1 {
+		rs = tm.handleResult(ctx, tm.results[0])
+	} else {
+		rs = tm.handleResult(ctx, tm.results)
 	}
+	tm.updateTS(&rs)
+	tm.dag.callbackToConsumer(ctx, rs)
+	tm.topic = rs.Topic
+	return rs
 }
