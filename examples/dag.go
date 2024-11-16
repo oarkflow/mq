@@ -25,7 +25,8 @@ func subDAG() *dag.DAG {
 		AddNode("Store data", "store:data", &tasks.StoreData{Operation: dag.Operation{Type: "process"}}, true).
 		AddNode("Send SMS", "send:sms", &tasks.SendSms{Operation: dag.Operation{Type: "process"}}).
 		AddNode("Notification", "notification", &tasks.InAppNotification{Operation: dag.Operation{Type: "process"}}).
-		AddEdge("Store Data to send sms and notification", "store:data", "send:sms", "notification")
+		AddEdge("Store Data to send sms", "store:data", "send:sms").
+		AddEdge("Store Data to notification", "send:sms", "notification")
 	return f
 }
 
