@@ -1,13 +1,17 @@
 package dag
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/oarkflow/mq/sio"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"time"
+
+	"github.com/oarkflow/mq/jsonparser"
+	"github.com/oarkflow/mq/sio"
 
 	"github.com/oarkflow/mq"
 	"github.com/oarkflow/mq/consts"
@@ -36,6 +40,7 @@ func (tm *DAG) Handlers() {
 	metrics.HandleHTTP()
 	http.Handle("/", http.FileServer(http.Dir("webroot")))
 	http.Handle("/notify", tm.SetupWS())
+	http.HandleFunc("GET /render", tm.Render)
 	http.HandleFunc("POST /request", tm.Request)
 	http.HandleFunc("POST /publish", tm.Publish)
 	http.HandleFunc("POST /schedule", tm.Schedule)
@@ -124,7 +129,7 @@ func (tm *DAG) request(w http.ResponseWriter, r *http.Request, async bool) {
 		}
 		err = json.Unmarshal(payload, &request)
 		if err != nil {
-			http.Error(w, "Failed to read request body", http.StatusBadRequest)
+			http.Error(w, "Failed to unmarshal body", http.StatusBadRequest)
 			return
 		}
 	} else {
@@ -145,6 +150,7 @@ func (tm *DAG) request(w http.ResponseWriter, r *http.Request, async bool) {
 	if request.Recurring {
 		opts = append(opts, mq.WithRecurring())
 	}
+	ctx = context.WithValue(ctx, "query_params", r.URL.Query())
 	var rs mq.Result
 	if request.Schedule {
 		rs = tm.ScheduleTask(ctx, request.Payload, opts...)
@@ -153,6 +159,19 @@ func (tm *DAG) request(w http.ResponseWriter, r *http.Request, async bool) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(rs)
+}
+
+func (tm *DAG) Render(w http.ResponseWriter, r *http.Request) {
+	ctx := mq.SetHeaders(r.Context(), map[string]string{consts.AwaitResponseKey: "true", "request_type": "render"})
+	ctx = context.WithValue(ctx, "query_params", r.URL.Query())
+	rs := tm.Process(ctx, nil)
+	content, err := jsonparser.GetString(rs.Payload, "content")
+	if err != nil {
+		http.Error(w, "Failed to read request body", http.StatusBadRequest)
+		return
+	}
+	w.Header().Set("Content-Type", consts.TypeHtml)
+	w.Write([]byte(content))
 }
 
 func (tm *DAG) Request(w http.ResponseWriter, r *http.Request) {
@@ -165,4 +184,26 @@ func (tm *DAG) Publish(w http.ResponseWriter, r *http.Request) {
 
 func (tm *DAG) Schedule(w http.ResponseWriter, r *http.Request) {
 	tm.request(w, r, false)
+}
+
+func GetTaskID(ctx context.Context) string {
+	if queryParams := ctx.Value("query_params"); queryParams != nil {
+		if params, ok := queryParams.(url.Values); ok {
+			if id := params.Get("taskID"); id != "" {
+				return id
+			}
+		}
+	}
+	return ""
+}
+
+func CanNextNode(ctx context.Context) string {
+	if queryParams := ctx.Value("query_params"); queryParams != nil {
+		if params, ok := queryParams.(url.Values); ok {
+			if id := params.Get("next"); id != "" {
+				return id
+			}
+		}
+	}
+	return ""
 }

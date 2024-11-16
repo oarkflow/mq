@@ -9,6 +9,23 @@ import (
 	"time"
 )
 
+func (tm *TaskManager) renderResult(ctx context.Context) mq.Result {
+	if rs, ok := tm.nodeResults[tm.topic]; ok {
+		tm.updateTS(&rs)
+		return rs
+	}
+	var rs mq.Result
+	if len(tm.results) == 1 {
+		rs = tm.handleResult(ctx, tm.results[0])
+	} else {
+		rs = tm.handleResult(ctx, tm.results)
+	}
+	tm.updateTS(&rs)
+	tm.dag.callbackToConsumer(ctx, rs)
+	tm.topic = rs.Topic
+	return rs
+}
+
 func (tm *TaskManager) processTask(ctx context.Context, nodeID string, payload json.RawMessage) mq.Result {
 	defer mq.RecoverPanic(mq.RecoverTitle)
 	node, ok := tm.dag.nodes[nodeID]
@@ -23,6 +40,10 @@ func (tm *TaskManager) processTask(ctx context.Context, nodeID string, payload j
 		go tm.processNode(ctx, node, payload)
 	}()
 	tm.wg.Wait()
+	requestType, ok := mq.GetHeader(ctx, "request_type")
+	if ok && requestType == "render" {
+		return tm.renderResult(ctx)
+	}
 	return tm.dispatchFinalResult(ctx)
 }
 
@@ -46,15 +67,16 @@ func (tm *TaskManager) getConditionalEdges(node *Node, result mq.Result) []Edge 
 }
 
 func (tm *TaskManager) handleNextTask(ctx context.Context, result mq.Result) mq.Result {
+	tm.topic = result.Topic
+	defer func() {
+		tm.wg.Done()
+		mq.RecoverPanic(mq.RecoverTitle)
+	}()
 	if result.Ctx != nil {
 		if headers, ok := mq.GetHeaders(ctx); ok {
 			ctx = mq.SetHeaders(result.Ctx, headers.AsMap())
 		}
 	}
-	defer func() {
-		tm.wg.Done()
-		mq.RecoverPanic(mq.RecoverTitle)
-	}()
 	node, ok := tm.dag.nodes[result.Topic]
 	if !ok {
 		return result
@@ -69,6 +91,9 @@ func (tm *TaskManager) handleNextTask(ctx context.Context, result mq.Result) mq.
 		return result
 	} else {
 		tm.appendResult(result, false)
+	}
+	if node.Type == Page {
+		return result
 	}
 	for _, edge := range edges {
 		switch edge.Type {
@@ -88,6 +113,10 @@ func (tm *TaskManager) handleNextTask(ctx context.Context, result mq.Result) mq.
 					}(ctx, target, item)
 				}
 			}
+		}
+	}
+	for _, edge := range edges {
+		switch edge.Type {
 		case Simple:
 			for _, target := range edge.To {
 				ctx = mq.SetHeaders(ctx, map[string]string{consts.QueueKey: target.Key})

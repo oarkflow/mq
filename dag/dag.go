@@ -26,9 +26,19 @@ const (
 	Iterator
 )
 
+type NodeType int
+
+func (c NodeType) IsValid() bool { return c >= Process && c <= Page }
+
+const (
+	Process NodeType = iota
+	Page
+)
+
 type Node struct {
 	processor mq.Processor
 	Name      string
+	Type      NodeType
 	Key       string
 	Edges     []Edge
 	isReady   bool
@@ -60,6 +70,7 @@ type DAG struct {
 	server                   *mq.Broker
 	consumer                 *mq.Consumer
 	taskContext              map[string]*TaskManager
+	iteratorNodes            map[string]struct{}
 	conditions               map[FromNode]map[When]Then
 	pool                     *mq.Pool
 	taskCleanupCh            chan string
@@ -136,6 +147,7 @@ func NewDAG(name, key string, opts ...mq.Option) *DAG {
 		name:          name,
 		key:           key,
 		nodes:         make(map[string]*Node),
+		iteratorNodes: make(map[string]struct{}),
 		taskContext:   make(map[string]*TaskManager),
 		conditions:    make(map[FromNode]map[When]Then),
 		taskCleanupCh: make(chan string),
@@ -259,6 +271,9 @@ func (tm *DAG) AddNode(name, key string, handler mq.Processor, firstNode ...bool
 		Key:       key,
 		processor: con,
 	}
+	if handler.GetType() == "page" {
+		n.Type = Page
+	}
 	if tm.server.SyncMode() {
 		n.isReady = true
 	}
@@ -305,6 +320,9 @@ func (tm *DAG) AddCondition(fromNode FromNode, conditions map[When]Then) *DAG {
 
 func (tm *DAG) AddIterator(label, from string, targets ...string) *DAG {
 	tm.Error = tm.addEdge(Iterator, label, from, targets...)
+	tm.mu.Lock()
+	tm.iteratorNodes[from] = struct{}{}
+	tm.mu.Unlock()
 	return tm
 }
 
@@ -349,10 +367,15 @@ func (tm *DAG) GetReport() string {
 
 func (tm *DAG) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 	tm.mu.Lock()
-	taskID := mq.NewID()
-	manager := NewTaskManager(tm, taskID)
-	manager.createdAt = task.CreatedAt
-	tm.taskContext[taskID] = manager
+	if task.ID == "" {
+		task.ID = mq.NewID()
+	}
+	manager, exists := tm.taskContext[task.ID]
+	if !exists {
+		manager = NewTaskManager(tm, task.ID, tm.iteratorNodes)
+		manager.createdAt = task.CreatedAt
+		tm.taskContext[task.ID] = manager
+	}
 	tm.mu.Unlock()
 
 	if tm.consumer != nil {
@@ -362,6 +385,18 @@ func (tm *DAG) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 			return mq.Result{Error: err}
 		}
 		task.Topic = initialNode
+	}
+	if manager.topic != "" {
+		task.Topic = manager.topic
+		canNext := CanNextNode(ctx)
+		if canNext != "" {
+			if n, ok := tm.nodes[task.Topic]; ok {
+				if len(n.Edges) > 0 {
+					task.Topic = n.Edges[0].To[0].Key
+				}
+			}
+		} else {
+		}
 	}
 	result := manager.processTask(ctx, task.Topic, task.Payload)
 
@@ -375,12 +410,9 @@ func (tm *DAG) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 }
 
 func (tm *DAG) check(ctx context.Context, payload []byte) (context.Context, *mq.Task, error) {
-	tm.mu.RLock()
 	if tm.paused {
-		tm.mu.RUnlock()
 		return ctx, nil, fmt.Errorf("unable to process task, error: DAG is not accepting any task")
 	}
-	tm.mu.RUnlock()
 	if !tm.IsReady() {
 		return ctx, nil, fmt.Errorf("unable to process task, error: DAG is not ready yet")
 	}
@@ -391,7 +423,18 @@ func (tm *DAG) check(ctx context.Context, payload []byte) (context.Context, *mq.
 	if tm.server.SyncMode() {
 		ctx = mq.SetHeaders(ctx, map[string]string{consts.AwaitResponseKey: "true"})
 	}
-	return ctx, mq.NewTask(mq.NewID(), payload, initialNode), nil
+	taskID := GetTaskID(ctx)
+	tm.mu.RLock()
+	defer tm.mu.RUnlock()
+	if taskID != "" {
+		if _, exists := tm.taskContext[taskID]; !exists {
+			return ctx, nil, fmt.Errorf("provided task ID doesn't exist")
+		}
+	}
+	if taskID == "" {
+		taskID = mq.NewID()
+	}
+	return ctx, mq.NewTask(taskID, payload, initialNode), nil
 }
 
 func (tm *DAG) Process(ctx context.Context, payload []byte) mq.Result {

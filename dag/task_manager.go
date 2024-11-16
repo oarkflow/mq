@@ -11,24 +11,30 @@ import (
 )
 
 type TaskManager struct {
-	createdAt   time.Time
-	processedAt time.Time
-	status      string
-	dag         *DAG
-	nodeResults map[string]mq.Result
-	wg          *WaitGroup
-	taskID      string
-	results     []mq.Result
-	mutex       sync.Mutex
+	createdAt     time.Time
+	processedAt   time.Time
+	status        string
+	dag           *DAG
+	nodeResults   map[string]mq.Result
+	wg            *WaitGroup
+	taskID        string
+	results       []mq.Result
+	iteratorNodes map[string]struct{}
+	mutex         sync.Mutex
+	topic         string
 }
 
-func NewTaskManager(d *DAG, taskID string) *TaskManager {
+func NewTaskManager(d *DAG, taskID string, iteratorNodes map[string]struct{}) *TaskManager {
+	if iteratorNodes == nil {
+		iteratorNodes = make(map[string]struct{})
+	}
 	return &TaskManager{
-		dag:         d,
-		nodeResults: make(map[string]mq.Result),
-		results:     make([]mq.Result, 0),
-		taskID:      taskID,
-		wg:          NewWaitGroup(),
+		dag:           d,
+		nodeResults:   make(map[string]mq.Result),
+		results:       make([]mq.Result, 0),
+		taskID:        taskID,
+		iteratorNodes: iteratorNodes,
+		wg:            NewWaitGroup(),
 	}
 }
 
@@ -51,6 +57,7 @@ func (tm *TaskManager) dispatchFinalResult(ctx context.Context) mq.Result {
 		_ = tm.dag.server.NotifyHandler()(ctx, rs)
 	}
 	tm.dag.taskCleanupCh <- tm.taskID
+	tm.topic = rs.Topic
 	return rs
 }
 

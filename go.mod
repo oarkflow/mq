@@ -8,6 +8,7 @@ require (
 	github.com/oarkflow/dipper v0.0.6
 	github.com/oarkflow/errors v0.0.6
 	github.com/oarkflow/expr v0.0.11
+	github.com/oarkflow/jet v0.0.4
 	github.com/oarkflow/json v0.0.13
 	github.com/oarkflow/xid v1.2.5
 	github.com/prometheus/client_golang v1.20.5

@@ -83,7 +83,8 @@ var (
 	ContentType      = "Content-Type"
 	AwaitResponseKey = "Await-Response"
 	QueueKey         = "Topic"
-	TypeJson         = "application/json"
+	TypeJson         = "application/json; charset=utf-8"
+	TypeHtml         = "text/html; charset=utf-8"
 	HeaderKey        = "headers"
 	TriggerNode      = "triggerNode"
 )
