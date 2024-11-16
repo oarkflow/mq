@@ -197,11 +197,6 @@ func (tm *TaskManager) getConditionalEdges(node *Node, result mq.Result) []Edge 
 
 func (tm *TaskManager) renderResult(ctx context.Context) mq.Result {
 	var rs mq.Result
-	if len(tm.results) == 1 {
-		rs = tm.handleResult(ctx, tm.results[0])
-	} else {
-		rs = tm.handleResult(ctx, tm.results)
-	}
 	tm.updateTS(&rs)
 	tm.dag.callbackToConsumer(ctx, rs)
 	tm.topic = rs.Topic

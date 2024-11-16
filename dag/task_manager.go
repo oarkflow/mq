@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/oarkflow/mq/storage"
@@ -19,15 +18,11 @@ type TaskManager struct {
 	status      string
 	dag         *DAG
 	taskID      string
+	wg          *WaitGroup
+	topic       string
+	result      mq.Result
 
 	taskNodeStatus storage.IMap[string, *taskNodeStatus]
-	results        []mq.Result
-	iteratorNodes  map[string][]Edge
-
-	wg     *WaitGroup
-	mutex  sync.Mutex
-	topic  string
-	result mq.Result
 }
 
 func NewTaskManager(d *DAG, taskID string, iteratorNodes map[string][]Edge) *TaskManager {
@@ -36,10 +31,8 @@ func NewTaskManager(d *DAG, taskID string, iteratorNodes map[string][]Edge) *Tas
 	}
 	return &TaskManager{
 		dag:            d,
-		results:        make([]mq.Result, 0),
 		taskNodeStatus: memory.New[string, *taskNodeStatus](),
 		taskID:         taskID,
-		iteratorNodes:  iteratorNodes,
 		wg:             NewWaitGroup(),
 	}
 }
@@ -100,12 +93,6 @@ func (tm *TaskManager) handleResult(ctx context.Context, results any) mq.Result 
 }
 
 func (tm *TaskManager) appendResult(result mq.Result, final bool) {
-	tm.mutex.Lock()
-	tm.updateTS(&result)
-	if final {
-		tm.results = append(tm.results, result)
-	}
-	tm.mutex.Unlock()
 	if tm.dag.reportNodeResultCallback != nil {
 		tm.dag.reportNodeResultCallback(result)
 	}
