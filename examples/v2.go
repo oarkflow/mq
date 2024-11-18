@@ -10,14 +10,16 @@ import (
 	"time"
 
 	"golang.org/x/exp/maps"
+
+	"github.com/oarkflow/mq/storage"
+	"github.com/oarkflow/mq/storage/memory"
 )
 
 type DAG struct {
 	Nodes       map[string]*Node
 	Edges       map[string][]string
 	ParentNodes map[string]string
-	taskManager map[string]*TaskManager
-	mu          sync.Mutex
+	taskManager storage.IMap[string, *TaskManager]
 	finalResult func(taskID string, result Result)
 }
 
@@ -26,20 +28,16 @@ func NewDAG(finalResultCallback func(taskID string, result Result)) *DAG {
 		Nodes:       make(map[string]*Node),
 		Edges:       make(map[string][]string),
 		ParentNodes: make(map[string]string),
-		taskManager: make(map[string]*TaskManager),
+		taskManager: memory.New[string, *TaskManager](),
 		finalResult: finalResultCallback,
 	}
 }
 
 func (tm *DAG) AddNode(nodeID string, handler func(payload json.RawMessage) Result) {
-	tm.mu.Lock()
-	defer tm.mu.Unlock()
 	tm.Nodes[nodeID] = &Node{ID: nodeID, Handler: handler}
 }
 
 func (tm *DAG) AddEdge(from string, to ...string) {
-	tm.mu.Lock()
-	defer tm.mu.Unlock()
 	tm.Edges[from] = append(tm.Edges[from], to...)
 	for _, targetNode := range to {
 		tm.ParentNodes[targetNode] = from
@@ -253,9 +251,7 @@ func (tm *DAG) formHandler(w http.ResponseWriter, r *http.Request) {
 		gender := r.FormValue("gender")
 		taskID := generateTaskID()
 		manager := NewTaskManager(tm)
-		tm.mu.Lock()
-		tm.taskManager[taskID] = manager
-		tm.mu.Unlock()
+		tm.taskManager.Set(taskID, manager)
 		go manager.Run()
 		payload := fmt.Sprintf(`{"email": "%s", "age": "%s", "gender": "%s"}`, email, age, gender)
 		manager.Trigger(taskID, "NodeA", json.RawMessage(payload))
@@ -270,14 +266,12 @@ func (tm *DAG) resultHandler(w http.ResponseWriter, r *http.Request) {
 func (tm *DAG) taskStatusHandler(w http.ResponseWriter, r *http.Request) {
 	taskID := r.URL.Query().Get("taskID")
 	if taskID == "" {
-		http.Error(w, "taskID is missing", http.StatusBadRequest)
+		http.Error(w, `{"message": "taskID is missing"}`, http.StatusBadRequest)
 		return
 	}
-	tm.mu.Lock()
-	manager, ok := tm.taskManager[taskID]
-	tm.mu.Unlock()
+	manager, ok := tm.taskManager.Get(taskID)
 	if !ok {
-		http.Error(w, "Invalid taskID", http.StatusNotFound)
+		http.Error(w, `{"message": "Invalid TaskID"}`, http.StatusNotFound)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")

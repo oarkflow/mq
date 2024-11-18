@@ -99,12 +99,14 @@
         fetch(`/task-result?taskID=${taskID}`)
             .then(response => response.json())
             .then(data => {
-                const container = document.getElementById('result');
-                let htmlContent = '';
-
-                // Show final result in a table
-                htmlContent += `
-                        <h2>Final Task Result</h2>
+                if(data?.message) {
+                    document.getElementById('result').innerHTML = `
+                        <p>Error loading task result. ${data.message}</p> <br> <a href="/form">Go back</a>`;
+                } else {
+                    const container = document.getElementById('result');
+                    let htmlContent = '';
+                    htmlContent += `
+                        <h2>Final Task Result <a href="/form">Go back</a></h2>
                         <table>
                             <tr>
                                 <th>Task ID</th>
@@ -120,9 +122,7 @@
                             </tr>
                         </table>
                     `;
-
-                // Show result per node
-                htmlContent += `
+                    htmlContent += `
                         <div class="node-result">
                             <h2>Result Per Node</h2>
                             <table>
@@ -133,12 +133,10 @@
                                     <th>Node Result Data</th>
                                 </tr>
                     `;
-
-                // Loop through each node result and display in a table
-                for (const nodeID in data) {
-                    if (nodeID !== "Result") {
-                        const node = data[nodeID];
-                        htmlContent += `
+                    for (const nodeID in data) {
+                        if (nodeID !== "Result") {
+                            const node = data[nodeID];
+                            htmlContent += `
                                 <tr>
                                     <td>${node.NodeID}</td>
                                     <td class="${getStatusClass(node.Status)}">${node.Status}</td>
@@ -146,13 +144,14 @@
                                     <td><pre>${JSON.stringify(node.Result.Data, null, 2)}</pre></td>
                                 </tr>
                             `;
+                        }
                     }
+                    htmlContent += '</table></div>';
+                    container.innerHTML = htmlContent;
                 }
-
-                htmlContent += '</table></div>';
-                container.innerHTML = htmlContent;
             })
             .catch(error => {
+                console.log(error)
                 document.getElementById('result').innerHTML = '<p>Error loading task result.</p>';
             });
     } else {
