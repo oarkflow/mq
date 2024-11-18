@@ -96,7 +96,7 @@
     // Fetch the task result
     const taskID = new URLSearchParams(window.location.search).get('task_id'); // Get taskID from URL
     if (taskID) {
-        fetch(`/task-result?taskID=${taskID}`)
+        fetch(`/task/status?taskID=${taskID}`)
             .then(response => response.json())
             .then(data => {
                 if(data?.message) {
