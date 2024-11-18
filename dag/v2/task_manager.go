@@ -6,7 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"golang.org/x/exp/maps"
+	"github.com/oarkflow/mq/storage"
+	"github.com/oarkflow/mq/storage/memory"
 )
 
 type TaskState struct {
@@ -14,7 +15,7 @@ type TaskState struct {
 	Status        TaskStatus
 	Timestamp     time.Time
 	Result        Result
-	targetResults map[string]Result
+	targetResults storage.IMap[string, Result]
 	my            sync.Mutex
 }
 
@@ -61,7 +62,7 @@ func newTaskState(nodeID string) *TaskState {
 		NodeID:        nodeID,
 		Status:        StatusPending,
 		Timestamp:     time.Now(),
-		targetResults: make(map[string]Result),
+		targetResults: memory.New[string, Result](),
 	}
 }
 
@@ -134,8 +135,8 @@ func (tm *TaskManager) onNodeCompleted(nodeResult nodeResult) {
 					state = newTaskState(parentNode.ID)
 					tm.taskStates[parentNode.ID] = state
 				}
-				state.targetResults[nodeResult.nodeID] = nodeResult.result
-				allTargetNodesDone := len(parentNode.Edges) == len(state.targetResults)
+				state.targetResults.Set(nodeResult.nodeID, nodeResult.result)
+				allTargetNodesDone := len(parentNode.Edges) == state.targetResults.Size()
 				tm.mu.Unlock()
 
 				if tm.areAllTargetNodesCompleted(parentNode.ID) && allTargetNodesDone {
@@ -166,22 +167,23 @@ func (tm *TaskManager) aggregateResults(parentNode string, taskID string) {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 	state := tm.taskStates[parentNode]
-	if len(state.targetResults) > 1 {
-		aggregatedData := make([]json.RawMessage, len(state.targetResults))
+	if state.targetResults.Size() > 1 {
+		aggregatedData := make([]json.RawMessage, state.targetResults.Size())
 		i := 0
-		for _, result := range state.targetResults {
+		state.targetResults.ForEach(func(_ string, result Result) bool {
 			aggregatedData[i] = result.Data
 			i++
-		}
+			return true
+		})
 		aggregatedPayload, _ := json.Marshal(aggregatedData)
 		state.Result = Result{Data: aggregatedPayload, Status: StatusCompleted}
-	} else if len(state.targetResults) == 1 {
-		state.Result = maps.Values(state.targetResults)[0]
+	} else if state.targetResults.Size() == 1 {
+		state.Result = state.targetResults.Values()[0]
 	}
 	tm.processFinalResult(taskID, state)
 }
 
 func (tm *TaskManager) processFinalResult(taskID string, state *TaskState) {
-	clear(state.targetResults)
+	state.targetResults.Clear()
 	tm.dag.finalResult(taskID, state.Result)
 }
