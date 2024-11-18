@@ -1,6 +1,7 @@
 package v2
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -21,6 +22,7 @@ const (
 )
 
 type Result struct {
+	Ctx    context.Context
 	Data   json.RawMessage
 	Error  error
 	Status TaskStatus
@@ -28,7 +30,7 @@ type Result struct {
 
 type Node struct {
 	ID      string
-	Handler func(payload json.RawMessage) Result
+	Handler func(ctx context.Context, payload json.RawMessage) Result
 	Edges   []Edge
 }
 
@@ -63,7 +65,7 @@ func NewDAG(finalResultCallback func(taskID string, result Result)) *DAG {
 	}
 }
 
-func (tm *DAG) AddNode(nodeID string, handler func(payload json.RawMessage) Result) *DAG {
+func (tm *DAG) AddNode(nodeID string, handler func(ctx context.Context, payload json.RawMessage) Result) *DAG {
 	if tm.Error != nil {
 		return tm
 	}
@@ -126,7 +128,7 @@ func (tm *DAG) formHandler(w http.ResponseWriter, r *http.Request) {
 		manager := NewTaskManager(tm)
 		tm.taskManager.Set(taskID, manager)
 		payload := fmt.Sprintf(`{"email": "%s", "age": "%s", "gender": "%s"}`, email, age, gender)
-		manager.Trigger(taskID, "NodeA", json.RawMessage(payload))
+		manager.ProcessTask(r.Context(), taskID, "NodeA", json.RawMessage(payload))
 		http.Redirect(w, r, "/result?taskID="+taskID, http.StatusFound)
 	}
 }

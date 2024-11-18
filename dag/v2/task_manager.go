@@ -1,6 +1,7 @@
 package v2
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"sync"
@@ -13,12 +14,13 @@ import (
 type TaskState struct {
 	NodeID        string
 	Status        TaskStatus
-	Timestamp     time.Time
+	UpdatedAt     time.Time
 	Result        Result
 	targetResults storage.IMap[string, Result]
 }
 
 type nodeResult struct {
+	ctx    context.Context
 	taskID string
 	nodeID string
 	result Result
@@ -27,12 +29,13 @@ type nodeResult struct {
 type TaskManager struct {
 	taskStates  map[string]*TaskState
 	dag         *DAG
-	mu          sync.Mutex
+	mu          sync.RWMutex
 	taskQueue   chan taskExecution
 	resultQueue chan nodeResult
 }
 
 type taskExecution struct {
+	ctx     context.Context
 	taskID  string
 	nodeID  string
 	payload json.RawMessage
@@ -50,18 +53,18 @@ func NewTaskManager(dag *DAG) *TaskManager {
 	return tm
 }
 
-func (tm *TaskManager) Trigger(taskID, startNode string, payload json.RawMessage) {
+func (tm *TaskManager) ProcessTask(ctx context.Context, taskID, startNode string, payload json.RawMessage) {
 	tm.mu.Lock()
 	tm.taskStates[startNode] = newTaskState(startNode)
 	tm.mu.Unlock()
-	tm.taskQueue <- taskExecution{taskID: taskID, nodeID: startNode, payload: payload}
+	tm.taskQueue <- taskExecution{taskID: taskID, nodeID: startNode, payload: payload, ctx: ctx}
 }
 
 func newTaskState(nodeID string) *TaskState {
 	return &TaskState{
 		NodeID:        nodeID,
 		Status:        StatusPending,
-		Timestamp:     time.Now(),
+		UpdatedAt:     time.Now(),
 		targetResults: memory.New[string, Result](),
 	}
 }
@@ -81,26 +84,24 @@ func (tm *TaskManager) processNode(exec taskExecution) {
 		return
 	}
 	tm.mu.Lock()
+	defer tm.mu.Unlock()
 	state := tm.taskStates[exec.nodeID]
 	if state == nil {
 		state = newTaskState(exec.nodeID)
 		tm.taskStates[exec.nodeID] = state
 	}
 	state.Status = StatusProcessing
-	state.Timestamp = time.Now()
-	tm.mu.Unlock()
-	result := node.Handler(exec.payload)
-	tm.mu.Lock()
-	state.Timestamp = time.Now()
+	state.UpdatedAt = time.Now()
+	result := node.Handler(context.Background(), exec.payload)
+	state.UpdatedAt = time.Now()
 	state.Result = result
 	state.Status = result.Status
-	tm.mu.Unlock()
 	if result.Status == StatusFailed {
 		fmt.Printf("Task %s failed at node %s: %v\n", exec.taskID, exec.nodeID, result.Error)
 		tm.processFinalResult(exec.taskID, state)
 		return
 	}
-	tm.resultQueue <- nodeResult{taskID: exec.taskID, nodeID: exec.nodeID, result: result}
+	tm.resultQueue <- nodeResult{taskID: exec.taskID, nodeID: exec.nodeID, result: result, ctx: exec.ctx}
 }
 
 func (tm *TaskManager) WaitForResult() {
@@ -123,7 +124,7 @@ func (tm *TaskManager) onNodeCompleted(nodeResult nodeResult) {
 				tm.taskStates[edge.To.ID] = newTaskState(edge.To.ID)
 			}
 			tm.mu.Unlock()
-			tm.taskQueue <- taskExecution{taskID: nodeResult.taskID, nodeID: edge.To.ID, payload: nodeResult.result.Data}
+			tm.taskQueue <- taskExecution{taskID: nodeResult.taskID, nodeID: edge.To.ID, payload: nodeResult.result.Data, ctx: nodeResult.ctx}
 		}
 	} else {
 		parentNodes, err := tm.dag.GetPreviousNodes(nodeResult.nodeID)
