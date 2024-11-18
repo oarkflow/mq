@@ -119,12 +119,7 @@ func (tm *TaskManager) onNodeCompleted(nodeResult nodeResult) {
 		for _, edge := range node.Edges {
 			tm.mu.Lock()
 			if _, exists := tm.taskStates[edge.To.ID]; !exists {
-				tm.taskStates[edge.To.ID] = &TaskState{
-					NodeID:        edge.To.ID,
-					Status:        StatusPending,
-					Timestamp:     time.Now(),
-					targetResults: make(map[string]Result),
-				}
+				tm.taskStates[edge.To.ID] = newTaskState(edge.To.ID)
 			}
 			tm.mu.Unlock()
 			tm.taskQueue <- taskExecution{taskID: nodeResult.taskID, nodeID: edge.To.ID, payload: nodeResult.result.Data}
@@ -136,7 +131,7 @@ func (tm *TaskManager) onNodeCompleted(nodeResult nodeResult) {
 				tm.mu.Lock()
 				state := tm.taskStates[parentNode.ID]
 				if state == nil {
-					state = &TaskState{NodeID: parentNode.ID, Status: StatusPending, Timestamp: time.Now(), targetResults: make(map[string]Result)}
+					state = newTaskState(parentNode.ID)
 					tm.taskStates[parentNode.ID] = state
 				}
 				state.targetResults[nodeResult.nodeID] = nodeResult.result
