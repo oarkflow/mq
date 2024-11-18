@@ -11,20 +11,37 @@ import (
 )
 
 func Form(ctx context.Context, payload json.RawMessage) v2.Result {
-	var data map[string]any
-	if err := json.Unmarshal(payload, &data); err != nil {
-		return v2.Result{Error: err, Status: v2.StatusFailed}
-	}
-	if templateFile, ok := data["html_content"].(string); ok {
-		parser := jet.NewWithMemory(jet.WithDelims("{{", "}}"))
-		rs, err := parser.ParseTemplate(templateFile, data)
-		if err != nil {
-			return v2.Result{Error: err, Status: v2.StatusFailed}
-		}
-		ctx = context.WithValue(ctx, "Content-Type", "text/html; charset/utf-8")
-		return v2.Result{Data: []byte(rs), Status: v2.StatusCompleted, Ctx: ctx}
-	}
-	return v2.Result{Data: payload, Status: v2.StatusCompleted}
+	template := []byte(`
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>User Data Form</title>
+</head>
+<body>
+<h1>Enter Your Information</h1>
+<form action="/form" method="POST">
+    <label for="email">Email:</label><br>
+    <input type="email" id="email" name="email" value="s.baniya.np@gmail.com" required><br><br>
+
+    <label for="age">Age:</label><br>
+    <input type="number" id="age" name="age" value="18" required><br><br>
+
+    <label for="gender">Gender:</label><br>
+    <select id="gender" name="gender" required>
+        <option value="male">Male</option>
+        <option value="female">Female</option>
+        <option value="other">Other</option>
+    </select><br><br>
+
+    <input type="submit" value="Submit">
+</form>
+</body>
+</html>
+
+`)
+	return v2.Result{Data: template, Status: v2.StatusCompleted}
 }
 
 func NodeA(ctx context.Context, payload json.RawMessage) v2.Result {
@@ -80,12 +97,12 @@ func notify(taskID string, result v2.Result) {
 
 func main() {
 	dag := v2.NewDAG(notify)
-	// dag.AddNode("Form", Form)
-	dag.AddNode("NodeA", NodeA)
-	dag.AddNode("NodeB", NodeB)
-	dag.AddNode("NodeC", NodeC)
-	dag.AddNode("Result", Result)
-	// dag.AddEdge("Form", "NodeA")
+	dag.AddNode(v2.Page, "Form", Form)
+	dag.AddNode(v2.Process, "NodeA", NodeA)
+	dag.AddNode(v2.Process, "NodeB", NodeB)
+	dag.AddNode(v2.Process, "NodeC", NodeC)
+	dag.AddNode(v2.Page, "Result", Result)
+	dag.AddEdge("Form", "NodeA")
 	dag.AddEdge("NodeA", "NodeB")
 	dag.AddEdge("NodeB", "NodeC")
 	dag.AddEdge("NodeC", "Result")
