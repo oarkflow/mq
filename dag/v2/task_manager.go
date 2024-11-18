@@ -51,14 +51,18 @@ func NewTaskManager(dag *DAG) *TaskManager {
 
 func (tm *TaskManager) Trigger(taskID, startNode string, payload json.RawMessage) {
 	tm.mu.Lock()
-	tm.taskStates[startNode] = &TaskState{
-		NodeID:        startNode,
+	tm.taskStates[startNode] = newTaskState(startNode)
+	tm.mu.Unlock()
+	tm.taskQueue <- taskExecution{taskID: taskID, nodeID: startNode, payload: payload}
+}
+
+func newTaskState(nodeID string) *TaskState {
+	return &TaskState{
+		NodeID:        nodeID,
 		Status:        StatusPending,
 		Timestamp:     time.Now(),
 		targetResults: make(map[string]Result),
 	}
-	tm.mu.Unlock()
-	tm.taskQueue <- taskExecution{taskID: taskID, nodeID: startNode, payload: payload}
 }
 
 func (tm *TaskManager) Run() {
@@ -78,7 +82,7 @@ func (tm *TaskManager) processNode(exec taskExecution) {
 	tm.mu.Lock()
 	state := tm.taskStates[exec.nodeID]
 	if state == nil {
-		state = &TaskState{NodeID: exec.nodeID, Status: StatusPending, Timestamp: time.Now(), targetResults: make(map[string]Result)}
+		state = newTaskState(exec.nodeID)
 		tm.taskStates[exec.nodeID] = state
 	}
 	state.Status = StatusProcessing
