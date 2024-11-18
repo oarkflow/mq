@@ -242,26 +242,29 @@ func (tm *DAG) submit(ctx context.Context, payload []byte) Result {
 	return <-resultCh
 }
 
-func (tm *DAG) formHandler(w http.ResponseWriter, r *http.Request) {
+func (tm *DAG) taskRender(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "GET" {
-		http.ServeFile(w, r, "webroot/form.html")
+		tm.render(w, r)
 	} else if r.Method == "POST" {
-		r.ParseForm()
-		email := r.FormValue("email")
-		age := r.FormValue("age")
-		gender := r.FormValue("gender")
-		taskID := mq.NewID()
-		resultCh := make(chan Result, 1)
-		manager := NewTaskManager(tm, resultCh)
-		tm.taskManager.Set(taskID, manager)
-		payload := fmt.Sprintf(`{"email": "%s", "age": "%s", "gender": "%s"}`, email, age, gender)
-		manager.ProcessTask(r.Context(), taskID, "NodeA", json.RawMessage(payload))
-		http.Redirect(w, r, "/result?taskID="+taskID, http.StatusFound)
+		ctx, data, err := parse(r)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		result := tm.submit(ctx, data)
+		if result.Ctx == nil {
+			fmt.Println("Ctrl not set")
+			return
+		}
+		if contentType, ok := result.Ctx.Value(consts.ContentType).(string); ok && contentType == consts.TypeHtml {
+			w.Header().Set(consts.ContentType, consts.TypeHtml)
+			data, err := jsonparser.GetString(result.Data, "content")
+			if err != nil {
+				return
+			}
+			w.Write([]byte(data))
+		}
 	}
-}
-
-func (tm *DAG) resultHandler(w http.ResponseWriter, r *http.Request) {
-	http.ServeFile(w, r, "webroot/result.html")
 }
 
 func (tm *DAG) taskStatusHandler(w http.ResponseWriter, r *http.Request) {
@@ -280,30 +283,7 @@ func (tm *DAG) taskStatusHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (tm *DAG) Start(addr string) {
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "GET" {
-			tm.render(w, r)
-		} else if r.Method == "POST" {
-			ctx, data, err := parse(r)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusNotFound)
-				return
-			}
-			result := tm.submit(ctx, data)
-			if result.Ctx == nil {
-				fmt.Println("Ctrl not set")
-				return
-			}
-			if contentType, ok := result.Ctx.Value(consts.ContentType).(string); ok && contentType == consts.TypeHtml {
-				w.Header().Set(consts.ContentType, consts.TypeHtml)
-				data, err := jsonparser.GetString(result.Data, "content")
-				if err != nil {
-					return
-				}
-				w.Write([]byte(data))
-			}
-		}
-	})
+	http.HandleFunc("/", tm.taskRender)
 	http.HandleFunc("/task-result", tm.taskStatusHandler)
 	http.ListenAndServe(addr, nil)
 }
