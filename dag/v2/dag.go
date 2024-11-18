@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"sync"
 
 	"github.com/oarkflow/mq"
+	"github.com/oarkflow/mq/consts"
 	"github.com/oarkflow/mq/storage"
 	"github.com/oarkflow/mq/storage/memory"
 )
@@ -74,10 +76,6 @@ func NewDAG(finalResultCallback func(taskID string, result Result)) *DAG {
 		taskManager: memory.New[string, *TaskManager](),
 		finalResult: finalResultCallback,
 	}
-}
-
-func (tm *DAG) Validate(ctx context.Context) (string, error) {
-	return tm.parseInitialNode(ctx)
 }
 
 func (tm *DAG) parseInitialNode(ctx context.Context) (string, error) {
@@ -170,6 +168,26 @@ func (tm *DAG) GetPreviousNodes(key string) ([]*Node, error) {
 	return predecessors, nil
 }
 
+func (tm *DAG) ProcessTask(ctx context.Context, payload []byte) Result {
+	var taskID string
+	userCtx := UserContext(ctx)
+	if val := userCtx.Get("task_id"); val != "" {
+		taskID = val
+	} else {
+		taskID = mq.NewID()
+	}
+	ctx = context.WithValue(ctx, "task_id", taskID)
+	resultCh := make(chan Result, 1)
+	manager := NewTaskManager(tm, resultCh)
+	tm.taskManager.Set(taskID, manager)
+	firstNode, err := tm.parseInitialNode(ctx)
+	if err != nil {
+		return Result{Error: err}
+	}
+	manager.ProcessTask(ctx, taskID, firstNode, payload)
+	return <-resultCh
+}
+
 func (tm *DAG) formHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "GET" {
 		http.ServeFile(w, r, "webroot/form.html")
@@ -179,7 +197,8 @@ func (tm *DAG) formHandler(w http.ResponseWriter, r *http.Request) {
 		age := r.FormValue("age")
 		gender := r.FormValue("gender")
 		taskID := mq.NewID()
-		manager := NewTaskManager(tm)
+		resultCh := make(chan Result, 1)
+		manager := NewTaskManager(tm, resultCh)
 		tm.taskManager.Set(taskID, manager)
 		payload := fmt.Sprintf(`{"email": "%s", "age": "%s", "gender": "%s"}`, email, age, gender)
 		manager.ProcessTask(r.Context(), taskID, "NodeA", json.RawMessage(payload))
@@ -208,19 +227,92 @@ func (tm *DAG) taskStatusHandler(w http.ResponseWriter, r *http.Request) {
 
 func (tm *DAG) Start(addr string) {
 	http.HandleFunc("/", func(w http.ResponseWriter, request *http.Request) {
-		firstNode, err := tm.Validate(request.Context())
+		ctx, data, err := parse(request)
 		if err != nil {
-			http.Error(w, `{"message": "taskID is missing"}`, http.StatusBadRequest)
+			http.Error(w, err.Error(), http.StatusNotFound)
 			return
 		}
-		node, _ := tm.nodes.Get(firstNode)
-		if node.Type == Page {
-
+		result := tm.ProcessTask(ctx, data)
+		if contentType, ok := result.Ctx.Value(consts.ContentType).(string); ok && contentType == consts.TypeHtml {
+			w.Header().Set(consts.ContentType, consts.TypeHtml)
+			w.Write(result.Data)
 		}
-		w.Write([]byte(firstNode))
 	})
 	http.HandleFunc("/form", tm.formHandler)
 	http.HandleFunc("/result", tm.resultHandler)
 	http.HandleFunc("/task-result", tm.taskStatusHandler)
 	http.ListenAndServe(addr, nil)
+}
+
+type Context struct {
+	Query map[string]any
+}
+
+func (ctx *Context) Get(key string) string {
+	if val, ok := ctx.Query[key]; ok {
+		switch val := val.(type) {
+		case []string:
+			return val[0]
+		case string:
+			return val
+		}
+	}
+	return ""
+}
+
+func parse(r *http.Request) (context.Context, []byte, error) {
+	ctx := r.Context()
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		return ctx, nil, err
+	}
+	defer r.Body.Close()
+	userContext := &Context{Query: make(map[string]any)}
+	result := make(map[string]any)
+	queryParams := r.URL.Query()
+	for key, values := range queryParams {
+		if len(values) > 1 {
+			userContext.Query[key] = values // Handle multiple values
+		} else {
+			userContext.Query[key] = values[0] // Single value
+		}
+	}
+	ctx = context.WithValue(ctx, "UserContext", userContext)
+	contentType := r.Header.Get("Content-Type")
+	switch {
+	case contentType == "application/json":
+		if body == nil {
+			return ctx, nil, nil
+		}
+		if err := json.Unmarshal(body, &result); err != nil {
+			return ctx, nil, err
+		}
+
+	case contentType == "application/x-www-form-urlencoded":
+		if err := r.ParseForm(); err != nil {
+			return ctx, nil, err
+		}
+		result = make(map[string]any)
+		for key, values := range r.Form {
+			if len(values) > 1 {
+				result[key] = values
+			} else {
+				result[key] = values[0]
+			}
+		}
+	default:
+		return ctx, nil, nil
+	}
+	bt, err := json.Marshal(result)
+	if err != nil {
+		return ctx, nil, err
+	}
+	return ctx, bt, err
+}
+
+func UserContext(ctx context.Context) *Context {
+	if userContext, ok := ctx.Value("UserContext").(*Context); ok {
+		return userContext
+	}
+	return &Context{Query: make(map[string]any)}
 }

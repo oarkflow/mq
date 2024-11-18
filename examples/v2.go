@@ -7,11 +7,12 @@ import (
 
 	"github.com/oarkflow/jet"
 
+	"github.com/oarkflow/mq/consts"
 	v2 "github.com/oarkflow/mq/dag/v2"
 )
 
 func Form(ctx context.Context, payload json.RawMessage) v2.Result {
-	template := []byte(`
+	template := `
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -21,7 +22,7 @@ func Form(ctx context.Context, payload json.RawMessage) v2.Result {
 </head>
 <body>
 <h1>Enter Your Information</h1>
-<form action="/form" method="POST">
+<form action="/?task_id={{task_id}}&next=true" method="POST">
     <label for="email">Email:</label><br>
     <input type="email" id="email" name="email" value="s.baniya.np@gmail.com" required><br><br>
 
@@ -40,55 +41,63 @@ func Form(ctx context.Context, payload json.RawMessage) v2.Result {
 </body>
 </html>
 
-`)
-	return v2.Result{Data: template, Status: v2.StatusCompleted}
+`
+	parser := jet.NewWithMemory(jet.WithDelims("{{", "}}"))
+	rs, err := parser.ParseTemplate(template, map[string]any{
+		"task_id": ctx.Value("task_id"),
+	})
+	if err != nil {
+		return v2.Result{Error: err, Ctx: ctx}
+	}
+	ctx = context.WithValue(ctx, consts.ContentType, consts.TypeHtml)
+	return v2.Result{Data: []byte(rs), Ctx: ctx}
 }
 
 func NodeA(ctx context.Context, payload json.RawMessage) v2.Result {
 	var data map[string]any
 	if err := json.Unmarshal(payload, &data); err != nil {
-		return v2.Result{Error: err, Status: v2.StatusFailed}
+		return v2.Result{Error: err}
 	}
 	data["allowed_voting"] = data["age"] == "18"
 	updatedPayload, _ := json.Marshal(data)
-	return v2.Result{Data: updatedPayload, Status: v2.StatusCompleted}
+	return v2.Result{Data: updatedPayload, Ctx: ctx}
 }
 
 func NodeB(ctx context.Context, payload json.RawMessage) v2.Result {
 	var data map[string]any
 	if err := json.Unmarshal(payload, &data); err != nil {
-		return v2.Result{Error: err, Status: v2.StatusFailed}
+		return v2.Result{Error: err, Ctx: ctx}
 	}
 	data["female_voter"] = data["gender"] == "female"
 	updatedPayload, _ := json.Marshal(data)
-	return v2.Result{Data: updatedPayload, Status: v2.StatusCompleted}
+	return v2.Result{Data: updatedPayload, Ctx: ctx}
 }
 
 func NodeC(ctx context.Context, payload json.RawMessage) v2.Result {
 	var data map[string]any
 	if err := json.Unmarshal(payload, &data); err != nil {
-		return v2.Result{Error: err, Status: v2.StatusFailed}
+		return v2.Result{Error: err, Ctx: ctx}
 	}
 	data["voted"] = true
 	updatedPayload, _ := json.Marshal(data)
-	return v2.Result{Data: updatedPayload, Status: v2.StatusCompleted}
+	return v2.Result{Data: updatedPayload, Ctx: ctx}
 }
 
 func Result(ctx context.Context, payload json.RawMessage) v2.Result {
 	var data map[string]any
 	if err := json.Unmarshal(payload, &data); err != nil {
-		return v2.Result{Error: err, Status: v2.StatusFailed}
+		return v2.Result{Error: err, Ctx: ctx}
 	}
 	if templateFile, ok := data["html_content"].(string); ok {
 		parser := jet.NewWithMemory(jet.WithDelims("{{", "}}"))
 		rs, err := parser.ParseTemplate(templateFile, data)
 		if err != nil {
-			return v2.Result{Error: err, Status: v2.StatusFailed}
+			return v2.Result{Error: err, Ctx: ctx}
 		}
-		ctx = context.WithValue(ctx, "Content-Type", "text/html; charset/utf-8")
-		return v2.Result{Data: []byte(rs), Status: v2.StatusCompleted, Ctx: ctx}
+		ctx = context.WithValue(ctx, consts.ContentType, consts.TypeHtml)
+		return v2.Result{Data: []byte(rs), Ctx: ctx}
 	}
-	return v2.Result{Data: payload, Status: v2.StatusCompleted}
+	return v2.Result{Data: payload, Ctx: ctx}
 }
 
 func notify(taskID string, result v2.Result) {

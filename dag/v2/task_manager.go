@@ -28,24 +28,36 @@ type nodeResult struct {
 
 type TaskManager struct {
 	taskStates  map[string]*TaskState
+	currentNode string
 	dag         *DAG
 	mu          sync.RWMutex
-	taskQueue   chan taskExecution
+	taskQueue   chan *Task
 	resultQueue chan nodeResult
+	resultCh    chan Result
 }
 
-type taskExecution struct {
+type Task struct {
 	ctx     context.Context
 	taskID  string
 	nodeID  string
 	payload json.RawMessage
 }
 
-func NewTaskManager(dag *DAG) *TaskManager {
+func NewTask(ctx context.Context, taskID, nodeID string, payload json.RawMessage) *Task {
+	return &Task{
+		ctx:     ctx,
+		taskID:  taskID,
+		nodeID:  nodeID,
+		payload: payload,
+	}
+}
+
+func NewTaskManager(dag *DAG, resultCh chan Result) *TaskManager {
 	tm := &TaskManager{
 		taskStates:  make(map[string]*TaskState),
-		taskQueue:   make(chan taskExecution, 100),
+		taskQueue:   make(chan *Task, 100),
 		resultQueue: make(chan nodeResult, 100),
+		resultCh:    resultCh,
 		dag:         dag,
 	}
 	go tm.Run()
@@ -57,7 +69,7 @@ func (tm *TaskManager) ProcessTask(ctx context.Context, taskID, startNode string
 	tm.mu.Lock()
 	tm.taskStates[startNode] = newTaskState(startNode)
 	tm.mu.Unlock()
-	tm.taskQueue <- taskExecution{taskID: taskID, nodeID: startNode, payload: payload, ctx: ctx}
+	tm.taskQueue <- NewTask(ctx, taskID, startNode, payload)
 }
 
 func newTaskState(nodeID string) *TaskState {
@@ -77,7 +89,7 @@ func (tm *TaskManager) Run() {
 	}()
 }
 
-func (tm *TaskManager) processNode(exec taskExecution) {
+func (tm *TaskManager) processNode(exec *Task) {
 	node, exists := tm.dag.nodes.Get(exec.nodeID)
 	if !exists {
 		fmt.Printf("Node %s does not exist\n", exec.nodeID)
@@ -92,13 +104,20 @@ func (tm *TaskManager) processNode(exec taskExecution) {
 	}
 	state.Status = StatusProcessing
 	state.UpdatedAt = time.Now()
-	result := node.Handler(context.Background(), exec.payload)
+	tm.currentNode = exec.nodeID
+	result := node.Handler(exec.ctx, exec.payload)
 	state.UpdatedAt = time.Now()
 	state.Result = result
-	state.Status = result.Status
-	if result.Status == StatusFailed {
-		fmt.Printf("Task %s failed at node %s: %v\n", exec.taskID, exec.nodeID, result.Error)
-		tm.processFinalResult(exec.taskID, state)
+	if result.Ctx == nil {
+		result.Ctx = exec.ctx
+	}
+	if result.Error != nil {
+		state.Status = StatusFailed
+	} else {
+		state.Status = StatusCompleted
+	}
+	if node.Type == Page {
+		tm.resultCh <- result
 		return
 	}
 	tm.resultQueue <- nodeResult{taskID: exec.taskID, nodeID: exec.nodeID, result: result, ctx: exec.ctx}
@@ -117,16 +136,7 @@ func (tm *TaskManager) onNodeCompleted(nodeResult nodeResult) {
 	if !ok {
 		return
 	}
-	if len(node.Edges) > 0 {
-		for _, edge := range node.Edges {
-			tm.mu.Lock()
-			if _, exists := tm.taskStates[edge.To.ID]; !exists {
-				tm.taskStates[edge.To.ID] = newTaskState(edge.To.ID)
-			}
-			tm.mu.Unlock()
-			tm.taskQueue <- taskExecution{taskID: nodeResult.taskID, nodeID: edge.To.ID, payload: nodeResult.result.Data, ctx: nodeResult.ctx}
-		}
-	} else {
+	if nodeResult.result.Error != nil || len(node.Edges) == 0 {
 		parentNodes, err := tm.dag.GetPreviousNodes(nodeResult.nodeID)
 		if err == nil {
 			for _, parentNode := range parentNodes {
@@ -145,6 +155,15 @@ func (tm *TaskManager) onNodeCompleted(nodeResult nodeResult) {
 				}
 			}
 		}
+		return
+	}
+	for _, edge := range node.Edges {
+		tm.mu.Lock()
+		if _, exists := tm.taskStates[edge.To.ID]; !exists {
+			tm.taskStates[edge.To.ID] = newTaskState(edge.To.ID)
+		}
+		tm.mu.Unlock()
+		tm.taskQueue <- NewTask(nodeResult.ctx, nodeResult.taskID, edge.To.ID, nodeResult.result.Data)
 	}
 }
 
