@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"golang.org/x/exp/maps"
 )
 
 type TaskStatus string
@@ -35,7 +37,8 @@ type TaskState struct {
 	Status        TaskStatus
 	Timestamp     time.Time
 	Result        Result
-	targetResults []Result
+	targetResults map[string]Result
+	my            sync.Mutex
 }
 
 type nodeResult struct {
@@ -96,9 +99,10 @@ func (tm *TaskManager) Trigger(taskID, startNode string, payload json.RawMessage
 		tm.TaskStates[taskID] = make(map[string]*TaskState)
 	}
 	tm.TaskStates[taskID][startNode] = &TaskState{
-		NodeID:    startNode,
-		Status:    StatusPending,
-		Timestamp: time.Now(),
+		NodeID:        startNode,
+		Status:        StatusPending,
+		Timestamp:     time.Now(),
+		targetResults: make(map[string]Result),
 	}
 	tm.mu.Unlock()
 	tm.taskQueue <- taskExecution{taskID: taskID, nodeID: startNode, payload: payload}
@@ -121,7 +125,7 @@ func (tm *TaskManager) processNode(exec taskExecution) {
 	tm.mu.Lock()
 	state := tm.TaskStates[exec.taskID][exec.nodeID]
 	if state == nil {
-		state = &TaskState{NodeID: exec.nodeID, Status: StatusPending, Timestamp: time.Now()}
+		state = &TaskState{NodeID: exec.nodeID, Status: StatusPending, Timestamp: time.Now(), targetResults: make(map[string]Result)}
 		tm.TaskStates[exec.taskID][exec.nodeID] = state
 	}
 	state.Status = StatusProcessing
@@ -156,9 +160,10 @@ func (tm *TaskManager) onNodeCompleted(nodeResult nodeResult) {
 			tm.mu.Lock()
 			if _, exists := tm.TaskStates[nodeResult.taskID][nextNodeID]; !exists {
 				tm.TaskStates[nodeResult.taskID][nextNodeID] = &TaskState{
-					NodeID:    nextNodeID,
-					Status:    StatusPending,
-					Timestamp: time.Now(),
+					NodeID:        nextNodeID,
+					Status:        StatusPending,
+					Timestamp:     time.Now(),
+					targetResults: make(map[string]Result),
 				}
 			}
 			tm.mu.Unlock()
@@ -170,10 +175,10 @@ func (tm *TaskManager) onNodeCompleted(nodeResult nodeResult) {
 			tm.mu.Lock()
 			state := tm.TaskStates[nodeResult.taskID][parentNode]
 			if state == nil {
-				state = &TaskState{NodeID: parentNode, Status: StatusPending, Timestamp: time.Now()}
+				state = &TaskState{NodeID: parentNode, Status: StatusPending, Timestamp: time.Now(), targetResults: make(map[string]Result)}
 				tm.TaskStates[nodeResult.taskID][parentNode] = state
 			}
-			state.targetResults = append(state.targetResults, nodeResult.result)
+			state.targetResults[nodeResult.nodeID] = nodeResult.result
 			allTargetNodesdone := len(tm.Edges[parentNode]) == len(state.targetResults)
 			tm.mu.Unlock()
 
@@ -202,15 +207,17 @@ func (tm *TaskManager) aggregateResults(parentNode string, taskID string) {
 	state := tm.TaskStates[taskID][parentNode]
 	if len(state.targetResults) > 1 {
 		aggregatedData := make([]any, len(state.targetResults))
-		for i, result := range state.targetResults {
+		i := 0
+		for _, result := range state.targetResults {
 			var data map[string]any
 			json.Unmarshal(result.Data, &data)
 			aggregatedData[i] = data
+			i++
 		}
 		aggregatedPayload, _ := json.Marshal(aggregatedData)
 		state.Result = Result{Data: aggregatedPayload, Status: StatusCompleted}
 	} else if len(state.targetResults) == 1 {
-		state.Result = state.targetResults[0]
+		state.Result = maps.Values(state.targetResults)[0]
 	}
 	tm.processFinalResult(taskID, state)
 }
