@@ -187,7 +187,7 @@ func (tm *DAG) ProcessTask(ctx context.Context, payload []byte) Result {
 	if next == "true" {
 		nodes, err := tm.GetNextNodes(manager.currentNode)
 		if err != nil {
-			return Result{Error: err}
+			return Result{Error: err, Ctx: ctx}
 		}
 		if len(nodes) > 0 {
 			ctx = context.WithValue(ctx, "initial_node", nodes[0].ID)
@@ -195,7 +195,11 @@ func (tm *DAG) ProcessTask(ctx context.Context, payload []byte) Result {
 	}
 	firstNode, err := tm.parseInitialNode(ctx)
 	if err != nil {
-		return Result{Error: err}
+		return Result{Error: err, Ctx: ctx}
+	}
+	node, ok := tm.nodes.Get(firstNode)
+	if ok && node.Type != Page && payload == nil {
+		return Result{Error: fmt.Errorf("payload is required for node %s", firstNode), Ctx: ctx}
 	}
 	manager.ProcessTask(ctx, taskID, firstNode, payload)
 	return <-resultCh

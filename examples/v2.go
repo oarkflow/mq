@@ -35,7 +35,7 @@ func Form(ctx context.Context, payload json.RawMessage) v2.Result {
 func NodeA(ctx context.Context, payload json.RawMessage) v2.Result {
 	var data map[string]any
 	if err := json.Unmarshal(payload, &data); err != nil {
-		return v2.Result{Error: err}
+		return v2.Result{Error: err, Ctx: ctx}
 	}
 	data["allowed_voting"] = data["age"] == "18"
 	updatedPayload, _ := json.Marshal(data)
@@ -98,10 +98,10 @@ func main() {
 	dag.AddNode(v2.Process, "NodeB", NodeB)
 	dag.AddNode(v2.Process, "NodeC", NodeC)
 	dag.AddNode(v2.Page, "Result", Result)
-	dag.AddEdge("Form", "NodeA")
+	// dag.AddEdge("Form", "NodeA")
 	dag.AddEdge("NodeA", "NodeB")
 	dag.AddEdge("NodeB", "NodeC")
-	dag.AddEdge("NodeC", "Result")
+	// dag.AddEdge("NodeC", "Result")
 	if dag.Error != nil {
 		panic(dag.Error)
 	}
