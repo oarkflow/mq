@@ -206,12 +206,10 @@ func (tm *TaskManager) aggregateResults(parentNode string, taskID string) {
 	defer tm.mu.Unlock()
 	state := tm.TaskStates[taskID][parentNode]
 	if len(state.targetResults) > 1 {
-		aggregatedData := make([]any, len(state.targetResults))
+		aggregatedData := make([]json.RawMessage, len(state.targetResults))
 		i := 0
 		for _, result := range state.targetResults {
-			var data map[string]any
-			json.Unmarshal(result.Data, &data)
-			aggregatedData[i] = data
+			aggregatedData[i] = result.Data
 			i++
 		}
 		aggregatedPayload, _ := json.Marshal(aggregatedData)
@@ -232,7 +230,7 @@ func finalResultCallback(taskID string, result Result) {
 }
 
 func generateTaskID() string {
-	return strconv.Itoa(rand.Intn(100000)) // Random taskID generation
+	return strconv.Itoa(rand.Intn(100000))
 }
 
 func (tm *TaskManager) formHandler(w http.ResponseWriter, r *http.Request) {
@@ -243,7 +241,7 @@ func (tm *TaskManager) formHandler(w http.ResponseWriter, r *http.Request) {
 		email := r.FormValue("email")
 		age := r.FormValue("age")
 		gender := r.FormValue("gender")
-		taskID := generateTaskID() // Generate TaskID on form submission
+		taskID := generateTaskID()
 		payload := fmt.Sprintf(`{"email": "%s", "age": "%s", "gender": "%s"}`, email, age, gender)
 		tm.Trigger(taskID, "NodeA", json.RawMessage(payload))
 		http.Redirect(w, r, "/result?taskID="+taskID, http.StatusFound)
@@ -260,17 +258,13 @@ func (tm *TaskManager) taskStatusHandler(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "taskID is missing", http.StatusBadRequest)
 		return
 	}
-
 	tm.mu.Lock()
 	state := tm.TaskStates[taskID]
 	tm.mu.Unlock()
-
 	if state == nil {
 		http.Error(w, "Invalid taskID", http.StatusNotFound)
 		return
 	}
-
-	// Return the final result as JSON or other response format
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(state)
 }
@@ -307,21 +301,16 @@ func main() {
 	tm.AddNode("Result", func(payload json.RawMessage) Result {
 		var data map[string]any
 		json.Unmarshal(payload, &data)
-		// Show the final result
-		// You can render the data as an HTML result here
+
 		return Result{Data: payload, Status: StatusCompleted}
 	})
-
 	tm.AddEdge("Form", "NodeA")
 	tm.AddEdge("NodeA", "NodeB")
 	tm.AddEdge("NodeB", "NodeC")
 	tm.AddEdge("NodeC", "Result")
-
 	http.HandleFunc("/form", tm.formHandler)
 	http.HandleFunc("/result", tm.resultHandler)
 	http.HandleFunc("/task-result", tm.taskStatusHandler)
-
 	go tm.Run()
-
 	http.ListenAndServe(":8080", nil)
 }
