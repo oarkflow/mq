@@ -10,10 +10,10 @@ import (
 )
 
 type TaskState struct {
-	NodeID        string
-	Status        TaskStatus
-	Timestamp     time.Time
-	Result        Result
+	nodeID        string
+	status        TaskStatus
+	timestamp     time.Time
+	result        Result
 	targetResults map[string]Result
 	my            sync.Mutex
 }
@@ -58,9 +58,9 @@ func (tm *TaskManager) Trigger(taskID, startNode string, payload json.RawMessage
 
 func newTaskState(nodeID string) *TaskState {
 	return &TaskState{
-		NodeID:        nodeID,
-		Status:        StatusPending,
-		Timestamp:     time.Now(),
+		nodeID:        nodeID,
+		status:        StatusPending,
+		timestamp:     time.Now(),
 		targetResults: make(map[string]Result),
 	}
 }
@@ -85,14 +85,14 @@ func (tm *TaskManager) processNode(exec taskExecution) {
 		state = newTaskState(exec.nodeID)
 		tm.taskStates[exec.nodeID] = state
 	}
-	state.Status = StatusProcessing
-	state.Timestamp = time.Now()
+	state.status = StatusProcessing
+	state.timestamp = time.Now()
 	tm.mu.Unlock()
 	result := node.Handler(exec.payload)
 	tm.mu.Lock()
-	state.Timestamp = time.Now()
-	state.Result = result
-	state.Status = result.Status
+	state.timestamp = time.Now()
+	state.result = result
+	state.status = result.Status
 	tm.mu.Unlock()
 	if result.Status == StatusFailed {
 		fmt.Printf("Task %s failed at node %s: %v\n", exec.taskID, exec.nodeID, result.Error)
@@ -155,7 +155,7 @@ func (tm *TaskManager) areAllTargetNodesCompleted(parentNodeID string) bool {
 	defer tm.mu.Unlock()
 	for _, targetNode := range parentNode.Edges {
 		state := tm.taskStates[targetNode.To.ID]
-		if state == nil || state.Status != StatusCompleted {
+		if state == nil || state.status != StatusCompleted {
 			return false
 		}
 	}
@@ -174,14 +174,14 @@ func (tm *TaskManager) aggregateResults(parentNode string, taskID string) {
 			i++
 		}
 		aggregatedPayload, _ := json.Marshal(aggregatedData)
-		state.Result = Result{Data: aggregatedPayload, Status: StatusCompleted}
+		state.result = Result{Data: aggregatedPayload, Status: StatusCompleted}
 	} else if len(state.targetResults) == 1 {
-		state.Result = maps.Values(state.targetResults)[0]
+		state.result = maps.Values(state.targetResults)[0]
 	}
 	tm.processFinalResult(taskID, state)
 }
 
 func (tm *TaskManager) processFinalResult(taskID string, state *TaskState) {
 	clear(state.targetResults)
-	tm.dag.finalResult(taskID, state.Result)
+	tm.dag.finalResult(taskID, state.result)
 }
