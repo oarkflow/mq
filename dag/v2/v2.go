@@ -1,5 +1,6 @@
 package v2
 
+/*
 import (
 	"context"
 	"encoding/json"
@@ -256,3 +257,4 @@ func startTaskHandler(w http.ResponseWriter, r *http.Request, tm *TaskManager) {
 	task := tm.StartTask()
 	http.Redirect(w, r, fmt.Sprintf("/render?taskID=%s", task.ID), http.StatusFound)
 }
+*/
