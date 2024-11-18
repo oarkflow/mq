@@ -26,7 +26,7 @@ func Form(ctx context.Context, payload json.RawMessage) v2.Result {
 	}
 	ctx = context.WithValue(ctx, consts.ContentType, consts.TypeHtml)
 	data := map[string]any{
-		"content": rs,
+		"html_content": rs,
 	}
 	bt, _ = json.Marshal(data)
 	return v2.Result{Data: bt, Ctx: ctx}
@@ -79,7 +79,7 @@ func Result(ctx context.Context, payload json.RawMessage) v2.Result {
 		}
 		ctx = context.WithValue(ctx, consts.ContentType, consts.TypeHtml)
 		data := map[string]any{
-			"content": rs,
+			"html_content": rs,
 		}
 		bt, _ := json.Marshal(data)
 		return v2.Result{Data: bt, Ctx: ctx}
