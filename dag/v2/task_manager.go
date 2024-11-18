@@ -16,7 +16,6 @@ type TaskState struct {
 	Timestamp     time.Time
 	Result        Result
 	targetResults storage.IMap[string, Result]
-	my            sync.Mutex
 }
 
 type nodeResult struct {
@@ -46,6 +45,7 @@ func NewTaskManager(dag *DAG) *TaskManager {
 		resultQueue: make(chan nodeResult, 100),
 		dag:         dag,
 	}
+	go tm.Run()
 	go tm.WaitForResult()
 	return tm
 }

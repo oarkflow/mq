@@ -54,5 +54,11 @@ func main() {
 	dag.AddNode("NodeB", NodeB)
 	dag.AddNode("NodeC", NodeC)
 	dag.AddNode("Result", Result)
+	dag.AddEdge("NodeA", "NodeB")
+	dag.AddEdge("NodeB", "NodeC")
+	dag.AddEdge("NodeC", "Result")
+	if dag.Error != nil {
+		panic(dag.Error)
+	}
 	dag.Start(":8080")
 }
