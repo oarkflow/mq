@@ -12,11 +12,18 @@ import (
 
 func main() {
 	f := dag.NewDAG("Sample DAG", "sample-dag", mq.WithSyncMode(true))
+	f.SetNotifyResponse(func(ctx context.Context, result mq.Result) error {
+		if f.Notifier != nil {
+			f.Notifier.ToRoom("global", "final-message", result)
+		}
+		return nil
+	})
 	setup(f)
 	err := f.Validate()
 	if err != nil {
 		panic(err)
 	}
+	f.Start(context.Background(), ":8083")
 	sendData(f)
 }
 
@@ -43,8 +50,7 @@ func setup(f *dag.DAG) {
 		AddEdge("Get input to loop", "get:input", "loop").
 		AddIterator("Loop to prepare email", "loop", "prepare:email").
 		AddEdge("Prepare Email to condition", "prepare:email", "condition").
-		AddCondition("condition", map[dag.When]dag.Then{"pass": "email:deliver", "fail": "persistent"}).
-		AddEdge("Final", "loop", "final")
+		AddCondition("condition", map[dag.When]dag.Then{"pass": "email:deliver", "fail": "persistent"})
 }
 
 func sendData(f *dag.DAG) {

@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Task Result</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f4f7fc;
+        }
+
+        h1 {
+            text-align: center;
+            color: #333;
+            padding-top: 20px;
+        }
+
+        .container {
+            width: 80%;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+
+        table th, table td {
+            padding: 10px;
+            border: 1px solid #ddd;
+            text-align: left;
+        }
+
+        table th {
+            background-color: #f1f1f1;
+            color: #333;
+        }
+
+        .status-pending {
+            color: orange;
+        }
+
+        .status-processing {
+            color: blue;
+        }
+
+        .status-completed {
+            color: green;
+        }
+
+        .status-failed {
+            color: red;
+        }
+
+        .node-result {
+            margin-top: 30px;
+        }
+
+        .node-result h2 {
+            color: #333;
+        }
+
+        .footer {
+            text-align: center;
+            margin-top: 40px;
+            padding-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+
+<h1>Task Result</h1>
+
+<div class="container" id="result">
+    <p>Loading result...</p>
+</div>
+
+<div class="footer">
+    <p>&copy; 2024 Task Manager</p>
+</div>
+
+<script>
+    function formatDate(dateStr) {
+        const date = new Date(dateStr);
+        return date.toLocaleString();
+    }
+
+    // Fetch the task result
+    const taskID = new URLSearchParams(window.location.search).get('taskID'); // Get taskID from URL
+    if (taskID) {
+        fetch(`/task-result?taskID=${taskID}`)
+            .then(response => response.json())
+            .then(data => {
+                const container = document.getElementById('result');
+                let htmlContent = '';
+
+                // Show final result in a table
+                htmlContent += `
+                        <h2>Final Task Result</h2>
+                        <table>
+                            <tr>
+                                <th>Task ID</th>
+                                <th>Status</th>
+                                <th>Timestamp</th>
+                                <th>Result Data</th>
+                            </tr>
+                            <tr>
+                                <td>${taskID}</td>
+                                <td class="${getStatusClass(data.Result.Status)}">${data.Result.Status}</td>
+                                <td>${formatDate(data.Result.Timestamp)}</td>
+                                <td><pre>${JSON.stringify(data.Result.Result.Data, null, 2)}</pre></td>
+                            </tr>
+                        </table>
+                    `;
+
+                // Show result per node
+                htmlContent += `
+                        <div class="node-result">
+                            <h2>Result Per Node</h2>
+                            <table>
+                                <tr>
+                                    <th>Node ID</th>
+                                    <th>Status</th>
+                                    <th>Timestamp</th>
+                                    <th>Node Result Data</th>
+                                </tr>
+                    `;
+
+                // Loop through each node result and display in a table
+                for (const nodeID in data) {
+                    if (nodeID !== "Result") {
+                        const node = data[nodeID];
+                        htmlContent += `
+                                <tr>
+                                    <td>${node.NodeID}</td>
+                                    <td class="${getStatusClass(node.Status)}">${node.Status}</td>
+                                    <td>${formatDate(node.Timestamp)}</td>
+                                    <td><pre>${JSON.stringify(node.Result.Data, null, 2)}</pre></td>
+                                </tr>
+                            `;
+                    }
+                }
+
+                htmlContent += '</table></div>';
+                container.innerHTML = htmlContent;
+            })
+            .catch(error => {
+                document.getElementById('result').innerHTML = '<p>Error loading task result.</p>';
+            });
+    } else {
+        document.getElementById('result').innerHTML = '<p>Task ID not provided.</p>';
+    }
+
+    function getStatusClass(status) {
+        switch (status) {
+            case 'Pending':
+                return 'status-pending';
+            case 'Processing':
+                return 'status-processing';
+            case 'Completed':
+                return 'status-completed';
+            case 'Failed':
+                return 'status-failed';
+            default:
+                return '';
+        }
+    }
+</script>
+</body>
+</html>
