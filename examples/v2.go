@@ -15,14 +15,23 @@ import (
 	"github.com/oarkflow/mq/storage/memory"
 )
 
+type EdgeType int
+
+func (c EdgeType) IsValid() bool { return c >= Simple && c <= Iterator }
+
+const (
+	Simple EdgeType = iota
+	Iterator
+)
+
 type Edge struct {
-	From *Node
-	To   []*Node
+	From     *Node
+	To       *Node
+	EdgeType EdgeType
 }
 
 type DAG struct {
 	nodes       storage.IMap[string, *Node]
-	Edges       map[string][]string
 	ParentNodes map[string]string
 	taskManager storage.IMap[string, *TaskManager]
 	finalResult func(taskID string, result Result)
@@ -32,7 +41,6 @@ type DAG struct {
 func NewDAG(finalResultCallback func(taskID string, result Result)) *DAG {
 	return &DAG{
 		nodes:       memory.New[string, *Node](),
-		Edges:       make(map[string][]string),
 		ParentNodes: make(map[string]string),
 		taskManager: memory.New[string, *TaskManager](),
 		finalResult: finalResultCallback,
@@ -43,11 +51,22 @@ func (tm *DAG) AddNode(nodeID string, handler func(payload json.RawMessage) Resu
 	tm.nodes.Set(nodeID, &Node{ID: nodeID, Handler: handler})
 }
 
-func (tm *DAG) AddEdge(from string, targets ...string) {
-	tm.Edges[from] = append(tm.Edges[from], targets...)
+func (tm *DAG) AddEdge(from string, targets ...string) error {
+	node, ok := tm.nodes.Get(from)
+	if !ok {
+		return fmt.Errorf("node not found %s", from)
+	}
+	for _, target := range targets {
+		if targetNode, ok := tm.nodes.Get(target); ok {
+			edge := Edge{From: node, To: targetNode, EdgeType: Simple}
+			node.Edges = append(node.Edges, edge)
+		}
+	}
+
 	for _, targetNode := range targets {
 		tm.ParentNodes[targetNode] = from
 	}
+	return nil
 }
 
 type TaskStatus string
@@ -68,6 +87,7 @@ type Result struct {
 type Node struct {
 	ID      string
 	Handler func(payload json.RawMessage) Result
+	Edges   []Edge
 }
 
 type TaskState struct {
@@ -168,46 +188,57 @@ func (tm *TaskManager) WaitForResult() {
 }
 
 func (tm *TaskManager) onNodeCompleted(nodeResult nodeResult) {
-	nextNodes := tm.dag.Edges[nodeResult.nodeID]
-	if len(nextNodes) > 0 {
-		for _, nextNodeID := range nextNodes {
+	node, ok := tm.dag.nodes.Get(nodeResult.nodeID)
+	if !ok {
+		return
+	}
+	if len(node.Edges) > 0 {
+		for _, edge := range node.Edges {
 			tm.mu.Lock()
-			if _, exists := tm.taskStates[nextNodeID]; !exists {
-				tm.taskStates[nextNodeID] = &TaskState{
-					NodeID:        nextNodeID,
+			if _, exists := tm.taskStates[edge.To.ID]; !exists {
+				tm.taskStates[edge.To.ID] = &TaskState{
+					NodeID:        edge.To.ID,
 					Status:        StatusPending,
 					Timestamp:     time.Now(),
 					targetResults: make(map[string]Result),
 				}
 			}
 			tm.mu.Unlock()
-			tm.taskQueue <- taskExecution{taskID: nodeResult.taskID, nodeID: nextNodeID, payload: nodeResult.result.Data}
+			tm.taskQueue <- taskExecution{taskID: nodeResult.taskID, nodeID: edge.To.ID, payload: nodeResult.result.Data}
 		}
 	} else {
-		parentNode := tm.dag.ParentNodes[nodeResult.nodeID]
-		if parentNode != "" {
+		parentNodeID := tm.dag.ParentNodes[nodeResult.nodeID]
+		if parentNodeID != "" {
+			parentNode, ok := tm.dag.nodes.Get(parentNodeID)
+			if !ok {
+				return
+			}
 			tm.mu.Lock()
-			state := tm.taskStates[parentNode]
+			state := tm.taskStates[parentNodeID]
 			if state == nil {
-				state = &TaskState{NodeID: parentNode, Status: StatusPending, Timestamp: time.Now(), targetResults: make(map[string]Result)}
-				tm.taskStates[parentNode] = state
+				state = &TaskState{NodeID: parentNodeID, Status: StatusPending, Timestamp: time.Now(), targetResults: make(map[string]Result)}
+				tm.taskStates[parentNodeID] = state
 			}
 			state.targetResults[nodeResult.nodeID] = nodeResult.result
-			allTargetNodesdone := len(tm.dag.Edges[parentNode]) == len(state.targetResults)
+			allTargetNodesDone := len(parentNode.Edges) == len(state.targetResults)
 			tm.mu.Unlock()
 
-			if tm.areAllTargetNodesCompleted(parentNode) && allTargetNodesdone {
-				tm.aggregateResults(parentNode, nodeResult.taskID)
+			if tm.areAllTargetNodesCompleted(parentNodeID) && allTargetNodesDone {
+				tm.aggregateResults(parentNodeID, nodeResult.taskID)
 			}
 		}
 	}
 }
 
-func (tm *TaskManager) areAllTargetNodesCompleted(parentNode string) bool {
+func (tm *TaskManager) areAllTargetNodesCompleted(parentNodeID string) bool {
+	parentNode, ok := tm.dag.nodes.Get(parentNodeID)
+	if !ok {
+		return false
+	}
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
-	for _, targetNode := range tm.dag.Edges[parentNode] {
-		state := tm.taskStates[targetNode]
+	for _, targetNode := range parentNode.Edges {
+		state := tm.taskStates[targetNode.To.ID]
 		if state == nil || state.Status != StatusCompleted {
 			return false
 		}
