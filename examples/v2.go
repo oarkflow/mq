@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 
 	"github.com/oarkflow/jet"
 
@@ -12,45 +13,23 @@ import (
 )
 
 func Form(ctx context.Context, payload json.RawMessage) v2.Result {
-	template := `
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>User Data Form</title>
-</head>
-<body>
-<h1>Enter Your Information</h1>
-<form action="/?task_id={{task_id}}&next=true" method="POST">
-    <label for="email">Email:</label><br>
-    <input type="email" id="email" name="email" value="s.baniya.np@gmail.com" required><br><br>
-
-    <label for="age">Age:</label><br>
-    <input type="number" id="age" name="age" value="18" required><br><br>
-
-    <label for="gender">Gender:</label><br>
-    <select id="gender" name="gender" required>
-        <option value="male">Male</option>
-        <option value="female">Female</option>
-        <option value="other">Other</option>
-    </select><br><br>
-
-    <input type="submit" value="Submit">
-</form>
-</body>
-</html>
-
-`
+	bt, err := os.ReadFile("webroot/form.html")
+	if err != nil {
+		return v2.Result{Error: err, Ctx: ctx}
+	}
 	parser := jet.NewWithMemory(jet.WithDelims("{{", "}}"))
-	rs, err := parser.ParseTemplate(template, map[string]any{
+	rs, err := parser.ParseTemplate(string(bt), map[string]any{
 		"task_id": ctx.Value("task_id"),
 	})
 	if err != nil {
 		return v2.Result{Error: err, Ctx: ctx}
 	}
 	ctx = context.WithValue(ctx, consts.ContentType, consts.TypeHtml)
-	return v2.Result{Data: []byte(rs), Ctx: ctx}
+	data := map[string]any{
+		"content": rs,
+	}
+	bt, _ = json.Marshal(data)
+	return v2.Result{Data: bt, Ctx: ctx}
 }
 
 func NodeA(ctx context.Context, payload json.RawMessage) v2.Result {
@@ -84,18 +63,26 @@ func NodeC(ctx context.Context, payload json.RawMessage) v2.Result {
 }
 
 func Result(ctx context.Context, payload json.RawMessage) v2.Result {
+	bt, err := os.ReadFile("webroot/result.html")
+	if err != nil {
+		return v2.Result{Error: err, Ctx: ctx}
+	}
 	var data map[string]any
 	if err := json.Unmarshal(payload, &data); err != nil {
 		return v2.Result{Error: err, Ctx: ctx}
 	}
-	if templateFile, ok := data["html_content"].(string); ok {
+	if bt != nil {
 		parser := jet.NewWithMemory(jet.WithDelims("{{", "}}"))
-		rs, err := parser.ParseTemplate(templateFile, data)
+		rs, err := parser.ParseTemplate(string(bt), data)
 		if err != nil {
 			return v2.Result{Error: err, Ctx: ctx}
 		}
 		ctx = context.WithValue(ctx, consts.ContentType, consts.TypeHtml)
-		return v2.Result{Data: []byte(rs), Ctx: ctx}
+		data := map[string]any{
+			"content": rs,
+		}
+		bt, _ := json.Marshal(data)
+		return v2.Result{Data: bt, Ctx: ctx}
 	}
 	return v2.Result{Data: payload, Ctx: ctx}
 }

@@ -94,7 +94,7 @@
     }
 
     // Fetch the task result
-    const taskID = new URLSearchParams(window.location.search).get('taskID'); // Get taskID from URL
+    const taskID = new URLSearchParams(window.location.search).get('task_id'); // Get taskID from URL
     if (taskID) {
         fetch(`/task-result?taskID=${taskID}`)
             .then(response => response.json())
@@ -111,13 +111,13 @@
                             <tr>
                                 <th>Task ID</th>
                                 <th>Status</th>
-                                <th>Timestamp</th>
+                                <th>UpdatedAt</th>
                                 <th>Result Data</th>
                             </tr>
                             <tr>
                                 <td>${taskID}</td>
                                 <td class="${getStatusClass(data.Result.Status)}">${data.Result.Status}</td>
-                                <td>${formatDate(data.Result.Timestamp)}</td>
+                                <td>${formatDate(data.Result.UpdatedAt)}</td>
                                 <td><pre>${JSON.stringify(data.Result.Result.Data, null, 2)}</pre></td>
                             </tr>
                         </table>
@@ -129,7 +129,7 @@
                                 <tr>
                                     <th>Node ID</th>
                                     <th>Status</th>
-                                    <th>Timestamp</th>
+                                    <th>UpdatedAt</th>
                                     <th>Node Result Data</th>
                                 </tr>
                     `;
@@ -140,7 +140,7 @@
                                 <tr>
                                     <td>${node.NodeID}</td>
                                     <td class="${getStatusClass(node.Status)}">${node.Status}</td>
-                                    <td>${formatDate(node.Timestamp)}</td>
+                                    <td>${formatDate(node.UpdatedAt)}</td>
                                     <td><pre>${JSON.stringify(node.Result.Data, null, 2)}</pre></td>
                                 </tr>
                             `;

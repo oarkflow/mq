@@ -10,6 +10,7 @@ import (
 
 	"github.com/oarkflow/mq"
 	"github.com/oarkflow/mq/consts"
+	"github.com/oarkflow/mq/jsonparser"
 	"github.com/oarkflow/mq/storage"
 	"github.com/oarkflow/mq/storage/memory"
 )
@@ -24,7 +25,7 @@ const (
 )
 
 type Result struct {
-	Ctx    context.Context
+	Ctx    context.Context `json:"-"`
 	Data   json.RawMessage
 	Error  error
 	Status TaskStatus
@@ -188,6 +189,59 @@ func (tm *DAG) ProcessTask(ctx context.Context, payload []byte) Result {
 	return <-resultCh
 }
 
+func (tm *DAG) render(w http.ResponseWriter, request *http.Request) {
+	ctx, data, err := parse(request)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	result := tm.ProcessTask(ctx, data)
+	if contentType, ok := result.Ctx.Value(consts.ContentType).(string); ok && contentType == consts.TypeHtml {
+		w.Header().Set(consts.ContentType, consts.TypeHtml)
+		data, err := jsonparser.GetString(result.Data, "content")
+		if err != nil {
+			return
+		}
+		w.Write([]byte(data))
+	}
+}
+
+func (tm *DAG) submit(ctx context.Context, payload []byte) Result {
+	var taskID string
+	userCtx := UserContext(ctx)
+	if val := userCtx.Get("task_id"); val != "" {
+		taskID = val
+	} else {
+		taskID = mq.NewID()
+	}
+	ctx = context.WithValue(ctx, "task_id", taskID)
+	userContext := UserContext(ctx)
+	next := userContext.Get("next")
+	manager, ok := tm.taskManager.Get(taskID)
+	resultCh := make(chan Result, 1)
+	if !ok {
+		manager = NewTaskManager(tm, resultCh)
+		tm.taskManager.Set(taskID, manager)
+	} else {
+		manager.resultCh = resultCh
+	}
+	if next == "true" {
+		nodes, err := tm.GetNextNodes(manager.currentNode)
+		if err != nil {
+			return Result{Error: err}
+		}
+		if len(nodes) > 0 {
+			ctx = context.WithValue(ctx, "initial_node", nodes[0].ID)
+		}
+	}
+	firstNode, err := tm.parseInitialNode(ctx)
+	if err != nil {
+		return Result{Error: err}
+	}
+	manager.ProcessTask(ctx, taskID, firstNode, payload)
+	return <-resultCh
+}
+
 func (tm *DAG) formHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "GET" {
 		http.ServeFile(w, r, "webroot/form.html")
@@ -221,25 +275,35 @@ func (tm *DAG) taskStatusHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"message": "Invalid TaskID"}`, http.StatusNotFound)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set(consts.ContentType, consts.TypeJson)
 	json.NewEncoder(w).Encode(manager.taskStates)
 }
 
 func (tm *DAG) Start(addr string) {
-	http.HandleFunc("/", func(w http.ResponseWriter, request *http.Request) {
-		ctx, data, err := parse(request)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusNotFound)
-			return
-		}
-		result := tm.ProcessTask(ctx, data)
-		if contentType, ok := result.Ctx.Value(consts.ContentType).(string); ok && contentType == consts.TypeHtml {
-			w.Header().Set(consts.ContentType, consts.TypeHtml)
-			w.Write(result.Data)
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" {
+			tm.render(w, r)
+		} else if r.Method == "POST" {
+			ctx, data, err := parse(r)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusNotFound)
+				return
+			}
+			result := tm.submit(ctx, data)
+			if result.Ctx == nil {
+				fmt.Println("Ctrl not set")
+				return
+			}
+			if contentType, ok := result.Ctx.Value(consts.ContentType).(string); ok && contentType == consts.TypeHtml {
+				w.Header().Set(consts.ContentType, consts.TypeHtml)
+				data, err := jsonparser.GetString(result.Data, "content")
+				if err != nil {
+					return
+				}
+				w.Write([]byte(data))
+			}
 		}
 	})
-	http.HandleFunc("/form", tm.formHandler)
-	http.HandleFunc("/result", tm.resultHandler)
 	http.HandleFunc("/task-result", tm.taskStatusHandler)
 	http.ListenAndServe(addr, nil)
 }

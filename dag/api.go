@@ -165,7 +165,7 @@ func (tm *DAG) Render(w http.ResponseWriter, r *http.Request) {
 	ctx := mq.SetHeaders(r.Context(), map[string]string{consts.AwaitResponseKey: "true", "request_type": "render"})
 	ctx = context.WithValue(ctx, "query_params", r.URL.Query())
 	rs := tm.Process(ctx, nil)
-	content, err := jsonparser.GetString(rs.Payload, "content")
+	content, err := jsonparser.GetString(rs.Payload, "html_content")
 	if err != nil {
 		http.Error(w, "Failed to read request body", http.StatusBadRequest)
 		return

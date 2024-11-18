@@ -200,6 +200,7 @@ func (tm *TaskManager) aggregateResults(parentNode string, taskID string) {
 	} else if state.targetResults.Size() == 1 {
 		state.Result = state.targetResults.Values()[0]
 	}
+	tm.resultCh <- state.Result
 	tm.processFinalResult(taskID, state)
 }
 

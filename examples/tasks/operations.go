@@ -116,7 +116,7 @@ type Final struct {
 
 func (e *Final) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 	rs := map[string]any{
-		"content": `<strong>Processed successfully!</strong>`,
+		"html_content": `<strong>Processed successfully!</strong>`,
 	}
 	bt, _ := json.Marshal(rs)
 	return mq.Result{Payload: bt, Ctx: ctx}
