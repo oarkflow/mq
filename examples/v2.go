@@ -32,7 +32,6 @@ type Edge struct {
 
 type DAG struct {
 	nodes       storage.IMap[string, *Node]
-	ParentNodes map[string]string
 	taskManager storage.IMap[string, *TaskManager]
 	finalResult func(taskID string, result Result)
 	mu          sync.Mutex
@@ -41,7 +40,6 @@ type DAG struct {
 func NewDAG(finalResultCallback func(taskID string, result Result)) *DAG {
 	return &DAG{
 		nodes:       memory.New[string, *Node](),
-		ParentNodes: make(map[string]string),
 		taskManager: memory.New[string, *TaskManager](),
 		finalResult: finalResultCallback,
 	}
@@ -62,11 +60,32 @@ func (tm *DAG) AddEdge(from string, targets ...string) error {
 			node.Edges = append(node.Edges, edge)
 		}
 	}
-
-	for _, targetNode := range targets {
-		tm.ParentNodes[targetNode] = from
-	}
 	return nil
+}
+
+func (tm *DAG) GetNextNodes(key string) ([]*Node, error) {
+	node, exists := tm.nodes.Get(key)
+	if !exists {
+		return nil, fmt.Errorf("node with key %s does not exist", key)
+	}
+	var successors []*Node
+	for _, edge := range node.Edges {
+		successors = append(successors, edge.To)
+	}
+	return successors, nil
+}
+
+func (tm *DAG) GetPreviousNodes(key string) ([]*Node, error) {
+	var predecessors []*Node
+	tm.nodes.ForEach(func(_ string, node *Node) bool {
+		for _, target := range node.Edges {
+			if target.To.ID == key {
+				predecessors = append(predecessors, node)
+			}
+		}
+		return true
+	})
+	return predecessors, nil
 }
 
 type TaskStatus string
@@ -207,24 +226,22 @@ func (tm *TaskManager) onNodeCompleted(nodeResult nodeResult) {
 			tm.taskQueue <- taskExecution{taskID: nodeResult.taskID, nodeID: edge.To.ID, payload: nodeResult.result.Data}
 		}
 	} else {
-		parentNodeID := tm.dag.ParentNodes[nodeResult.nodeID]
-		if parentNodeID != "" {
-			parentNode, ok := tm.dag.nodes.Get(parentNodeID)
-			if !ok {
-				return
-			}
-			tm.mu.Lock()
-			state := tm.taskStates[parentNodeID]
-			if state == nil {
-				state = &TaskState{NodeID: parentNodeID, Status: StatusPending, Timestamp: time.Now(), targetResults: make(map[string]Result)}
-				tm.taskStates[parentNodeID] = state
-			}
-			state.targetResults[nodeResult.nodeID] = nodeResult.result
-			allTargetNodesDone := len(parentNode.Edges) == len(state.targetResults)
-			tm.mu.Unlock()
+		parentNodes, err := tm.dag.GetPreviousNodes(nodeResult.nodeID)
+		if err == nil {
+			for _, parentNode := range parentNodes {
+				tm.mu.Lock()
+				state := tm.taskStates[parentNode.ID]
+				if state == nil {
+					state = &TaskState{NodeID: parentNode.ID, Status: StatusPending, Timestamp: time.Now(), targetResults: make(map[string]Result)}
+					tm.taskStates[parentNode.ID] = state
+				}
+				state.targetResults[nodeResult.nodeID] = nodeResult.result
+				allTargetNodesDone := len(parentNode.Edges) == len(state.targetResults)
+				tm.mu.Unlock()
 
-			if tm.areAllTargetNodesCompleted(parentNodeID) && allTargetNodesDone {
-				tm.aggregateResults(parentNodeID, nodeResult.taskID)
+				if tm.areAllTargetNodesCompleted(parentNode.ID) && allTargetNodesDone {
+					tm.aggregateResults(parentNode.ID, nodeResult.taskID)
+				}
 			}
 		}
 	}
