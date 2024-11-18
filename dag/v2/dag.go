@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sync"
 
 	"github.com/oarkflow/mq"
 	"github.com/oarkflow/mq/storage"
@@ -29,10 +28,10 @@ type Result struct {
 
 type NodeType int
 
-func (c NodeType) IsValid() bool { return c >= Process && c <= Page }
+func (c NodeType) IsValid() bool { return c >= Function && c <= Page }
 
 const (
-	Process NodeType = iota
+	Function NodeType = iota
 	Page
 )
 
@@ -62,7 +61,6 @@ type DAG struct {
 	nodes       storage.IMap[string, *Node]
 	taskManager storage.IMap[string, *TaskManager]
 	finalResult func(taskID string, result Result)
-	mu          sync.Mutex
 	Error       error
 	startNode   string
 }
@@ -122,7 +120,7 @@ func (tm *DAG) AddNode(nodeType NodeType, nodeID string, handler func(ctx contex
 	return tm
 }
 
-func (tm *DAG) AddEdge(from string, targets ...string) *DAG {
+func (tm *DAG) AddEdge(edgeType EdgeType, from string, targets ...string) *DAG {
 	if tm.Error != nil {
 		return tm
 	}
@@ -133,7 +131,7 @@ func (tm *DAG) AddEdge(from string, targets ...string) *DAG {
 	}
 	for _, target := range targets {
 		if targetNode, ok := tm.nodes.Get(target); ok {
-			edge := Edge{From: node, To: targetNode, Type: Simple}
+			edge := Edge{From: node, To: targetNode, Type: edgeType}
 			node.Edges = append(node.Edges, edge)
 		}
 	}
@@ -179,7 +177,7 @@ func (tm *DAG) ProcessTask(ctx context.Context, payload []byte) Result {
 	manager, ok := tm.taskManager.Get(taskID)
 	resultCh := make(chan Result, 1)
 	if !ok {
-		manager = NewTaskManager(tm, resultCh)
+		manager = NewTaskManager(tm, taskID, resultCh)
 		tm.taskManager.Set(taskID, manager)
 	} else {
 		manager.resultCh = resultCh
@@ -201,6 +199,6 @@ func (tm *DAG) ProcessTask(ctx context.Context, payload []byte) Result {
 	if ok && node.Type != Page && payload == nil {
 		return Result{Error: fmt.Errorf("payload is required for node %s", firstNode), Ctx: ctx}
 	}
-	manager.ProcessTask(ctx, taskID, firstNode, payload)
+	manager.ProcessTask(ctx, firstNode, payload)
 	return <-resultCh
 }

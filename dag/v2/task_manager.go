@@ -21,7 +21,6 @@ type TaskState struct {
 
 type nodeResult struct {
 	ctx    context.Context
-	taskID string
 	nodeID string
 	result Result
 }
@@ -30,6 +29,7 @@ type TaskManager struct {
 	taskStates  map[string]*TaskState
 	currentNode string
 	dag         *DAG
+	taskID      string
 	mu          sync.RWMutex
 	taskQueue   chan *Task
 	resultQueue chan nodeResult
@@ -52,12 +52,13 @@ func NewTask(ctx context.Context, taskID, nodeID string, payload json.RawMessage
 	}
 }
 
-func NewTaskManager(dag *DAG, resultCh chan Result) *TaskManager {
+func NewTaskManager(dag *DAG, taskID string, resultCh chan Result) *TaskManager {
 	tm := &TaskManager{
 		taskStates:  make(map[string]*TaskState),
 		taskQueue:   make(chan *Task, 100),
 		resultQueue: make(chan nodeResult, 100),
 		resultCh:    resultCh,
+		taskID:      taskID,
 		dag:         dag,
 	}
 	go tm.Run()
@@ -65,11 +66,11 @@ func NewTaskManager(dag *DAG, resultCh chan Result) *TaskManager {
 	return tm
 }
 
-func (tm *TaskManager) ProcessTask(ctx context.Context, taskID, startNode string, payload json.RawMessage) {
+func (tm *TaskManager) ProcessTask(ctx context.Context, startNode string, payload json.RawMessage) {
 	tm.mu.Lock()
 	tm.taskStates[startNode] = newTaskState(startNode)
 	tm.mu.Unlock()
-	tm.taskQueue <- NewTask(ctx, taskID, startNode, payload)
+	tm.taskQueue <- NewTask(ctx, tm.taskID, startNode, payload)
 }
 
 func newTaskState(nodeID string) *TaskState {
@@ -120,7 +121,7 @@ func (tm *TaskManager) processNode(exec *Task) {
 		tm.resultCh <- result
 		return
 	}
-	tm.resultQueue <- nodeResult{taskID: exec.taskID, nodeID: exec.nodeID, result: result, ctx: exec.ctx}
+	tm.resultQueue <- nodeResult{nodeID: exec.nodeID, result: result, ctx: exec.ctx}
 }
 
 func (tm *TaskManager) WaitForResult() {
@@ -151,7 +152,7 @@ func (tm *TaskManager) onNodeCompleted(nodeResult nodeResult) {
 				tm.mu.Unlock()
 
 				if tm.areAllTargetNodesCompleted(parentNode.ID) && allTargetNodesDone {
-					tm.aggregateResults(parentNode.ID, nodeResult.taskID)
+					tm.aggregateResults(parentNode.ID)
 				}
 			}
 		}
@@ -163,7 +164,7 @@ func (tm *TaskManager) onNodeCompleted(nodeResult nodeResult) {
 			tm.taskStates[edge.To.ID] = newTaskState(edge.To.ID)
 		}
 		tm.mu.Unlock()
-		tm.taskQueue <- NewTask(nodeResult.ctx, nodeResult.taskID, edge.To.ID, nodeResult.result.Data)
+		tm.taskQueue <- NewTask(nodeResult.ctx, tm.taskID, edge.To.ID, nodeResult.result.Data)
 	}
 }
 
@@ -183,7 +184,7 @@ func (tm *TaskManager) areAllTargetNodesCompleted(parentNodeID string) bool {
 	return true
 }
 
-func (tm *TaskManager) aggregateResults(parentNode string, taskID string) {
+func (tm *TaskManager) aggregateResults(parentNode string) {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 	state := tm.taskStates[parentNode]
@@ -201,10 +202,10 @@ func (tm *TaskManager) aggregateResults(parentNode string, taskID string) {
 		state.Result = state.targetResults.Values()[0]
 	}
 	tm.resultCh <- state.Result
-	tm.processFinalResult(taskID, state)
+	tm.processFinalResult(state)
 }
 
-func (tm *TaskManager) processFinalResult(taskID string, state *TaskState) {
+func (tm *TaskManager) processFinalResult(state *TaskState) {
 	state.targetResults.Clear()
-	tm.dag.finalResult(taskID, state.Result)
+	tm.dag.finalResult(tm.taskID, state.Result)
 }

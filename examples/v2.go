@@ -94,14 +94,14 @@ func notify(taskID string, result v2.Result) {
 func main() {
 	dag := v2.NewDAG(notify)
 	dag.AddNode(v2.Page, "Form", Form)
-	dag.AddNode(v2.Process, "NodeA", NodeA)
-	dag.AddNode(v2.Process, "NodeB", NodeB)
-	dag.AddNode(v2.Process, "NodeC", NodeC)
+	dag.AddNode(v2.Function, "NodeA", NodeA)
+	dag.AddNode(v2.Function, "NodeB", NodeB)
+	dag.AddNode(v2.Function, "NodeC", NodeC)
 	dag.AddNode(v2.Page, "Result", Result)
-	// dag.AddEdge("Form", "NodeA")
-	dag.AddEdge("NodeA", "NodeB")
-	dag.AddEdge("NodeB", "NodeC")
-	// dag.AddEdge("NodeC", "Result")
+	dag.AddEdge(v2.Simple, "Form", "NodeA")
+	dag.AddEdge(v2.Simple, "NodeA", "NodeB")
+	dag.AddEdge(v2.Simple, "NodeB", "NodeC")
+	dag.AddEdge(v2.Simple, "NodeC", "Result")
 	if dag.Error != nil {
 		panic(dag.Error)
 	}

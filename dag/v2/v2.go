@@ -196,7 +196,7 @@ func processNode(w http.ResponseWriter, r *http.Request, task *Task, tm *TaskMan
 				log.Printf("No ConditionStatus found, following edge to next Operation: %s", nextNodeID)
 			} else {
 				log.Printf("Task %s completed. Final result: %s", task.ID, task.FinalResult)
-				fmt.Fprintf(w, "<html><body><h1>Process Completed</h1><p>%s</p></body></html>", task.FinalResult)
+				fmt.Fprintf(w, "<html><body><h1>Function Completed</h1><p>%s</p></body></html>", task.FinalResult)
 				return
 			}
 		}
@@ -243,7 +243,7 @@ func submitHandler(w http.ResponseWriter, r *http.Request, tm *TaskManager) {
 	nextNode, exists := tm.GetNextNode(task)
 	if !exists {
 		log.Printf("Task %s completed. Final result: %s", task.ID, task.FinalResult)
-		fmt.Fprintf(w, "<html><body><h1>Process Completed</h1><p>%s</p></body></html>", task.FinalResult)
+		fmt.Fprintf(w, "<html><body><h1>Function Completed</h1><p>%s</p></body></html>", task.FinalResult)
 		return
 	}
 	switch nextNode := nextNode.(type) {
