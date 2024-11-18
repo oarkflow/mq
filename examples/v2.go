@@ -21,7 +21,7 @@ type Edge struct {
 }
 
 type DAG struct {
-	Nodes       storage.IMap[string, *Node]
+	nodes       storage.IMap[string, *Node]
 	Edges       map[string][]string
 	ParentNodes map[string]string
 	taskManager storage.IMap[string, *TaskManager]
@@ -31,7 +31,7 @@ type DAG struct {
 
 func NewDAG(finalResultCallback func(taskID string, result Result)) *DAG {
 	return &DAG{
-		Nodes:       memory.New[string, *Node](),
+		nodes:       memory.New[string, *Node](),
 		Edges:       make(map[string][]string),
 		ParentNodes: make(map[string]string),
 		taskManager: memory.New[string, *TaskManager](),
@@ -40,12 +40,12 @@ func NewDAG(finalResultCallback func(taskID string, result Result)) *DAG {
 }
 
 func (tm *DAG) AddNode(nodeID string, handler func(payload json.RawMessage) Result) {
-	tm.Nodes.Set(nodeID, &Node{ID: nodeID, Handler: handler})
+	tm.nodes.Set(nodeID, &Node{ID: nodeID, Handler: handler})
 }
 
-func (tm *DAG) AddEdge(from string, to ...string) {
-	tm.Edges[from] = append(tm.Edges[from], to...)
-	for _, targetNode := range to {
+func (tm *DAG) AddEdge(from string, targets ...string) {
+	tm.Edges[from] = append(tm.Edges[from], targets...)
+	for _, targetNode := range targets {
 		tm.ParentNodes[targetNode] = from
 	}
 }
@@ -131,7 +131,7 @@ func (tm *TaskManager) Run() {
 }
 
 func (tm *TaskManager) processNode(exec taskExecution) {
-	node, exists := tm.dag.Nodes.Get(exec.nodeID)
+	node, exists := tm.dag.nodes.Get(exec.nodeID)
 	if !exists {
 		fmt.Printf("Node %s does not exist\n", exec.nodeID)
 		return
