@@ -19,6 +19,15 @@ type TaskState struct {
 	targetResults storage.IMap[string, Result]
 }
 
+func newTaskState(nodeID string) *TaskState {
+	return &TaskState{
+		NodeID:        nodeID,
+		Status:        StatusPending,
+		UpdatedAt:     time.Now(),
+		targetResults: memory.New[string, Result](),
+	}
+}
+
 type nodeResult struct {
 	ctx    context.Context
 	nodeID string
@@ -74,15 +83,6 @@ func (tm *TaskManager) ProcessTask(ctx context.Context, startNode string, payloa
 	tm.taskQueue <- NewTask(ctx, tm.taskID, startNode, payload)
 }
 
-func newTaskState(nodeID string) *TaskState {
-	return &TaskState{
-		NodeID:        nodeID,
-		Status:        StatusPending,
-		UpdatedAt:     time.Now(),
-		targetResults: memory.New[string, Result](),
-	}
-}
-
 func (tm *TaskManager) Run() {
 	go func() {
 		for {
@@ -93,6 +93,22 @@ func (tm *TaskManager) Run() {
 					return
 				}
 				tm.processNode(task)
+			}
+		}
+	}()
+}
+
+func (tm *TaskManager) WaitForResult() {
+	go func() {
+		for {
+			select {
+			case nr, ok := <-tm.resultQueue:
+				if !ok {
+					fmt.Println("Result queue closed")
+					return
+				}
+				fmt.Printf("Processing result for node: %s %v %s\n", nr.nodeID, string(nr.result.Data), nr.status)
+				tm.onNodeCompleted(nr)
 			}
 		}
 	}()
@@ -136,20 +152,18 @@ func (tm *TaskManager) processNode(exec *Task) {
 	tm.resultQueue <- nodeResult{nodeID: exec.nodeID, result: result, ctx: exec.ctx, status: state.Status}
 }
 
-func (tm *TaskManager) WaitForResult() {
-	go func() {
-		for {
-			select {
-			case nr, ok := <-tm.resultQueue:
-				if !ok {
-					fmt.Println("Result queue closed")
-					return
-				}
-				fmt.Printf("Processing result for node: %s %v %s\n", nr.nodeID, string(nr.result.Data), nr.status)
-				tm.onNodeCompleted(nr)
-			}
-		}
-	}()
+func (tm *TaskManager) onNodeCompleted(nodeRS nodeResult) {
+	node, ok := tm.dag.nodes.Get(nodeRS.nodeID)
+	if !ok {
+		return
+	}
+	edges := tm.getConditionalEdges(node, nodeRS.result)
+	hasErrorOrCompleted := nodeRS.result.Error != nil || len(edges) == 0 || nodeRS.status == StatusFailed
+	if hasErrorOrCompleted {
+		tm.checkParentNodes(nodeRS)
+		return
+	}
+	tm.handleEdges(nodeRS, edges)
 }
 
 func (tm *TaskManager) getConditionalEdges(node *Node, result Result) []Edge {
@@ -169,20 +183,6 @@ func (tm *TaskManager) getConditionalEdges(node *Node, result Result) []Edge {
 		}
 	}
 	return edges
-}
-
-func (tm *TaskManager) onNodeCompleted(nodeRS nodeResult) {
-	node, ok := tm.dag.nodes.Get(nodeRS.nodeID)
-	if !ok {
-		return
-	}
-	edges := tm.getConditionalEdges(node, nodeRS.result)
-	hasErrorOrCompleted := nodeRS.result.Error != nil || len(edges) == 0 || nodeRS.status == StatusFailed
-	if hasErrorOrCompleted {
-		tm.checkParentNodes(nodeRS)
-		return
-	}
-	tm.handleEdges(nodeRS, edges)
 }
 
 func (tm *TaskManager) handleEdges(nodeRS nodeResult, edges []Edge) {
