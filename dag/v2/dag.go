@@ -20,10 +20,12 @@ const (
 )
 
 type Result struct {
-	Ctx    context.Context `json:"-"`
-	Data   json.RawMessage
-	Error  error
-	Status TaskStatus
+	Ctx             context.Context `json:"-"`
+	Data            json.RawMessage
+	Error           error
+	Status          TaskStatus
+	ConditionStatus string
+	Topic           string
 }
 
 type NodeType int
@@ -58,18 +60,22 @@ type Edge struct {
 }
 
 type DAG struct {
-	nodes       storage.IMap[string, *Node]
-	taskManager storage.IMap[string, *TaskManager]
-	finalResult func(taskID string, result Result)
-	Error       error
-	startNode   string
+	nodes         storage.IMap[string, *Node]
+	taskManager   storage.IMap[string, *TaskManager]
+	iteratorNodes storage.IMap[string, []Edge]
+	finalResult   func(taskID string, result Result)
+	Error         error
+	startNode     string
+	conditions    map[string]map[string]string
 }
 
 func NewDAG(finalResultCallback func(taskID string, result Result)) *DAG {
 	return &DAG{
-		nodes:       memory.New[string, *Node](),
-		taskManager: memory.New[string, *TaskManager](),
-		finalResult: finalResultCallback,
+		nodes:         memory.New[string, *Node](),
+		taskManager:   memory.New[string, *TaskManager](),
+		iteratorNodes: memory.New[string, []Edge](),
+		conditions:    make(map[string]map[string]string),
+		finalResult:   finalResultCallback,
 	}
 }
 
@@ -103,6 +109,12 @@ func (tm *DAG) findStartNode() *Node {
 				incomingEdges[edge.To.ID] = true
 			}
 		}
+		if cond, ok := tm.conditions[node.ID]; ok {
+			for _, target := range cond {
+				connectedNodes[target] = true
+				incomingEdges[target] = true
+			}
+		}
 	}
 	for nodeID, node := range tm.nodes.AsMap() {
 		if !incomingEdges[nodeID] && connectedNodes[nodeID] {
@@ -112,17 +124,30 @@ func (tm *DAG) findStartNode() *Node {
 	return nil
 }
 
-func (tm *DAG) AddNode(nodeType NodeType, nodeID string, handler func(ctx context.Context, payload json.RawMessage) Result) *DAG {
+func (tm *DAG) AddCondition(fromNode string, conditions map[string]string) *DAG {
+	tm.conditions[fromNode] = conditions
+	return tm
+}
+
+type Handler func(ctx context.Context, payload json.RawMessage) Result
+
+func (tm *DAG) AddNode(nodeType NodeType, nodeID string, handler Handler, startNode ...bool) *DAG {
 	if tm.Error != nil {
 		return tm
 	}
 	tm.nodes.Set(nodeID, &Node{ID: nodeID, Handler: handler, Type: nodeType})
+	if len(startNode) > 0 && startNode[0] {
+		tm.startNode = nodeID
+	}
 	return tm
 }
 
 func (tm *DAG) AddEdge(edgeType EdgeType, from string, targets ...string) *DAG {
 	if tm.Error != nil {
 		return tm
+	}
+	if edgeType == Iterator {
+		tm.iteratorNodes.Set(from, []Edge{})
 	}
 	node, ok := tm.nodes.Get(from)
 	if !ok {
@@ -133,6 +158,12 @@ func (tm *DAG) AddEdge(edgeType EdgeType, from string, targets ...string) *DAG {
 		if targetNode, ok := tm.nodes.Get(target); ok {
 			edge := Edge{From: node, To: targetNode, Type: edgeType}
 			node.Edges = append(node.Edges, edge)
+			if edgeType != Iterator {
+				if edges, ok := tm.iteratorNodes.Get(node.ID); ok {
+					edges = append(edges, edge)
+					tm.iteratorNodes.Set(node.ID, edges)
+				}
+			}
 		}
 	}
 	return tm
@@ -141,11 +172,18 @@ func (tm *DAG) AddEdge(edgeType EdgeType, from string, targets ...string) *DAG {
 func (tm *DAG) GetNextNodes(key string) ([]*Node, error) {
 	node, exists := tm.nodes.Get(key)
 	if !exists {
-		return nil, fmt.Errorf("node with key %s does not exist", key)
+		return nil, fmt.Errorf("Node with key %s does not exist", key)
 	}
 	var successors []*Node
 	for _, edge := range node.Edges {
 		successors = append(successors, edge.To)
+	}
+	if conds, exists := tm.conditions[key]; exists {
+		for _, targetKey := range conds {
+			if targetNode, exists := tm.nodes.Get(targetKey); exists {
+				successors = append(successors, targetNode)
+			}
+		}
 	}
 	return successors, nil
 }
@@ -160,6 +198,17 @@ func (tm *DAG) GetPreviousNodes(key string) ([]*Node, error) {
 		}
 		return true
 	})
+	for fromNode, conds := range tm.conditions {
+		for _, targetKey := range conds {
+			if targetKey == key {
+				node, exists := tm.nodes.Get(fromNode)
+				if !exists {
+					return nil, fmt.Errorf("Node with key %s does not exist", fromNode)
+				}
+				predecessors = append(predecessors, node)
+			}
+		}
+	}
 	return predecessors, nil
 }
 

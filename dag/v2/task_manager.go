@@ -22,6 +22,7 @@ type TaskState struct {
 type nodeResult struct {
 	ctx    context.Context
 	nodeID string
+	status TaskStatus
 	result Result
 }
 
@@ -107,6 +108,7 @@ func (tm *TaskManager) processNode(exec *Task) {
 	state.UpdatedAt = time.Now()
 	tm.currentNode = exec.nodeID
 	result := node.Handler(exec.ctx, exec.payload)
+	result.Topic = node.ID
 	state.UpdatedAt = time.Now()
 	state.Result = result
 	if result.Ctx == nil {
@@ -115,13 +117,16 @@ func (tm *TaskManager) processNode(exec *Task) {
 	if result.Error != nil {
 		state.Status = StatusFailed
 	} else {
-		state.Status = StatusCompleted
+		edges := tm.getConditionalEdges(node, result)
+		if len(edges) == 0 {
+			state.Status = StatusCompleted
+		}
 	}
 	if node.Type == Page {
 		tm.resultCh <- result
 		return
 	}
-	tm.resultQueue <- nodeResult{nodeID: exec.nodeID, result: result, ctx: exec.ctx}
+	tm.resultQueue <- nodeResult{nodeID: exec.nodeID, result: result, ctx: exec.ctx, status: state.Status}
 }
 
 func (tm *TaskManager) WaitForResult() {
@@ -132,13 +137,33 @@ func (tm *TaskManager) WaitForResult() {
 	}()
 }
 
-func (tm *TaskManager) onNodeCompleted(nodeResult nodeResult) {
-	node, ok := tm.dag.nodes.Get(nodeResult.nodeID)
+func (tm *TaskManager) getConditionalEdges(node *Node, result Result) []Edge {
+	edges := make([]Edge, len(node.Edges))
+	copy(edges, node.Edges)
+	if result.ConditionStatus != "" {
+		if conditions, ok := tm.dag.conditions[result.Topic]; ok {
+			if targetNodeKey, ok := conditions[result.ConditionStatus]; ok {
+				if targetNode, ok := tm.dag.nodes.Get(targetNodeKey); ok {
+					edges = append(edges, Edge{From: node, To: targetNode})
+				}
+			} else if targetNodeKey, ok = conditions["default"]; ok {
+				if targetNode, ok := tm.dag.nodes.Get(targetNodeKey); ok {
+					edges = append(edges, Edge{From: node, To: targetNode})
+				}
+			}
+		}
+	}
+	return edges
+}
+
+func (tm *TaskManager) onNodeCompleted(nodeRS nodeResult) {
+	node, ok := tm.dag.nodes.Get(nodeRS.nodeID)
 	if !ok {
 		return
 	}
-	if nodeResult.result.Error != nil || len(node.Edges) == 0 {
-		parentNodes, err := tm.dag.GetPreviousNodes(nodeResult.nodeID)
+	edges := tm.getConditionalEdges(node, nodeRS.result)
+	if nodeRS.result.Error != nil || len(edges) == 0 || nodeRS.status == StatusFailed {
+		parentNodes, err := tm.dag.GetPreviousNodes(nodeRS.nodeID)
 		if err == nil {
 			for _, parentNode := range parentNodes {
 				tm.mu.Lock()
@@ -147,10 +172,9 @@ func (tm *TaskManager) onNodeCompleted(nodeResult nodeResult) {
 					state = newTaskState(parentNode.ID)
 					tm.taskStates[parentNode.ID] = state
 				}
-				state.targetResults.Set(nodeResult.nodeID, nodeResult.result)
+				state.targetResults.Set(nodeRS.nodeID, nodeRS.result)
 				allTargetNodesDone := len(parentNode.Edges) == state.targetResults.Size()
 				tm.mu.Unlock()
-
 				if tm.areAllTargetNodesCompleted(parentNode.ID) && allTargetNodesDone {
 					tm.aggregateResults(parentNode.ID)
 				}
@@ -158,13 +182,35 @@ func (tm *TaskManager) onNodeCompleted(nodeResult nodeResult) {
 		}
 		return
 	}
-	for _, edge := range node.Edges {
+	for _, edge := range edges {
+		if edge.Type == Simple {
+			if _, ok := tm.dag.iteratorNodes.Get(edge.From.ID); ok {
+				continue
+			}
+		}
 		tm.mu.Lock()
 		if _, exists := tm.taskStates[edge.To.ID]; !exists {
 			tm.taskStates[edge.To.ID] = newTaskState(edge.To.ID)
 		}
 		tm.mu.Unlock()
-		tm.taskQueue <- NewTask(nodeResult.ctx, tm.taskID, edge.To.ID, nodeResult.result.Data)
+		if edge.Type == Iterator {
+			var items []json.RawMessage
+			err := json.Unmarshal(nodeRS.result.Data, &items)
+			if err != nil {
+				tm.resultQueue <- nodeResult{
+					ctx:    nodeRS.ctx,
+					nodeID: edge.To.ID,
+					status: StatusFailed,
+					result: Result{Error: err},
+				}
+				return
+			}
+			for _, item := range items {
+				tm.taskQueue <- NewTask(nodeRS.ctx, tm.taskID, edge.To.ID, item)
+			}
+		} else {
+			tm.taskQueue <- NewTask(nodeRS.ctx, tm.taskID, edge.To.ID, nodeRS.result.Data)
+		}
 	}
 }
 
