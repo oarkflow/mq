@@ -11,6 +11,8 @@ import (
 	"github.com/oarkflow/mq/storage/memory"
 )
 
+var Delimite = "___"
+
 type TaskState struct {
 	NodeID        string
 	Status        TaskStatus
@@ -77,10 +79,14 @@ func NewTaskManager(dag *DAG, taskID string, resultCh chan Result) *TaskManager 
 }
 
 func (tm *TaskManager) ProcessTask(ctx context.Context, startNode string, payload json.RawMessage) {
+	tm.send(ctx, startNode, tm.taskID, payload)
+}
+
+func (tm *TaskManager) send(ctx context.Context, startNode, taskID string, payload json.RawMessage) {
 	tm.mu.Lock()
 	tm.taskStates[startNode] = newTaskState(startNode)
 	tm.mu.Unlock()
-	tm.taskQueue <- NewTask(ctx, tm.taskID, startNode, payload)
+	tm.taskQueue <- NewTask(ctx, taskID, startNode, payload)
 }
 
 func (tm *TaskManager) Run() {
@@ -160,7 +166,7 @@ func (tm *TaskManager) onNodeCompleted(nodeRS nodeResult) {
 	edges := tm.getConditionalEdges(node, nodeRS.result)
 	hasErrorOrCompleted := nodeRS.result.Error != nil || len(edges) == 0 || nodeRS.status == StatusFailed
 	if hasErrorOrCompleted {
-		tm.checkParentNodes(nodeRS)
+		// tm.checkParentNodes(nodeRS)
 		return
 	}
 	tm.handleEdges(nodeRS, edges)
@@ -192,11 +198,6 @@ func (tm *TaskManager) handleEdges(nodeRS nodeResult, edges []Edge) {
 				continue
 			}
 		}
-		tm.mu.Lock()
-		if _, exists := tm.taskStates[edge.To.ID]; !exists {
-			tm.taskStates[edge.To.ID] = newTaskState(edge.To.ID)
-		}
-		tm.mu.Unlock()
 		if edge.Type == Iterator {
 			var items []json.RawMessage
 			err := json.Unmarshal(nodeRS.result.Data, &items)
@@ -210,10 +211,10 @@ func (tm *TaskManager) handleEdges(nodeRS nodeResult, edges []Edge) {
 				return
 			}
 			for _, item := range items {
-				tm.taskQueue <- NewTask(nodeRS.ctx, tm.taskID, edge.To.ID, item)
+				tm.send(nodeRS.ctx, edge.To.ID, tm.taskID, item)
 			}
 		} else {
-			tm.taskQueue <- NewTask(nodeRS.ctx, tm.taskID, edge.To.ID, nodeRS.result.Data)
+			tm.send(nodeRS.ctx, edge.To.ID, tm.taskID, nodeRS.result.Data)
 		}
 	}
 }
