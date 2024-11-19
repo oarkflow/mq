@@ -3,14 +3,13 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 
 	v2 "github.com/oarkflow/mq/dag/v2"
 )
 
 func main() {
 	dag := v2.NewDAG(func(taskID string, result v2.Result) {
-		fmt.Printf("Final resuslt for Task %s: %s\n", taskID, string(result.Data))
+		// fmt.Printf("Final resuslt for Task %s: %s\n", taskID, string(result.Data))
 	})
 	dag.AddNode(v2.Function, "GetData", GetData, true)
 	dag.AddNode(v2.Function, "Loop", Loop)
@@ -28,8 +27,8 @@ func main() {
 	if dag.Error != nil {
 		panic(dag.Error)
 	}
-	rs := dag.ProcessTask(context.Background(), data)
-	fmt.Println(rs.Status, rs.Topic, string(rs.Data))
+	dag.ProcessTask(context.Background(), data)
+	// fmt.Println(rs.Status, rs.Topic, string(rs.Data))
 }
 
 func GetData(ctx context.Context, payload json.RawMessage) v2.Result {
@@ -53,7 +52,6 @@ func ValidateAge(ctx context.Context, payload json.RawMessage) v2.Result {
 	}
 	data["age_voter"] = data["age"] == "18"
 	updatedPayload, _ := json.Marshal(data)
-	fmt.Println("ValidateAge", data)
 	return v2.Result{Data: updatedPayload, Ctx: ctx, ConditionStatus: status}
 }
 
@@ -64,7 +62,6 @@ func ValidateGender(ctx context.Context, payload json.RawMessage) v2.Result {
 	}
 	data["female_voter"] = data["gender"] == "female"
 	updatedPayload, _ := json.Marshal(data)
-	fmt.Println("ValidateGender", data)
 	return v2.Result{Data: updatedPayload, Ctx: ctx}
 }
 
@@ -75,6 +72,5 @@ func Final(ctx context.Context, payload json.RawMessage) v2.Result {
 	}
 	data["done"] = true
 	updatedPayload, _ := json.Marshal(data)
-	fmt.Println("Final", data)
 	return v2.Result{Data: updatedPayload, Ctx: ctx}
 }

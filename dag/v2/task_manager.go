@@ -92,7 +92,6 @@ func (tm *TaskManager) Run() {
 					fmt.Println("Task queue closed")
 					return
 				}
-				fmt.Printf("Processing task for node: %s\n", task.nodeID)
 				tm.processNode(task)
 			}
 		}
@@ -178,26 +177,15 @@ func (tm *TaskManager) onNodeCompleted(nodeRS nodeResult) {
 		return
 	}
 	edges := tm.getConditionalEdges(node, nodeRS.result)
-	if nodeRS.result.Error != nil || len(edges) == 0 || nodeRS.status == StatusFailed {
-		parentNodes, err := tm.dag.GetPreviousNodes(nodeRS.nodeID)
-		if err == nil {
-			for _, parentNode := range parentNodes {
-				tm.mu.Lock()
-				state := tm.taskStates[parentNode.ID]
-				if state == nil {
-					state = newTaskState(parentNode.ID)
-					tm.taskStates[parentNode.ID] = state
-				}
-				state.targetResults.Set(nodeRS.nodeID, nodeRS.result)
-				allTargetNodesDone := len(parentNode.Edges) == state.targetResults.Size()
-				tm.mu.Unlock()
-				if tm.areAllTargetNodesCompleted(parentNode.ID) && allTargetNodesDone {
-					tm.aggregateResults(parentNode.ID)
-				}
-			}
-		}
+	hasErrorOrCompleted := nodeRS.result.Error != nil || len(edges) == 0 || nodeRS.status == StatusFailed
+	if hasErrorOrCompleted {
+		tm.checkParentNodes(nodeRS)
 		return
 	}
+	tm.handleEdges(nodeRS, edges)
+}
+
+func (tm *TaskManager) handleEdges(nodeRS nodeResult, edges []Edge) {
 	for _, edge := range edges {
 		if edge.Type == Simple {
 			if _, ok := tm.dag.iteratorNodes.Get(edge.From.ID); ok {
@@ -226,6 +214,26 @@ func (tm *TaskManager) onNodeCompleted(nodeRS nodeResult) {
 			}
 		} else {
 			tm.taskQueue <- NewTask(nodeRS.ctx, tm.taskID, edge.To.ID, nodeRS.result.Data)
+		}
+	}
+}
+
+func (tm *TaskManager) checkParentNodes(nodeRS nodeResult) {
+	parentNodes, err := tm.dag.GetPreviousNodes(nodeRS.nodeID)
+	if err == nil {
+		for _, parentNode := range parentNodes {
+			tm.mu.Lock()
+			state := tm.taskStates[parentNode.ID]
+			if state == nil {
+				state = newTaskState(parentNode.ID)
+				tm.taskStates[parentNode.ID] = state
+			}
+			state.targetResults.Set(nodeRS.nodeID, nodeRS.result)
+			allTargetNodesDone := len(parentNode.Edges) == state.targetResults.Size()
+			tm.mu.Unlock()
+			if tm.areAllTargetNodesCompleted(parentNode.ID) && allTargetNodesDone {
+				tm.aggregateResults(parentNode.ID)
+			}
 		}
 	}
 }
