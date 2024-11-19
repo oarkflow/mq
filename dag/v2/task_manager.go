@@ -11,6 +11,10 @@ import (
 	"github.com/oarkflow/mq/storage/memory"
 )
 
+var (
+	Delimiter = "___"
+)
+
 type TaskState struct {
 	NodeID        string
 	Status        TaskStatus
@@ -28,6 +32,7 @@ type nodeResult struct {
 
 type TaskManager struct {
 	taskStates  map[string]*TaskState
+	itemsTopic  storage.IMap[string, string]
 	currentNode string
 	dag         *DAG
 	taskID      string
@@ -58,6 +63,7 @@ func NewTaskManager(dag *DAG, taskID string, resultCh chan Result) *TaskManager 
 		taskStates:  make(map[string]*TaskState),
 		taskQueue:   make(chan *Task, 100),
 		resultQueue: make(chan nodeResult, 100),
+		itemsTopic:  memory.New[string, string](),
 		resultCh:    resultCh,
 		taskID:      taskID,
 		dag:         dag,
@@ -92,15 +98,17 @@ func (tm *TaskManager) Run() {
 					fmt.Println("Task queue closed")
 					return
 				}
-				fmt.Printf("Processing task for node: %s\n", task.nodeID)
+				fmt.Printf("Processing task for node: %s with payload: %s\n", task.nodeID, string(task.payload))
 				tm.processNode(task)
+			case <-time.After(5 * time.Second):
+				fmt.Println("Task queue idle for 5 seconds")
 			}
 		}
 	}()
 }
 
 func (tm *TaskManager) processNode(exec *Task) {
-	node, exists := tm.dag.nodes.Get(exec.nodeID)
+	node, exists := tm.dag.GetNode(exec.nodeID)
 	if !exists {
 		fmt.Printf("Node %s does not exist\n", exec.nodeID)
 		return
@@ -130,6 +138,7 @@ func (tm *TaskManager) processNode(exec *Task) {
 			state.Status = StatusCompleted
 		}
 	}
+	result.Status = state.Status
 	if node.Type == Page {
 		tm.resultCh <- result
 		return
@@ -146,8 +155,10 @@ func (tm *TaskManager) WaitForResult() {
 					fmt.Println("Result queue closed")
 					return
 				}
-				fmt.Printf("Processing result for node: %s %v %s\n", nr.nodeID, string(nr.result.Data), nr.status)
+				fmt.Printf("Processing result for node: %s with result: %v %s\n", nr.nodeID, string(nr.result.Data), nr.result.Status)
 				tm.onNodeCompleted(nr)
+			case <-time.After(5 * time.Second):
+				fmt.Println("Result queue idle for 5 seconds")
 			}
 		}
 	}()
@@ -159,11 +170,11 @@ func (tm *TaskManager) getConditionalEdges(node *Node, result Result) []Edge {
 	if result.ConditionStatus != "" {
 		if conditions, ok := tm.dag.conditions[result.Topic]; ok {
 			if targetNodeKey, ok := conditions[result.ConditionStatus]; ok {
-				if targetNode, ok := tm.dag.nodes.Get(targetNodeKey); ok {
+				if targetNode, ok := tm.dag.GetNode(targetNodeKey); ok {
 					edges = append(edges, Edge{From: node, To: targetNode})
 				}
 			} else if targetNodeKey, ok = conditions["default"]; ok {
-				if targetNode, ok := tm.dag.nodes.Get(targetNodeKey); ok {
+				if targetNode, ok := tm.dag.GetNode(targetNodeKey); ok {
 					edges = append(edges, Edge{From: node, To: targetNode})
 				}
 			}
@@ -173,29 +184,14 @@ func (tm *TaskManager) getConditionalEdges(node *Node, result Result) []Edge {
 }
 
 func (tm *TaskManager) onNodeCompleted(nodeRS nodeResult) {
-	node, ok := tm.dag.nodes.Get(nodeRS.nodeID)
+	node, ok := tm.dag.GetNode(nodeRS.nodeID)
 	if !ok {
 		return
 	}
 	edges := tm.getConditionalEdges(node, nodeRS.result)
-	if nodeRS.result.Error != nil || len(edges) == 0 || nodeRS.status == StatusFailed {
-		parentNodes, err := tm.dag.GetPreviousNodes(nodeRS.nodeID)
-		if err == nil {
-			for _, parentNode := range parentNodes {
-				tm.mu.Lock()
-				state := tm.taskStates[parentNode.ID]
-				if state == nil {
-					state = newTaskState(parentNode.ID)
-					tm.taskStates[parentNode.ID] = state
-				}
-				state.targetResults.Set(nodeRS.nodeID, nodeRS.result)
-				allTargetNodesDone := len(parentNode.Edges) == state.targetResults.Size()
-				tm.mu.Unlock()
-				if tm.areAllTargetNodesCompleted(parentNode.ID) && allTargetNodesDone {
-					tm.aggregateResults(parentNode.ID)
-				}
-			}
-		}
+	hasErrorOrCompleted := nodeRS.result.Error != nil || len(edges) == 0 || nodeRS.status == StatusFailed
+	tm.checkAndAggregateResults(nodeRS, hasErrorOrCompleted)
+	if hasErrorOrCompleted {
 		return
 	}
 	for _, edge := range edges {
@@ -230,8 +226,45 @@ func (tm *TaskManager) onNodeCompleted(nodeRS nodeResult) {
 	}
 }
 
+func (tm *TaskManager) checkAndAggregateResults(nodeRS nodeResult, hasErrorOrCompleted bool) {
+	if !hasErrorOrCompleted {
+		return
+	}
+	parentNodes, err := tm.dag.GetPreviousNodes(nodeRS.nodeID)
+	if err != nil {
+		return
+	}
+	if len(parentNodes) == 0 {
+		currentNodeState := tm.taskStates[nodeRS.nodeID]
+		if currentNodeState != nil {
+			tm.processFinalResult(currentNodeState)
+		}
+		return
+	}
+	for _, parentNode := range parentNodes {
+		tm.mu.Lock()
+		state := tm.taskStates[parentNode.ID]
+		if state == nil {
+			state = newTaskState(parentNode.ID)
+			tm.taskStates[parentNode.ID] = state
+		}
+		state.targetResults.Set(nodeRS.nodeID, nodeRS.result)
+		allTargetNodesDone := len(parentNode.Edges) == state.targetResults.Size()
+		tm.mu.Unlock()
+		if parentNode.ID == "Loop" {
+			fmt.Println(state.targetResults.AsMap())
+			fmt.Println(len(parentNode.Edges), state.targetResults.Size(), tm.areAllTargetNodesCompleted(parentNode.ID), parentNode.ID)
+		}
+		if tm.areAllTargetNodesCompleted(parentNode.ID) && allTargetNodesDone {
+			parentState := tm.aggregateResults(parentNode.ID)
+			fmt.Println(parentState.NodeID, parentState.Status, string(parentState.Result.Data), "Here")
+			tm.checkAndAggregateResults(nodeResult{ctx: nodeRS.ctx, nodeID: parentNode.ID, status: nodeRS.status, result: parentState.Result}, true)
+		}
+	}
+}
+
 func (tm *TaskManager) areAllTargetNodesCompleted(parentNodeID string) bool {
-	parentNode, ok := tm.dag.nodes.Get(parentNodeID)
+	parentNode, ok := tm.dag.GetNode(parentNodeID)
 	if !ok {
 		return false
 	}
@@ -246,7 +279,7 @@ func (tm *TaskManager) areAllTargetNodesCompleted(parentNodeID string) bool {
 	return true
 }
 
-func (tm *TaskManager) aggregateResults(parentNode string) {
+func (tm *TaskManager) aggregateResults(parentNode string) *TaskState {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 	state := tm.taskStates[parentNode]
@@ -263,11 +296,11 @@ func (tm *TaskManager) aggregateResults(parentNode string) {
 	} else if state.targetResults.Size() == 1 {
 		state.Result = state.targetResults.Values()[0]
 	}
-	tm.resultCh <- state.Result
-	tm.processFinalResult(state)
+	return state
 }
 
 func (tm *TaskManager) processFinalResult(state *TaskState) {
+	tm.resultCh <- state.Result
 	state.targetResults.Clear()
 	tm.dag.finalResult(tm.taskID, state.Result)
 }

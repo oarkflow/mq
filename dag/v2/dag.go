@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/oarkflow/mq"
 	"github.com/oarkflow/mq/storage"
@@ -149,13 +150,13 @@ func (tm *DAG) AddEdge(edgeType EdgeType, from string, targets ...string) *DAG {
 	if edgeType == Iterator {
 		tm.iteratorNodes.Set(from, []Edge{})
 	}
-	node, ok := tm.nodes.Get(from)
+	node, ok := tm.GetNode(from)
 	if !ok {
 		tm.Error = fmt.Errorf("node not found %s", from)
 		return tm
 	}
 	for _, target := range targets {
-		if targetNode, ok := tm.nodes.Get(target); ok {
+		if targetNode, ok := tm.GetNode(target); ok {
 			edge := Edge{From: node, To: targetNode, Type: edgeType}
 			node.Edges = append(node.Edges, edge)
 			if edgeType != Iterator {
@@ -169,8 +170,15 @@ func (tm *DAG) AddEdge(edgeType EdgeType, from string, targets ...string) *DAG {
 	return tm
 }
 
+func (tm *DAG) GetNode(key string) (*Node, bool) {
+	if strings.Contains(key, Delimiter) {
+		key = strings.Split(key, Delimiter)[0]
+	}
+	return tm.nodes.Get(key)
+}
+
 func (tm *DAG) GetNextNodes(key string) ([]*Node, error) {
-	node, exists := tm.nodes.Get(key)
+	node, exists := tm.GetNode(key)
 	if !exists {
 		return nil, fmt.Errorf("Node with key %s does not exist", key)
 	}
@@ -180,7 +188,7 @@ func (tm *DAG) GetNextNodes(key string) ([]*Node, error) {
 	}
 	if conds, exists := tm.conditions[key]; exists {
 		for _, targetKey := range conds {
-			if targetNode, exists := tm.nodes.Get(targetKey); exists {
+			if targetNode, exists := tm.GetNode(targetKey); exists {
 				successors = append(successors, targetNode)
 			}
 		}
@@ -201,7 +209,7 @@ func (tm *DAG) GetPreviousNodes(key string) ([]*Node, error) {
 	for fromNode, conds := range tm.conditions {
 		for _, targetKey := range conds {
 			if targetKey == key {
-				node, exists := tm.nodes.Get(fromNode)
+				node, exists := tm.GetNode(fromNode)
 				if !exists {
 					return nil, fmt.Errorf("Node with key %s does not exist", fromNode)
 				}
@@ -244,7 +252,7 @@ func (tm *DAG) ProcessTask(ctx context.Context, payload []byte) Result {
 	if err != nil {
 		return Result{Error: err, Ctx: ctx}
 	}
-	node, ok := tm.nodes.Get(firstNode)
+	node, ok := tm.GetNode(firstNode)
 	if ok && node.Type != Page && payload == nil {
 		return Result{Error: fmt.Errorf("payload is required for node %s", firstNode), Ctx: ctx}
 	}
