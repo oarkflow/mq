@@ -85,8 +85,16 @@ func newTaskState(nodeID string) *TaskState {
 
 func (tm *TaskManager) Run() {
 	go func() {
-		for task := range tm.taskQueue {
-			tm.processNode(task)
+		for {
+			select {
+			case task, ok := <-tm.taskQueue:
+				if !ok {
+					fmt.Println("Task queue closed")
+					return
+				}
+				fmt.Printf("Processing task for node: %s\n", task.nodeID)
+				tm.processNode(task)
+			}
 		}
 	}()
 }
@@ -131,8 +139,16 @@ func (tm *TaskManager) processNode(exec *Task) {
 
 func (tm *TaskManager) WaitForResult() {
 	go func() {
-		for nr := range tm.resultQueue {
-			tm.onNodeCompleted(nr)
+		for {
+			select {
+			case nr, ok := <-tm.resultQueue:
+				if !ok {
+					fmt.Println("Result queue closed")
+					return
+				}
+				fmt.Printf("Processing result for node: %s %v %s\n", nr.nodeID, string(nr.result.Data), nr.status)
+				tm.onNodeCompleted(nr)
+			}
 		}
 	}()
 }
