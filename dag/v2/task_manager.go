@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -74,9 +75,7 @@ func NewTaskManager(dag *DAG, taskID string, resultCh chan Result) *TaskManager 
 }
 
 func (tm *TaskManager) ProcessTask(ctx context.Context, startNode string, payload json.RawMessage) {
-	tm.mu.Lock()
-	tm.taskStates[startNode] = newTaskState(startNode)
-	tm.mu.Unlock()
+	tm.NewState(startNode)
 	tm.taskQueue <- NewTask(ctx, tm.taskID, startNode, payload)
 }
 
@@ -87,6 +86,36 @@ func newTaskState(nodeID string) *TaskState {
 		UpdatedAt:     time.Now(),
 		targetResults: memory.New[string, Result](),
 	}
+}
+
+func (tm *TaskManager) GetPreviousNodes(node string) ([]*Node, error) {
+	node = strings.Split(node, Delimiter)[0]
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+	return tm.dag.GetPreviousNodes(node)
+}
+
+func (tm *TaskManager) GetState(node string) *TaskState {
+	node = getKey(node)
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+	return tm.taskStates[node]
+}
+
+func (tm *TaskManager) NewState(node string) *TaskState {
+	node = getKey(node)
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+	state := newTaskState(node)
+	tm.taskStates[node] = state
+	return state
+}
+
+func getKey(node string) string {
+	if !strings.Contains(node, Delimiter) {
+		node = fmt.Sprintf("%s%s%s", node, Delimiter, "0")
+	}
+	return node
 }
 
 func (tm *TaskManager) Run() {
@@ -113,12 +142,9 @@ func (tm *TaskManager) processNode(exec *Task) {
 		fmt.Printf("Node %s does not exist\n", exec.nodeID)
 		return
 	}
-	tm.mu.Lock()
-	defer tm.mu.Unlock()
-	state := tm.taskStates[exec.nodeID]
+	state := tm.GetState(exec.nodeID)
 	if state == nil {
-		state = newTaskState(exec.nodeID)
-		tm.taskStates[exec.nodeID] = state
+		state = tm.NewState(exec.nodeID)
 	}
 	state.Status = StatusProcessing
 	state.UpdatedAt = time.Now()
@@ -200,11 +226,9 @@ func (tm *TaskManager) onNodeCompleted(nodeRS nodeResult) {
 				continue
 			}
 		}
-		tm.mu.Lock()
-		if _, exists := tm.taskStates[edge.To.ID]; !exists {
-			tm.taskStates[edge.To.ID] = newTaskState(edge.To.ID)
+		if state := tm.GetState(edge.To.ID); state == nil {
+			tm.NewState(edge.To.ID)
 		}
-		tm.mu.Unlock()
 		if edge.Type == Iterator {
 			var items []json.RawMessage
 			err := json.Unmarshal(nodeRS.result.Data, &items)
@@ -217,11 +241,24 @@ func (tm *TaskManager) onNodeCompleted(nodeRS nodeResult) {
 				}
 				return
 			}
-			for _, item := range items {
-				tm.taskQueue <- NewTask(nodeRS.ctx, tm.taskID, edge.To.ID, item)
+			for i, item := range items {
+				suffixedNodeID := fmt.Sprintf("%s%s%d", edge.To.ID, Delimiter, i)
+				ctx := context.WithValue(nodeRS.ctx, "index", suffixedNodeID)
+				tm.itemsTopic.Set(suffixedNodeID, edge.To.ID)
+				tm.taskQueue <- NewTask(ctx, tm.taskID, suffixedNodeID, item)
 			}
 		} else {
-			tm.taskQueue <- NewTask(nodeRS.ctx, tm.taskID, edge.To.ID, nodeRS.result.Data)
+			index := "0"
+			possibleIndex, exists := nodeRS.ctx.Value("index").(string)
+			if exists {
+				i := strings.Split(possibleIndex, Delimiter)
+				if len(i) == 2 {
+					index = i[1]
+				}
+			}
+			suffixedNodeID := fmt.Sprintf("%s%s%s", edge.To.ID, Delimiter, index)
+			tm.itemsTopic.Set(suffixedNodeID, edge.To.ID)
+			tm.taskQueue <- NewTask(nodeRS.ctx, tm.taskID, suffixedNodeID, nodeRS.result.Data)
 		}
 	}
 }
@@ -230,35 +267,38 @@ func (tm *TaskManager) checkAndAggregateResults(nodeRS nodeResult, hasErrorOrCom
 	if !hasErrorOrCompleted {
 		return
 	}
-	parentNodes, err := tm.dag.GetPreviousNodes(nodeRS.nodeID)
+	parentNodes, err := tm.GetPreviousNodes(nodeRS.nodeID)
 	if err != nil {
 		return
 	}
+	fmt.Println(nodeRS.nodeID)
 	if len(parentNodes) == 0 {
-		currentNodeState := tm.taskStates[nodeRS.nodeID]
+		currentNodeState := tm.GetState(nodeRS.nodeID)
 		if currentNodeState != nil {
 			tm.processFinalResult(currentNodeState)
 		}
 		return
 	}
 	for _, parentNode := range parentNodes {
-		tm.mu.Lock()
-		state := tm.taskStates[parentNode.ID]
+		state := tm.GetState(parentNode.ID)
 		if state == nil {
-			state = newTaskState(parentNode.ID)
-			tm.taskStates[parentNode.ID] = state
+			state = tm.NewState(parentNode.ID)
 		}
-		state.targetResults.Set(nodeRS.nodeID, nodeRS.result)
+		originalNodeID := nodeRS.nodeID
+		if mappedID, exists := tm.itemsTopic.Get(nodeRS.nodeID); exists {
+			originalNodeID = mappedID // Retrieve original node ID
+		}
+		state.targetResults.Set(originalNodeID, nodeRS.result)
 		allTargetNodesDone := len(parentNode.Edges) == state.targetResults.Size()
-		tm.mu.Unlock()
-		if parentNode.ID == "Loop" {
-			fmt.Println(state.targetResults.AsMap())
-			fmt.Println(len(parentNode.Edges), state.targetResults.Size(), tm.areAllTargetNodesCompleted(parentNode.ID), parentNode.ID)
-		}
+
 		if tm.areAllTargetNodesCompleted(parentNode.ID) && allTargetNodesDone {
 			parentState := tm.aggregateResults(parentNode.ID)
-			fmt.Println(parentState.NodeID, parentState.Status, string(parentState.Result.Data), "Here")
-			tm.checkAndAggregateResults(nodeResult{ctx: nodeRS.ctx, nodeID: parentNode.ID, status: nodeRS.status, result: parentState.Result}, true)
+			tm.checkAndAggregateResults(nodeResult{
+				ctx:    nodeRS.ctx,
+				nodeID: parentNode.ID,
+				status: nodeRS.status,
+				result: parentState.Result,
+			}, true)
 		}
 	}
 }
@@ -268,10 +308,8 @@ func (tm *TaskManager) areAllTargetNodesCompleted(parentNodeID string) bool {
 	if !ok {
 		return false
 	}
-	tm.mu.Lock()
-	defer tm.mu.Unlock()
 	for _, targetNode := range parentNode.Edges {
-		state := tm.taskStates[targetNode.To.ID]
+		state := tm.GetState(targetNode.To.ID)
 		if state == nil || state.Status != StatusCompleted {
 			return false
 		}
@@ -279,10 +317,8 @@ func (tm *TaskManager) areAllTargetNodesCompleted(parentNodeID string) bool {
 	return true
 }
 
-func (tm *TaskManager) aggregateResults(parentNode string) *TaskState {
-	tm.mu.Lock()
-	defer tm.mu.Unlock()
-	state := tm.taskStates[parentNode]
+func (tm *TaskManager) aggregateResults(parentNodeID string) *TaskState {
+	state := tm.GetState(parentNodeID)
 	if state.targetResults.Size() > 1 {
 		aggregatedData := make([]json.RawMessage, state.targetResults.Size())
 		i := 0
