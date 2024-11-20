@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/oarkflow/mq/storage"
@@ -39,13 +38,12 @@ type nodeResult struct {
 }
 
 type TaskManager struct {
-	taskStates  map[string]*TaskState
+	taskStates  storage.IMap[string, *TaskState]
 	parentNodes storage.IMap[string, string]
 	childNodes  storage.IMap[string, int]
 	currentNode string
 	dag         *DAG
 	taskID      string
-	mu          sync.RWMutex
 	taskQueue   chan *Task
 	resultQueue chan nodeResult
 	resultCh    chan Result
@@ -69,7 +67,7 @@ func NewTask(ctx context.Context, taskID, nodeID string, payload json.RawMessage
 
 func NewTaskManager(dag *DAG, taskID string, resultCh chan Result) *TaskManager {
 	tm := &TaskManager{
-		taskStates:  make(map[string]*TaskState),
+		taskStates:  memory.New[string, *TaskState](),
 		parentNodes: memory.New[string, string](),
 		childNodes:  memory.New[string, int](),
 		taskQueue:   make(chan *Task, 100),
@@ -92,62 +90,53 @@ func (tm *TaskManager) send(ctx context.Context, startNode, taskID string, paylo
 		startNode = strings.Split(startNode, Delimiter)[0]
 		startNode = fmt.Sprintf("%s%s%s", startNode, Delimiter, index)
 	}
-
-	tm.mu.Lock()
-	tm.taskStates[startNode] = newTaskState(startNode)
-	tm.mu.Unlock()
+	tm.taskStates.Set(startNode, newTaskState(startNode))
 	tm.taskQueue <- NewTask(ctx, taskID, startNode, payload)
 }
 
 func (tm *TaskManager) Run() {
-	go func() {
-		for {
-			select {
-			case task, ok := <-tm.taskQueue:
-				if !ok {
-					fmt.Println("Task queue closed")
-					return
-				}
-				tm.processNode(task)
+	for {
+		select {
+		case task, ok := <-tm.taskQueue:
+			if !ok {
+				fmt.Println("Task queue closed")
+				return
 			}
+			tm.processNode(task)
 		}
-	}()
+	}
 }
 
 func (tm *TaskManager) WaitForResult() {
-	go func() {
-		for {
-			select {
-			case nr, ok := <-tm.resultQueue:
-				if !ok {
-					fmt.Println("Result queue closed")
-					return
-				}
-				fmt.Printf("Processing result for node: %s %v %s\n", nr.nodeID, string(nr.result.Data), nr.status)
-				tm.onNodeCompleted(nr)
+	for {
+		select {
+		case nr, ok := <-tm.resultQueue:
+			if !ok {
+				fmt.Println("Result queue closed")
+				return
 			}
+			tm.onNodeCompleted(nr)
 		}
-	}()
+	}
 }
 
 func (tm *TaskManager) processNode(exec *Task) {
 	pureNodeID := strings.Split(exec.nodeID, Delimiter)[0]
 	node, exists := tm.dag.nodes.Get(pureNodeID)
 	if !exists {
-		fmt.Printf("Node %s does not exist\n", pureNodeID)
+		fmt.Printf("Node %s does not exist while processing node\n", pureNodeID)
 		return
 	}
-	tm.mu.Lock()
-	state := tm.taskStates[exec.nodeID]
+	state, _ := tm.taskStates.Get(exec.nodeID)
 	if state == nil {
 		state = newTaskState(exec.nodeID)
-		tm.taskStates[exec.nodeID] = state
+		tm.taskStates.Set(exec.nodeID, state)
 	}
-	tm.mu.Unlock()
 	state.Status = StatusProcessing
 	state.UpdatedAt = time.Now()
 	tm.currentNode = exec.nodeID
 	result := node.Handler(exec.ctx, exec.payload)
+	state.Result = result
 	result.Topic = node.ID
 	if result.Error != nil {
 		tm.resultCh <- result
@@ -197,7 +186,6 @@ func (tm *TaskManager) handlePrevious(ctx context.Context, state *TaskState, res
 	if result.Error != nil {
 		state.Status = StatusFailed
 	}
-	fmt.Printf("Processing result for node: %s %v %s\n", state.NodeID, string(state.Result.Data), state.Status)
 	pn, ok := tm.parentNodes.Get(state.NodeID)
 	if edges, exists := tm.dag.iteratorNodes.Get(nodeID[0]); exists && state.Status == StatusCompleted {
 		state.Status = StatusProcessing
@@ -215,7 +203,7 @@ func (tm *TaskManager) handlePrevious(ctx context.Context, state *TaskState, res
 		tm.handleEdges(toProcess, edges)
 	} else if ok {
 		if targetsCount == size {
-			parentState, _ := tm.taskStates[pn]
+			parentState, _ := tm.taskStates.Get(pn)
 			if parentState != nil {
 				state.Result.Topic = state.NodeID
 				tm.handlePrevious(ctx, parentState, state.Result, state.NodeID)
@@ -263,7 +251,7 @@ func (tm *TaskManager) onNodeCompleted(rs nodeResult) {
 			childNode := fmt.Sprintf("%s%s%s", node.ID, Delimiter, index)
 			pn, ok := tm.parentNodes.Get(childNode)
 			if ok {
-				parentState, _ := tm.taskStates[pn]
+				parentState, _ := tm.taskStates.Get(pn)
 				if parentState != nil {
 					pn = strings.Split(pn, Delimiter)[0]
 					tm.handlePrevious(rs.ctx, parentState, rs.result, rs.nodeID)
@@ -327,12 +315,12 @@ func (tm *TaskManager) handleEdges(currentResult nodeResult, edges []Edge) {
 			}
 		} else {
 			tm.childNodes.Set(parentNode, 1)
-			index, ok := currentResult.ctx.Value("index").(string)
+			idx, ok := currentResult.ctx.Value("index").(string)
 			if !ok {
-				index = "0"
+				idx = "0"
 			}
-			childNode := fmt.Sprintf("%s%s%s", edge.To.ID, Delimiter, index)
-			ctx := context.WithValue(currentResult.ctx, "index", index)
+			childNode := fmt.Sprintf("%s%s%s", edge.To.ID, Delimiter, idx)
+			ctx := context.WithValue(currentResult.ctx, "index", idx)
 			tm.parentNodes.Set(childNode, parentNode)
 			tm.send(ctx, edge.To.ID, tm.taskID, currentResult.result.Data)
 		}

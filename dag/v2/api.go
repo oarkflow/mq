@@ -2,7 +2,9 @@ package v2
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/oarkflow/mq/consts"
 	"github.com/oarkflow/mq/jsonparser"
@@ -15,6 +17,10 @@ func (tm *DAG) render(w http.ResponseWriter, request *http.Request) {
 		return
 	}
 	result := tm.ProcessTask(ctx, data)
+	if result.Error != nil {
+		http.Error(w, fmt.Sprintf(`{"message": "%s"}`, result.Error.Error()), http.StatusInternalServerError)
+		return
+	}
 	contentType, ok := result.Ctx.Value(consts.ContentType).(string)
 	if !ok {
 		contentType = consts.TypeJson
@@ -49,10 +55,12 @@ func (tm *DAG) taskStatusHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	result := make(map[string]TaskState)
-	for key, value := range manager.taskStates {
+	manager.taskStates.ForEach(func(key string, value *TaskState) bool {
+		key = strings.Split(key, Delimiter)[0]
+		nodeID := strings.Split(value.NodeID, Delimiter)[0]
 		rs := jsonparser.Delete(value.Result.Data, "html_content")
 		state := TaskState{
-			NodeID:    value.NodeID,
+			NodeID:    nodeID,
 			Status:    value.Status,
 			UpdatedAt: value.UpdatedAt,
 			Result: Result{
@@ -62,7 +70,8 @@ func (tm *DAG) taskStatusHandler(w http.ResponseWriter, r *http.Request) {
 			},
 		}
 		result[key] = state
-	}
+		return true
+	})
 	w.Header().Set(consts.ContentType, consts.TypeJson)
 	json.NewEncoder(w).Encode(result)
 }

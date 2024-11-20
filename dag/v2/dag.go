@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/oarkflow/mq"
 	"github.com/oarkflow/mq/storage"
@@ -170,9 +171,10 @@ func (tm *DAG) AddEdge(edgeType EdgeType, from string, targets ...string) *DAG {
 }
 
 func (tm *DAG) GetNextNodes(key string) ([]*Node, error) {
+	key = strings.Split(key, Delimiter)[0]
 	node, exists := tm.nodes.Get(key)
 	if !exists {
-		return nil, fmt.Errorf("Node with key %s does not exist", key)
+		return nil, fmt.Errorf("Node with key %s does not exist while getting next node", key)
 	}
 	var successors []*Node
 	for _, edge := range node.Edges {
@@ -189,6 +191,7 @@ func (tm *DAG) GetNextNodes(key string) ([]*Node, error) {
 }
 
 func (tm *DAG) GetPreviousNodes(key string) ([]*Node, error) {
+	key = strings.Split(key, Delimiter)[0]
 	var predecessors []*Node
 	tm.nodes.ForEach(func(_ string, node *Node) bool {
 		for _, target := range node.Edges {
@@ -203,7 +206,7 @@ func (tm *DAG) GetPreviousNodes(key string) ([]*Node, error) {
 			if targetKey == key {
 				node, exists := tm.nodes.Get(fromNode)
 				if !exists {
-					return nil, fmt.Errorf("Node with key %s does not exist", fromNode)
+					return nil, fmt.Errorf("Node with key %s does not exist while getting previous node", fromNode)
 				}
 				predecessors = append(predecessors, node)
 			}
