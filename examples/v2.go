@@ -105,5 +105,5 @@ func main() {
 	if dag.Error != nil {
 		panic(dag.Error)
 	}
-	dag.Start(":8080")
+	dag.Start("0.0.0.0:8080")
 }

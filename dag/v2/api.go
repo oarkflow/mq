@@ -3,6 +3,7 @@ package v2
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 
@@ -59,14 +60,18 @@ func (tm *DAG) taskStatusHandler(w http.ResponseWriter, r *http.Request) {
 		key = strings.Split(key, Delimiter)[0]
 		nodeID := strings.Split(value.NodeID, Delimiter)[0]
 		rs := jsonparser.Delete(value.Result.Data, "html_content")
+		status := value.Status
+		if status == StatusProcessing {
+			status = StatusCompleted
+		}
 		state := TaskState{
 			NodeID:    nodeID,
-			Status:    value.Status,
+			Status:    status,
 			UpdatedAt: value.UpdatedAt,
 			Result: Result{
 				Data:   rs,
 				Error:  value.Result.Error,
-				Status: value.Result.Status,
+				Status: status,
 			},
 		}
 		result[key] = state
@@ -79,5 +84,6 @@ func (tm *DAG) taskStatusHandler(w http.ResponseWriter, r *http.Request) {
 func (tm *DAG) Start(addr string) {
 	http.HandleFunc("/process", tm.render)
 	http.HandleFunc("/task/status", tm.taskStatusHandler)
+	log.Printf("Server listening on http://%s", addr)
 	http.ListenAndServe(addr, nil)
 }
