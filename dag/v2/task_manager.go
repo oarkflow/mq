@@ -41,7 +41,7 @@ type nodeResult struct {
 type TaskManager struct {
 	taskStates  map[string]*TaskState
 	parentNodes map[string]string
-	childNodes  map[string]int
+	childNodes  storage.IMap[string, int]
 	currentNode string
 	dag         *DAG
 	taskID      string
@@ -71,7 +71,7 @@ func NewTaskManager(dag *DAG, taskID string, resultCh chan Result) *TaskManager 
 	tm := &TaskManager{
 		taskStates:  make(map[string]*TaskState),
 		parentNodes: make(map[string]string),
-		childNodes:  make(map[string]int),
+		childNodes:  memory.New[string, int](),
 		taskQueue:   make(chan *Task, 100),
 		resultQueue: make(chan nodeResult, 100),
 		resultCh:    resultCh,
@@ -153,7 +153,14 @@ func (tm *TaskManager) processNode(exec *Task) {
 }
 
 func (tm *TaskManager) handleResult(ctx context.Context, node *Node, state *TaskState, result Result) {
-	if state.targetResults.Size() == len(node.Edges) {
+
+}
+
+func (tm *TaskManager) handlePrevious(ctx context.Context, state *TaskState, result Result, childNode string) {
+	state.targetResults.Set(childNode, result)
+	state.targetResults.Del(state.NodeID)
+	targetsCount, _ := tm.childNodes.Get(state.NodeID)
+	if state.targetResults.Size() == targetsCount {
 		if state.targetResults.Size() > 1 {
 			aggregatedData := make([]json.RawMessage, state.targetResults.Size())
 			i := 0
@@ -170,6 +177,8 @@ func (tm *TaskManager) handleResult(ctx context.Context, node *Node, state *Task
 		} else if state.targetResults.Size() == 1 {
 			state.Result = state.targetResults.Values()[0]
 		}
+		state.Status = result.Status
+		state.Result.Status = result.Status
 	}
 	if state.Result.Data == nil {
 		state.Result.Data = result.Data
@@ -181,48 +190,36 @@ func (tm *TaskManager) handleResult(ctx context.Context, node *Node, state *Task
 	if result.Error != nil {
 		state.Status = StatusFailed
 	}
-	if _, hasParent := tm.parentNodes[result.Topic]; !hasParent {
-		if len(node.Edges) == 0 {
-			state.Status = StatusCompleted
-		}
-	}
-	if strings.Contains(state.NodeID, tm.dag.startNode) {
-		fmt.Println(string(state.Result.Data))
-	}
-}
-
-func (tm *TaskManager) handlePrevious(ctx context.Context, node *Node, state *TaskState, result Result) {
-	tm.handleResult(ctx, node, state, result)
-
-	if index, ok := ctx.Value("index").(string); ok {
-		childNode := fmt.Sprintf("%s%s%s", node.ID, Delimiter, index)
-		tm.mu.Lock()
-		pn, ok := tm.parentNodes[childNode]
-		tm.mu.Unlock()
-		if !ok {
-			childNode = fmt.Sprintf("%s%s%s", node.ID, Delimiter, "0")
-			pn, ok = tm.parentNodes[childNode]
-		}
-		if ok {
+	fmt.Printf("Processing result for node: %s %v %s\n", state.NodeID, string(state.Result.Data), state.Status)
+	tm.mu.Lock()
+	pn, ok := tm.parentNodes[state.NodeID]
+	tm.mu.Unlock()
+	if ok {
+		if targetsCount == state.targetResults.Size() {
 			parentState, _ := tm.taskStates[pn]
 			if parentState != nil {
-				result.Topic = childNode
-				_, hasParent := tm.parentNodes[pn]
-				if !hasParent {
-					parentState.targetResults.Set(childNode, state.Result)
-				} else {
-					parentState.targetResults.Set(childNode, result)
-				}
-				pn = strings.Split(pn, Delimiter)[0]
-				parentNode, _ := tm.dag.nodes.Get(pn)
-				tm.handlePrevious(ctx, parentNode, parentState, result)
+				tm.handlePrevious(ctx, parentState, state.Result, state.NodeID)
 			}
 		}
+	} else {
+		tm.resultCh <- state.Result
+		tm.processFinalResult(state)
 	}
 }
 
 func (tm *TaskManager) handleNext(ctx context.Context, node *Node, state *TaskState, result Result) {
-	tm.handleResult(ctx, node, state, result)
+	state.UpdatedAt = time.Now()
+	if result.Ctx == nil {
+		result.Ctx = ctx
+	}
+	if result.Error != nil {
+		state.Status = StatusFailed
+	} else {
+		edges := tm.getConditionalEdges(node, result)
+		if len(edges) == 0 {
+			state.Status = StatusCompleted
+		}
+	}
 	if node.Type == Page {
 		tm.resultCh <- result
 		return
@@ -230,18 +227,19 @@ func (tm *TaskManager) handleNext(ctx context.Context, node *Node, state *TaskSt
 	if result.Status == "" {
 		result.Status = state.Status
 	}
-	tm.resultQueue <- nodeResult{nodeID: node.ID, result: result, ctx: ctx, status: state.Status}
+	tm.resultQueue <- nodeResult{nodeID: state.NodeID, result: result, ctx: ctx, status: state.Status}
 }
 
-func (tm *TaskManager) onNodeCompleted(nodeRS nodeResult) {
-	node, ok := tm.dag.nodes.Get(nodeRS.nodeID)
+func (tm *TaskManager) onNodeCompleted(rs nodeResult) {
+	nodeID := strings.Split(rs.nodeID, Delimiter)[0]
+	node, ok := tm.dag.nodes.Get(nodeID)
 	if !ok {
 		return
 	}
-	edges := tm.getConditionalEdges(node, nodeRS.result)
-	hasErrorOrCompleted := nodeRS.result.Error != nil || len(edges) == 0 || nodeRS.status == StatusFailed
+	edges := tm.getConditionalEdges(node, rs.result)
+	hasErrorOrCompleted := rs.result.Error != nil || len(edges) == 0
 	if hasErrorOrCompleted {
-		if index, ok := nodeRS.ctx.Value("index").(string); ok {
+		if index, ok := rs.ctx.Value("index").(string); ok {
 			childNode := fmt.Sprintf("%s%s%s", node.ID, Delimiter, index)
 			tm.mu.Lock()
 			pn, ok := tm.parentNodes[childNode]
@@ -250,19 +248,13 @@ func (tm *TaskManager) onNodeCompleted(nodeRS nodeResult) {
 				parentState, _ := tm.taskStates[pn]
 				if parentState != nil {
 					pn = strings.Split(pn, Delimiter)[0]
-					parentNode, _ := tm.dag.nodes.Get(pn)
-					parentState.Status = nodeRS.status
-					parentState.Result.Status = nodeRS.status
-					nodeRS.nodeID = pn
-					nodeRS.result.Topic = pn
-					nodeRS.result.Status = parentState.Status
-					tm.handlePrevious(nodeRS.ctx, parentNode, parentState, nodeRS.result)
+					tm.handlePrevious(rs.ctx, parentState, rs.result, rs.nodeID)
 				}
 			}
 		}
 		return
 	}
-	tm.handleEdges(nodeRS, edges)
+	tm.handleEdges(rs, edges)
 }
 
 func (tm *TaskManager) getConditionalEdges(node *Node, result Result) []Edge {
@@ -309,7 +301,7 @@ func (tm *TaskManager) handleEdges(currentResult nodeResult, edges []Edge) {
 				return
 			}
 			tm.mu.Lock()
-			tm.childNodes[parentNode] = len(items)
+			tm.childNodes.Set(parentNode, len(items))
 			tm.mu.Unlock()
 			for i, item := range items {
 				childNode := fmt.Sprintf("%s%s%d", edge.To.ID, Delimiter, i)
@@ -321,7 +313,7 @@ func (tm *TaskManager) handleEdges(currentResult nodeResult, edges []Edge) {
 			}
 		} else {
 			tm.mu.Lock()
-			tm.childNodes[parentNode] = 1
+			tm.childNodes.Set(parentNode, 1)
 			tm.mu.Unlock()
 			index, ok := currentResult.ctx.Value("index").(string)
 			if !ok {
