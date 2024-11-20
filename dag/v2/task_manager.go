@@ -16,6 +16,7 @@ const (
 	Delimiter          = "___"
 	ContextIndex       = "index"
 	DefaultChannelSize = 100
+	RetryInterval      = 5 * time.Second
 )
 
 type TaskState struct {
@@ -43,16 +44,17 @@ type nodeResult struct {
 }
 
 type TaskManager struct {
-	taskStates  storage.IMap[string, *TaskState]
-	parentNodes storage.IMap[string, string]
-	childNodes  storage.IMap[string, int]
-	currentNode string
-	dag         *DAG
-	taskID      string
-	taskQueue   chan *Task
-	resultQueue chan nodeResult
-	resultCh    chan Result
-	stopCh      chan struct{}
+	taskStates    storage.IMap[string, *TaskState]
+	parentNodes   storage.IMap[string, string]
+	childNodes    storage.IMap[string, int]
+	deferredTasks storage.IMap[string, *Task]
+	currentNode   string
+	dag           *DAG
+	taskID        string
+	taskQueue     chan *Task
+	resultQueue   chan nodeResult
+	resultCh      chan Result
+	stopCh        chan struct{}
 }
 
 type Task struct {
@@ -73,15 +75,16 @@ func NewTask(ctx context.Context, taskID, nodeID string, payload json.RawMessage
 
 func NewTaskManager(dag *DAG, taskID string, resultCh chan Result) *TaskManager {
 	tm := &TaskManager{
-		taskStates:  memory.New[string, *TaskState](),
-		parentNodes: memory.New[string, string](),
-		childNodes:  memory.New[string, int](),
-		taskQueue:   make(chan *Task, DefaultChannelSize),
-		resultQueue: make(chan nodeResult, DefaultChannelSize),
-		stopCh:      make(chan struct{}),
-		resultCh:    resultCh,
-		taskID:      taskID,
-		dag:         dag,
+		taskStates:    memory.New[string, *TaskState](),
+		parentNodes:   memory.New[string, string](),
+		childNodes:    memory.New[string, int](),
+		deferredTasks: memory.New[string, *Task](),
+		taskQueue:     make(chan *Task, DefaultChannelSize),
+		resultQueue:   make(chan nodeResult, DefaultChannelSize),
+		stopCh:        make(chan struct{}),
+		resultCh:      resultCh,
+		taskID:        taskID,
+		dag:           dag,
 	}
 	go tm.run()
 	go tm.waitForResult()
@@ -100,10 +103,12 @@ func (tm *TaskManager) send(ctx context.Context, startNode, taskID string, paylo
 	if _, exists := tm.taskStates.Get(startNode); !exists {
 		tm.taskStates.Set(startNode, newTaskState(startNode))
 	}
+	task := NewTask(ctx, taskID, startNode, payload)
 	select {
-	case tm.taskQueue <- NewTask(ctx, taskID, startNode, payload):
+	case tm.taskQueue <- task:
 	default:
 		log.Println("Task queue is full, dropping task.")
+		tm.deferredTasks.Set(taskID, task)
 	}
 }
 
@@ -343,6 +348,21 @@ func (tm *TaskManager) handleEdges(currentResult nodeResult, edges []Edge) {
 			ctx := context.WithValue(currentResult.ctx, ContextIndex, idx)
 			tm.parentNodes.Set(childNode, parentNode)
 			tm.send(ctx, edge.To.ID, tm.taskID, currentResult.result.Data)
+		}
+	}
+}
+
+func (tm *TaskManager) retryDeferredTasks() {
+	for {
+		select {
+		case <-tm.stopCh:
+			log.Println("Stopping Deferred Task Retrier")
+			return
+		case <-time.After(RetryInterval):
+			tm.deferredTasks.ForEach(func(taskID string, task *Task) bool {
+				tm.send(task.ctx, task.nodeID, taskID, task.payload)
+				return true
+			})
 		}
 	}
 }
