@@ -40,7 +40,7 @@ type nodeResult struct {
 
 type TaskManager struct {
 	taskStates  map[string]*TaskState
-	parentNodes map[string]string
+	parentNodes storage.IMap[string, string]
 	childNodes  storage.IMap[string, int]
 	currentNode string
 	dag         *DAG
@@ -70,7 +70,7 @@ func NewTask(ctx context.Context, taskID, nodeID string, payload json.RawMessage
 func NewTaskManager(dag *DAG, taskID string, resultCh chan Result) *TaskManager {
 	tm := &TaskManager{
 		taskStates:  make(map[string]*TaskState),
-		parentNodes: make(map[string]string),
+		parentNodes: memory.New[string, string](),
 		childNodes:  memory.New[string, int](),
 		taskQueue:   make(chan *Task, 100),
 		resultQueue: make(chan nodeResult, 100),
@@ -138,22 +138,18 @@ func (tm *TaskManager) processNode(exec *Task) {
 		return
 	}
 	tm.mu.Lock()
-	defer tm.mu.Unlock()
 	state := tm.taskStates[exec.nodeID]
 	if state == nil {
 		state = newTaskState(exec.nodeID)
 		tm.taskStates[exec.nodeID] = state
 	}
+	tm.mu.Unlock()
 	state.Status = StatusProcessing
 	state.UpdatedAt = time.Now()
 	tm.currentNode = exec.nodeID
 	result := node.Handler(exec.ctx, exec.payload)
 	result.Topic = node.ID
 	tm.handleNext(exec.ctx, node, state, result)
-}
-
-func (tm *TaskManager) handleResult(ctx context.Context, node *Node, state *TaskState, result Result) {
-
 }
 
 func (tm *TaskManager) handlePrevious(ctx context.Context, state *TaskState, result Result, childNode string) {
@@ -191,9 +187,7 @@ func (tm *TaskManager) handlePrevious(ctx context.Context, state *TaskState, res
 		state.Status = StatusFailed
 	}
 	fmt.Printf("Processing result for node: %s %v %s\n", state.NodeID, string(state.Result.Data), state.Status)
-	tm.mu.Lock()
-	pn, ok := tm.parentNodes[state.NodeID]
-	tm.mu.Unlock()
+	pn, ok := tm.parentNodes.Get(state.NodeID)
 	if ok {
 		if targetsCount == state.targetResults.Size() {
 			parentState, _ := tm.taskStates[pn]
@@ -241,9 +235,7 @@ func (tm *TaskManager) onNodeCompleted(rs nodeResult) {
 	if hasErrorOrCompleted {
 		if index, ok := rs.ctx.Value("index").(string); ok {
 			childNode := fmt.Sprintf("%s%s%s", node.ID, Delimiter, index)
-			tm.mu.Lock()
-			pn, ok := tm.parentNodes[childNode]
-			tm.mu.Unlock()
+			pn, ok := tm.parentNodes.Get(childNode)
 			if ok {
 				parentState, _ := tm.taskStates[pn]
 				if parentState != nil {
@@ -300,30 +292,22 @@ func (tm *TaskManager) handleEdges(currentResult nodeResult, edges []Edge) {
 				}
 				return
 			}
-			tm.mu.Lock()
 			tm.childNodes.Set(parentNode, len(items))
-			tm.mu.Unlock()
 			for i, item := range items {
 				childNode := fmt.Sprintf("%s%s%d", edge.To.ID, Delimiter, i)
 				ctx := context.WithValue(currentResult.ctx, "index", fmt.Sprintf("%d", i))
-				tm.mu.Lock()
-				tm.parentNodes[childNode] = parentNode
-				tm.mu.Unlock()
+				tm.parentNodes.Set(childNode, parentNode)
 				tm.send(ctx, edge.To.ID, tm.taskID, item)
 			}
 		} else {
-			tm.mu.Lock()
 			tm.childNodes.Set(parentNode, 1)
-			tm.mu.Unlock()
 			index, ok := currentResult.ctx.Value("index").(string)
 			if !ok {
 				index = "0"
 			}
 			childNode := fmt.Sprintf("%s%s%s", edge.To.ID, Delimiter, index)
 			ctx := context.WithValue(currentResult.ctx, "index", index)
-			tm.mu.Lock()
-			tm.parentNodes[childNode] = parentNode
-			tm.mu.Unlock()
+			tm.parentNodes.Set(childNode, parentNode)
 			tm.send(ctx, edge.To.ID, tm.taskID, currentResult.result.Data)
 		}
 	}
