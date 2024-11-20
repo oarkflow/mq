@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -11,7 +12,11 @@ import (
 	"github.com/oarkflow/mq/storage/memory"
 )
 
-var Delimiter = "___"
+const (
+	Delimiter          = "___"
+	ContextIndex       = "index"
+	DefaultChannelSize = 100
+)
 
 type TaskState struct {
 	NodeID        string
@@ -47,6 +52,7 @@ type TaskManager struct {
 	taskQueue   chan *Task
 	resultQueue chan nodeResult
 	resultCh    chan Result
+	stopCh      chan struct{}
 }
 
 type Task struct {
@@ -70,14 +76,15 @@ func NewTaskManager(dag *DAG, taskID string, resultCh chan Result) *TaskManager 
 		taskStates:  memory.New[string, *TaskState](),
 		parentNodes: memory.New[string, string](),
 		childNodes:  memory.New[string, int](),
-		taskQueue:   make(chan *Task, 100),
-		resultQueue: make(chan nodeResult, 100),
+		taskQueue:   make(chan *Task, DefaultChannelSize),
+		resultQueue: make(chan nodeResult, DefaultChannelSize),
+		stopCh:      make(chan struct{}),
 		resultCh:    resultCh,
 		taskID:      taskID,
 		dag:         dag,
 	}
-	go tm.Run()
-	go tm.WaitForResult()
+	go tm.run()
+	go tm.waitForResult()
 	return tm
 }
 
@@ -86,35 +93,39 @@ func (tm *TaskManager) ProcessTask(ctx context.Context, startNode string, payloa
 }
 
 func (tm *TaskManager) send(ctx context.Context, startNode, taskID string, payload json.RawMessage) {
-	if index, ok := ctx.Value("index").(string); ok {
+	if index, ok := ctx.Value(ContextIndex).(string); ok {
 		startNode = strings.Split(startNode, Delimiter)[0]
 		startNode = fmt.Sprintf("%s%s%s", startNode, Delimiter, index)
 	}
-	tm.taskStates.Set(startNode, newTaskState(startNode))
-	tm.taskQueue <- NewTask(ctx, taskID, startNode, payload)
+	if _, exists := tm.taskStates.Get(startNode); !exists {
+		tm.taskStates.Set(startNode, newTaskState(startNode))
+	}
+	select {
+	case tm.taskQueue <- NewTask(ctx, taskID, startNode, payload):
+	default:
+		log.Println("Task queue is full, dropping task.")
+	}
 }
 
-func (tm *TaskManager) Run() {
+func (tm *TaskManager) run() {
 	for {
 		select {
-		case task, ok := <-tm.taskQueue:
-			if !ok {
-				fmt.Println("Task queue closed")
-				return
-			}
+		case <-tm.stopCh:
+			log.Println("Stopping TaskManager")
+			return
+		case task := <-tm.taskQueue:
 			tm.processNode(task)
 		}
 	}
 }
 
-func (tm *TaskManager) WaitForResult() {
+func (tm *TaskManager) waitForResult() {
 	for {
 		select {
-		case nr, ok := <-tm.resultQueue:
-			if !ok {
-				fmt.Println("Result queue closed")
-				return
-			}
+		case <-tm.stopCh:
+			log.Println("Stopping Result Listener")
+			return
+		case nr := <-tm.resultQueue:
 			tm.onNodeCompleted(nr)
 		}
 	}
@@ -124,7 +135,7 @@ func (tm *TaskManager) processNode(exec *Task) {
 	pureNodeID := strings.Split(exec.nodeID, Delimiter)[0]
 	node, exists := tm.dag.nodes.Get(pureNodeID)
 	if !exists {
-		fmt.Printf("Node %s does not exist while processing node\n", pureNodeID)
+		log.Printf("Node %s does not exist while processing node\n", pureNodeID)
 		return
 	}
 	state, _ := tm.taskStates.Get(exec.nodeID)
@@ -144,7 +155,7 @@ func (tm *TaskManager) processNode(exec *Task) {
 		return
 	}
 	if node.Type == Page {
-		tm.resultCh <- state.Result
+		tm.resultCh <- result
 		return
 	}
 	tm.handleNext(exec.ctx, node, state, result)
@@ -192,7 +203,7 @@ func (tm *TaskManager) handlePrevious(ctx context.Context, state *TaskState, res
 		tm.dag.iteratorNodes.Del(nodeID[0])
 		state.targetResults.Clear()
 		if len(nodeID) == 2 {
-			ctx = context.WithValue(ctx, "index", nodeID[1])
+			ctx = context.WithValue(ctx, ContextIndex, nodeID[1])
 		}
 		toProcess := nodeResult{
 			ctx:    ctx,
@@ -235,7 +246,16 @@ func (tm *TaskManager) handleNext(ctx context.Context, node *Node, state *TaskSt
 	if result.Status == "" {
 		result.Status = state.Status
 	}
-	tm.resultQueue <- nodeResult{nodeID: state.NodeID, result: result, ctx: ctx, status: state.Status}
+	select {
+	case tm.resultQueue <- nodeResult{
+		ctx:    ctx,
+		nodeID: state.NodeID,
+		result: result,
+		status: state.Status,
+	}:
+	default:
+		log.Println("Result queue is full, dropping result.")
+	}
 }
 
 func (tm *TaskManager) onNodeCompleted(rs nodeResult) {
@@ -247,7 +267,7 @@ func (tm *TaskManager) onNodeCompleted(rs nodeResult) {
 	edges := tm.getConditionalEdges(node, rs.result)
 	hasErrorOrCompleted := rs.result.Error != nil || len(edges) == 0
 	if hasErrorOrCompleted {
-		if index, ok := rs.ctx.Value("index").(string); ok {
+		if index, ok := rs.ctx.Value(ContextIndex).(string); ok {
 			childNode := fmt.Sprintf("%s%s%s", node.ID, Delimiter, index)
 			pn, ok := tm.parentNodes.Get(childNode)
 			if ok {
@@ -284,7 +304,7 @@ func (tm *TaskManager) getConditionalEdges(node *Node, result Result) []Edge {
 
 func (tm *TaskManager) handleEdges(currentResult nodeResult, edges []Edge) {
 	for _, edge := range edges {
-		index, ok := currentResult.ctx.Value("index").(string)
+		index, ok := currentResult.ctx.Value(ContextIndex).(string)
 		if !ok {
 			index = "0"
 		}
@@ -309,18 +329,18 @@ func (tm *TaskManager) handleEdges(currentResult nodeResult, edges []Edge) {
 			tm.childNodes.Set(parentNode, len(items))
 			for i, item := range items {
 				childNode := fmt.Sprintf("%s%s%d", edge.To.ID, Delimiter, i)
-				ctx := context.WithValue(currentResult.ctx, "index", fmt.Sprintf("%d", i))
+				ctx := context.WithValue(currentResult.ctx, ContextIndex, fmt.Sprintf("%d", i))
 				tm.parentNodes.Set(childNode, parentNode)
 				tm.send(ctx, edge.To.ID, tm.taskID, item)
 			}
 		} else {
 			tm.childNodes.Set(parentNode, 1)
-			idx, ok := currentResult.ctx.Value("index").(string)
+			idx, ok := currentResult.ctx.Value(ContextIndex).(string)
 			if !ok {
 				idx = "0"
 			}
 			childNode := fmt.Sprintf("%s%s%s", edge.To.ID, Delimiter, idx)
-			ctx := context.WithValue(currentResult.ctx, "index", idx)
+			ctx := context.WithValue(currentResult.ctx, ContextIndex, idx)
 			tm.parentNodes.Set(childNode, parentNode)
 			tm.send(ctx, edge.To.ID, tm.taskID, currentResult.result.Data)
 		}
@@ -330,4 +350,8 @@ func (tm *TaskManager) handleEdges(currentResult nodeResult, edges []Edge) {
 func (tm *TaskManager) processFinalResult(state *TaskState) {
 	state.targetResults.Clear()
 	tm.dag.finalResult(tm.taskID, state.Result)
+}
+
+func (tm *TaskManager) Stop() {
+	close(tm.stopCh)
 }

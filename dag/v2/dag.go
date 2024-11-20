@@ -251,7 +251,7 @@ func (tm *DAG) ProcessTask(ctx context.Context, payload []byte) Result {
 	if ok && node.Type != Page && payload == nil {
 		return Result{Error: fmt.Errorf("payload is required for node %s", firstNode), Ctx: ctx}
 	}
-	ctx = context.WithValue(ctx, "index", "0")
+	ctx = context.WithValue(ctx, ContextIndex, "0")
 	manager.ProcessTask(ctx, firstNode, payload)
 	return <-resultCh
 }
