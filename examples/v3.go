@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	v2 "github.com/oarkflow/mq/dag/v2"
 )
@@ -27,8 +28,8 @@ func main() {
 	if dag.Error != nil {
 		panic(dag.Error)
 	}
-	dag.ProcessTask(context.Background(), data)
-	// fmt.Println(rs.Status, rs.Topic, string(rs.Data))
+	rs := dag.ProcessTask(context.Background(), data)
+	fmt.Println(rs.Status, rs.Topic, string(rs.Data))
 }
 
 func GetData(ctx context.Context, payload json.RawMessage) v2.Result {

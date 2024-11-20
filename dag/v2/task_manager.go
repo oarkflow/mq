@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -11,7 +12,7 @@ import (
 	"github.com/oarkflow/mq/storage/memory"
 )
 
-var Delimite = "___"
+var Delimiter = "___"
 
 type TaskState struct {
 	NodeID        string
@@ -39,6 +40,8 @@ type nodeResult struct {
 
 type TaskManager struct {
 	taskStates  map[string]*TaskState
+	parentNodes map[string]string
+	childNodes  map[string]int
 	currentNode string
 	dag         *DAG
 	taskID      string
@@ -67,6 +70,8 @@ func NewTask(ctx context.Context, taskID, nodeID string, payload json.RawMessage
 func NewTaskManager(dag *DAG, taskID string, resultCh chan Result) *TaskManager {
 	tm := &TaskManager{
 		taskStates:  make(map[string]*TaskState),
+		parentNodes: make(map[string]string),
+		childNodes:  make(map[string]int),
 		taskQueue:   make(chan *Task, 100),
 		resultQueue: make(chan nodeResult, 100),
 		resultCh:    resultCh,
@@ -83,6 +88,11 @@ func (tm *TaskManager) ProcessTask(ctx context.Context, startNode string, payloa
 }
 
 func (tm *TaskManager) send(ctx context.Context, startNode, taskID string, payload json.RawMessage) {
+	if index, ok := ctx.Value("index").(string); ok {
+		startNode = strings.Split(startNode, Delimiter)[0]
+		startNode = fmt.Sprintf("%s%s%s", startNode, Delimiter, index)
+	}
+
 	tm.mu.Lock()
 	tm.taskStates[startNode] = newTaskState(startNode)
 	tm.mu.Unlock()
@@ -121,9 +131,10 @@ func (tm *TaskManager) WaitForResult() {
 }
 
 func (tm *TaskManager) processNode(exec *Task) {
-	node, exists := tm.dag.nodes.Get(exec.nodeID)
+	pureNodeID := strings.Split(exec.nodeID, Delimiter)[0]
+	node, exists := tm.dag.nodes.Get(pureNodeID)
 	if !exists {
-		fmt.Printf("Node %s does not exist\n", exec.nodeID)
+		fmt.Printf("Node %s does not exist\n", pureNodeID)
 		return
 	}
 	tm.mu.Lock()
@@ -138,24 +149,88 @@ func (tm *TaskManager) processNode(exec *Task) {
 	tm.currentNode = exec.nodeID
 	result := node.Handler(exec.ctx, exec.payload)
 	result.Topic = node.ID
+	tm.handleNext(exec.ctx, node, state, result)
+}
+
+func (tm *TaskManager) handleResult(ctx context.Context, node *Node, state *TaskState, result Result) {
+	if state.targetResults.Size() == len(node.Edges) {
+		if state.targetResults.Size() > 1 {
+			aggregatedData := make([]json.RawMessage, state.targetResults.Size())
+			i := 0
+			state.targetResults.ForEach(func(_ string, rs Result) bool {
+				aggregatedData[i] = rs.Data
+				i++
+				return true
+			})
+			aggregatedPayload, err := json.Marshal(aggregatedData)
+			if err != nil {
+				panic(err)
+			}
+			state.Result = Result{Data: aggregatedPayload, Status: StatusCompleted, Ctx: ctx, Topic: state.NodeID}
+		} else if state.targetResults.Size() == 1 {
+			state.Result = state.targetResults.Values()[0]
+		}
+	}
+	if state.Result.Data == nil {
+		state.Result.Data = result.Data
+	}
 	state.UpdatedAt = time.Now()
-	state.Result = result
 	if result.Ctx == nil {
-		result.Ctx = exec.ctx
+		result.Ctx = ctx
 	}
 	if result.Error != nil {
 		state.Status = StatusFailed
-	} else {
-		edges := tm.getConditionalEdges(node, result)
-		if len(edges) == 0 {
+	}
+	if _, hasParent := tm.parentNodes[result.Topic]; !hasParent {
+		if len(node.Edges) == 0 {
 			state.Status = StatusCompleted
 		}
 	}
+	if strings.Contains(state.NodeID, tm.dag.startNode) {
+		fmt.Println(string(state.Result.Data))
+	}
+}
+
+func (tm *TaskManager) handlePrevious(ctx context.Context, node *Node, state *TaskState, result Result) {
+	tm.handleResult(ctx, node, state, result)
+
+	if index, ok := ctx.Value("index").(string); ok {
+		childNode := fmt.Sprintf("%s%s%s", node.ID, Delimiter, index)
+		tm.mu.Lock()
+		pn, ok := tm.parentNodes[childNode]
+		tm.mu.Unlock()
+		if !ok {
+			childNode = fmt.Sprintf("%s%s%s", node.ID, Delimiter, "0")
+			pn, ok = tm.parentNodes[childNode]
+		}
+		if ok {
+			parentState, _ := tm.taskStates[pn]
+			if parentState != nil {
+				result.Topic = childNode
+				_, hasParent := tm.parentNodes[pn]
+				if !hasParent {
+					parentState.targetResults.Set(childNode, state.Result)
+				} else {
+					parentState.targetResults.Set(childNode, result)
+				}
+				pn = strings.Split(pn, Delimiter)[0]
+				parentNode, _ := tm.dag.nodes.Get(pn)
+				tm.handlePrevious(ctx, parentNode, parentState, result)
+			}
+		}
+	}
+}
+
+func (tm *TaskManager) handleNext(ctx context.Context, node *Node, state *TaskState, result Result) {
+	tm.handleResult(ctx, node, state, result)
 	if node.Type == Page {
 		tm.resultCh <- result
 		return
 	}
-	tm.resultQueue <- nodeResult{nodeID: exec.nodeID, result: result, ctx: exec.ctx, status: state.Status}
+	if result.Status == "" {
+		result.Status = state.Status
+	}
+	tm.resultQueue <- nodeResult{nodeID: node.ID, result: result, ctx: ctx, status: state.Status}
 }
 
 func (tm *TaskManager) onNodeCompleted(nodeRS nodeResult) {
@@ -166,7 +241,25 @@ func (tm *TaskManager) onNodeCompleted(nodeRS nodeResult) {
 	edges := tm.getConditionalEdges(node, nodeRS.result)
 	hasErrorOrCompleted := nodeRS.result.Error != nil || len(edges) == 0 || nodeRS.status == StatusFailed
 	if hasErrorOrCompleted {
-		// tm.checkParentNodes(nodeRS)
+		if index, ok := nodeRS.ctx.Value("index").(string); ok {
+			childNode := fmt.Sprintf("%s%s%s", node.ID, Delimiter, index)
+			tm.mu.Lock()
+			pn, ok := tm.parentNodes[childNode]
+			tm.mu.Unlock()
+			if ok {
+				parentState, _ := tm.taskStates[pn]
+				if parentState != nil {
+					pn = strings.Split(pn, Delimiter)[0]
+					parentNode, _ := tm.dag.nodes.Get(pn)
+					parentState.Status = nodeRS.status
+					parentState.Result.Status = nodeRS.status
+					nodeRS.nodeID = pn
+					nodeRS.result.Topic = pn
+					nodeRS.result.Status = parentState.Status
+					tm.handlePrevious(nodeRS.ctx, parentNode, parentState, nodeRS.result)
+				}
+			}
+		}
 		return
 	}
 	tm.handleEdges(nodeRS, edges)
@@ -191,8 +284,13 @@ func (tm *TaskManager) getConditionalEdges(node *Node, result Result) []Edge {
 	return edges
 }
 
-func (tm *TaskManager) handleEdges(nodeRS nodeResult, edges []Edge) {
+func (tm *TaskManager) handleEdges(currentResult nodeResult, edges []Edge) {
 	for _, edge := range edges {
+		index, ok := currentResult.ctx.Value("index").(string)
+		if !ok {
+			index = "0"
+		}
+		parentNode := fmt.Sprintf("%s%s%s", edge.From.ID, Delimiter, index)
 		if edge.Type == Simple {
 			if _, ok := tm.dag.iteratorNodes.Get(edge.From.ID); ok {
 				continue
@@ -200,80 +298,43 @@ func (tm *TaskManager) handleEdges(nodeRS nodeResult, edges []Edge) {
 		}
 		if edge.Type == Iterator {
 			var items []json.RawMessage
-			err := json.Unmarshal(nodeRS.result.Data, &items)
+			err := json.Unmarshal(currentResult.result.Data, &items)
 			if err != nil {
 				tm.resultQueue <- nodeResult{
-					ctx:    nodeRS.ctx,
+					ctx:    currentResult.ctx,
 					nodeID: edge.To.ID,
 					status: StatusFailed,
 					result: Result{Error: err},
 				}
 				return
 			}
-			for _, item := range items {
-				tm.send(nodeRS.ctx, edge.To.ID, tm.taskID, item)
+			tm.mu.Lock()
+			tm.childNodes[parentNode] = len(items)
+			tm.mu.Unlock()
+			for i, item := range items {
+				childNode := fmt.Sprintf("%s%s%d", edge.To.ID, Delimiter, i)
+				ctx := context.WithValue(currentResult.ctx, "index", fmt.Sprintf("%d", i))
+				tm.mu.Lock()
+				tm.parentNodes[childNode] = parentNode
+				tm.mu.Unlock()
+				tm.send(ctx, edge.To.ID, tm.taskID, item)
 			}
 		} else {
-			tm.send(nodeRS.ctx, edge.To.ID, tm.taskID, nodeRS.result.Data)
-		}
-	}
-}
-
-func (tm *TaskManager) checkParentNodes(nodeRS nodeResult) {
-	parentNodes, err := tm.dag.GetPreviousNodes(nodeRS.nodeID)
-	if err == nil {
-		for _, parentNode := range parentNodes {
 			tm.mu.Lock()
-			state := tm.taskStates[parentNode.ID]
-			if state == nil {
-				state = newTaskState(parentNode.ID)
-				tm.taskStates[parentNode.ID] = state
-			}
-			state.targetResults.Set(nodeRS.nodeID, nodeRS.result)
-			allTargetNodesDone := len(parentNode.Edges) == state.targetResults.Size()
+			tm.childNodes[parentNode] = 1
 			tm.mu.Unlock()
-			if tm.areAllTargetNodesCompleted(parentNode.ID) && allTargetNodesDone {
-				tm.aggregateResults(parentNode.ID)
+			index, ok := currentResult.ctx.Value("index").(string)
+			if !ok {
+				index = "0"
 			}
+			childNode := fmt.Sprintf("%s%s%s", edge.To.ID, Delimiter, index)
+			ctx := context.WithValue(currentResult.ctx, "index", index)
+			tm.mu.Lock()
+			tm.parentNodes[childNode] = parentNode
+			tm.mu.Unlock()
+			tm.send(ctx, edge.To.ID, tm.taskID, currentResult.result.Data)
 		}
 	}
-}
-
-func (tm *TaskManager) areAllTargetNodesCompleted(parentNodeID string) bool {
-	parentNode, ok := tm.dag.nodes.Get(parentNodeID)
-	if !ok {
-		return false
-	}
-	tm.mu.Lock()
-	defer tm.mu.Unlock()
-	for _, targetNode := range parentNode.Edges {
-		state := tm.taskStates[targetNode.To.ID]
-		if state == nil || state.Status != StatusCompleted {
-			return false
-		}
-	}
-	return true
-}
-
-func (tm *TaskManager) aggregateResults(parentNode string) {
-	tm.mu.Lock()
-	defer tm.mu.Unlock()
-	state := tm.taskStates[parentNode]
-	if state.targetResults.Size() > 1 {
-		aggregatedData := make([]json.RawMessage, state.targetResults.Size())
-		i := 0
-		state.targetResults.ForEach(func(_ string, result Result) bool {
-			aggregatedData[i] = result.Data
-			i++
-			return true
-		})
-		aggregatedPayload, _ := json.Marshal(aggregatedData)
-		state.Result = Result{Data: aggregatedPayload, Status: StatusCompleted}
-	} else if state.targetResults.Size() == 1 {
-		state.Result = state.targetResults.Values()[0]
-	}
-	tm.resultCh <- state.Result
-	tm.processFinalResult(state)
 }
 
 func (tm *TaskManager) processFinalResult(state *TaskState) {
