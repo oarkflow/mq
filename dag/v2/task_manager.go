@@ -154,6 +154,10 @@ func (tm *TaskManager) processNode(exec *Task) {
 		tm.processFinalResult(state)
 		return
 	}
+	if node.Type == Page {
+		tm.resultCh <- state.Result
+		return
+	}
 	tm.handleNext(exec.ctx, node, state, result)
 }
 
