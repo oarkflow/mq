@@ -149,6 +149,11 @@ func (tm *TaskManager) processNode(exec *Task) {
 	tm.currentNode = exec.nodeID
 	result := node.Handler(exec.ctx, exec.payload)
 	result.Topic = node.ID
+	if result.Error != nil {
+		tm.resultCh <- result
+		tm.processFinalResult(state)
+		return
+	}
 	tm.handleNext(exec.ctx, node, state, result)
 }
 
@@ -156,9 +161,11 @@ func (tm *TaskManager) handlePrevious(ctx context.Context, state *TaskState, res
 	state.targetResults.Set(childNode, result)
 	state.targetResults.Del(state.NodeID)
 	targetsCount, _ := tm.childNodes.Get(state.NodeID)
-	if state.targetResults.Size() == targetsCount {
-		if state.targetResults.Size() > 1 {
-			aggregatedData := make([]json.RawMessage, state.targetResults.Size())
+	size := state.targetResults.Size()
+	nodeID := strings.Split(state.NodeID, Delimiter)
+	if size == targetsCount {
+		if size > 1 {
+			aggregatedData := make([]json.RawMessage, size)
 			i := 0
 			state.targetResults.ForEach(func(_ string, rs Result) bool {
 				aggregatedData[i] = rs.Data
@@ -170,7 +177,7 @@ func (tm *TaskManager) handlePrevious(ctx context.Context, state *TaskState, res
 				panic(err)
 			}
 			state.Result = Result{Data: aggregatedPayload, Status: StatusCompleted, Ctx: ctx, Topic: state.NodeID}
-		} else if state.targetResults.Size() == 1 {
+		} else if size == 1 {
 			state.Result = state.targetResults.Values()[0]
 		}
 		state.Status = result.Status
@@ -187,11 +194,28 @@ func (tm *TaskManager) handlePrevious(ctx context.Context, state *TaskState, res
 		state.Status = StatusFailed
 	}
 	fmt.Printf("Processing result for node: %s %v %s\n", state.NodeID, string(state.Result.Data), state.Status)
-	pn, ok := tm.parentNodes.Get(state.NodeID)
-	if ok {
-		if targetsCount == state.targetResults.Size() {
+	tm.mu.Lock()
+	pn, ok := tm.parentNodes[state.NodeID]
+	tm.mu.Unlock()
+	if edges, exists := tm.dag.iteratorNodes.Get(nodeID[0]); exists && state.Status == StatusCompleted {
+		state.Status = StatusProcessing
+		tm.dag.iteratorNodes.Del(nodeID[0])
+		state.targetResults.Clear()
+		if len(nodeID) == 2 {
+			ctx = context.WithValue(ctx, "index", nodeID[1])
+		}
+		toProcess := nodeResult{
+			ctx:    ctx,
+			nodeID: state.NodeID,
+			status: state.Status,
+			result: state.Result,
+		}
+		tm.handleEdges(toProcess, edges)
+	} else if ok {
+		if targetsCount == size {
 			parentState, _ := tm.taskStates[pn]
 			if parentState != nil {
+				state.Result.Topic = state.NodeID
 				tm.handlePrevious(ctx, parentState, state.Result, state.NodeID)
 			}
 		}
