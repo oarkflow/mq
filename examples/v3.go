@@ -29,6 +29,9 @@ func main() {
 		panic(dag.Error)
 	}
 	rs := dag.ProcessTask(context.Background(), data)
+	if rs.Error != nil {
+		panic(rs.Error)
+	}
 	fmt.Println(rs.Status, rs.Topic, string(rs.Data))
 }
 
@@ -67,11 +70,17 @@ func ValidateGender(ctx context.Context, payload json.RawMessage) v2.Result {
 }
 
 func Final(ctx context.Context, payload json.RawMessage) v2.Result {
-	var data map[string]any
+	var data []map[string]any
 	if err := json.Unmarshal(payload, &data); err != nil {
 		return v2.Result{Error: err, Ctx: ctx}
 	}
-	data["done"] = true
-	updatedPayload, _ := json.Marshal(data)
+	for i, row := range data {
+		row["done"] = true
+		data[i] = row
+	}
+	updatedPayload, err := json.Marshal(data)
+	if err != nil {
+		panic(err)
+	}
 	return v2.Result{Data: updatedPayload, Ctx: ctx}
 }
