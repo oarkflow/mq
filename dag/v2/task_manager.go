@@ -194,9 +194,7 @@ func (tm *TaskManager) handlePrevious(ctx context.Context, state *TaskState, res
 		state.Status = StatusFailed
 	}
 	fmt.Printf("Processing result for node: %s %v %s\n", state.NodeID, string(state.Result.Data), state.Status)
-	tm.mu.Lock()
-	pn, ok := tm.parentNodes[state.NodeID]
-	tm.mu.Unlock()
+	pn, ok := tm.parentNodes.Get(state.NodeID)
 	if edges, exists := tm.dag.iteratorNodes.Get(nodeID[0]); exists && state.Status == StatusCompleted {
 		state.Status = StatusProcessing
 		tm.dag.iteratorNodes.Del(nodeID[0])
