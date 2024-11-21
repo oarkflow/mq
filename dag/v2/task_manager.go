@@ -166,7 +166,7 @@ func (tm *TaskManager) processNode(exec *Task) {
 	tm.handleNext(exec.ctx, node, state, result)
 }
 
-func (tm *TaskManager) handlePrevious(ctx context.Context, state *TaskState, result Result, childNode string) {
+func (tm *TaskManager) handlePrevious(ctx context.Context, state *TaskState, result Result, childNode string, dispatchFinal bool) {
 	state.targetResults.Set(childNode, result)
 	state.targetResults.Del(state.NodeID)
 	targetsCount, _ := tm.childNodes.Get(state.NodeID)
@@ -222,7 +222,7 @@ func (tm *TaskManager) handlePrevious(ctx context.Context, state *TaskState, res
 			parentState, _ := tm.taskStates.Get(pn)
 			if parentState != nil {
 				state.Result.Topic = state.NodeID
-				tm.handlePrevious(ctx, parentState, state.Result, state.NodeID)
+				tm.handlePrevious(ctx, parentState, state.Result, state.NodeID, dispatchFinal)
 			}
 		}
 	} else {
@@ -243,10 +243,6 @@ func (tm *TaskManager) handleNext(ctx context.Context, node *Node, state *TaskSt
 		if len(edges) == 0 {
 			state.Status = StatusCompleted
 		}
-	}
-	if node.Type == Page {
-		tm.resultCh <- result
-		return
 	}
 	if result.Status == "" {
 		result.Status = state.Status
@@ -279,7 +275,7 @@ func (tm *TaskManager) onNodeCompleted(rs nodeResult) {
 				parentState, _ := tm.taskStates.Get(pn)
 				if parentState != nil {
 					pn = strings.Split(pn, Delimiter)[0]
-					tm.handlePrevious(rs.ctx, parentState, rs.result, rs.nodeID)
+					tm.handlePrevious(rs.ctx, parentState, rs.result, rs.nodeID, true)
 				}
 			}
 		}

@@ -215,6 +215,33 @@ func (tm *DAG) GetPreviousNodes(key string) ([]*Node, error) {
 	return predecessors, nil
 }
 
+func (tm *DAG) GetLastNodes() ([]*Node, error) {
+	var lastNodes []*Node
+	tm.nodes.ForEach(func(key string, node *Node) bool {
+		if len(node.Edges) == 0 {
+			if conds, exists := tm.conditions[node.ID]; !exists || len(conds) == 0 {
+				lastNodes = append(lastNodes, node)
+			}
+		}
+		return true
+	})
+	return lastNodes, nil
+}
+
+func (tm *DAG) IsLastNode(key string) (bool, error) {
+	node, exists := tm.nodes.Get(key)
+	if !exists {
+		return false, fmt.Errorf("Node with key %s does not exist", key)
+	}
+	if len(node.Edges) > 0 {
+		return false, nil
+	}
+	if conds, exists := tm.conditions[node.ID]; exists && len(conds) > 0 {
+		return false, nil
+	}
+	return true, nil
+}
+
 func (tm *DAG) ProcessTask(ctx context.Context, payload []byte) Result {
 	var taskID string
 	userCtx := UserContext(ctx)
@@ -234,7 +261,11 @@ func (tm *DAG) ProcessTask(ctx context.Context, payload []byte) Result {
 	} else {
 		manager.resultCh = resultCh
 	}
-	if next == "true" {
+	node, exists := tm.nodes.Get(manager.currentNode)
+	method, ok := ctx.Value("method").(string)
+	if method == "GET" && exists && node.Type == Page {
+		ctx = context.WithValue(ctx, "initial_node", manager.currentNode)
+	} else if next == "true" {
 		nodes, err := tm.GetNextNodes(manager.currentNode)
 		if err != nil {
 			return Result{Error: err, Ctx: ctx}
@@ -247,7 +278,7 @@ func (tm *DAG) ProcessTask(ctx context.Context, payload []byte) Result {
 	if err != nil {
 		return Result{Error: err, Ctx: ctx}
 	}
-	node, ok := tm.nodes.Get(firstNode)
+	node, ok = tm.nodes.Get(firstNode)
 	if ok && node.Type != Page && payload == nil {
 		return Result{Error: fmt.Errorf("payload is required for node %s", firstNode), Ctx: ctx}
 	}

@@ -1,6 +1,7 @@
 package v2
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -11,11 +12,36 @@ import (
 	"github.com/oarkflow/mq/jsonparser"
 )
 
-func (tm *DAG) render(w http.ResponseWriter, request *http.Request) {
-	ctx, data, err := parse(request)
+func renderNotFound(w http.ResponseWriter) {
+	html := []byte(`
+<div>
+	<h1>Task not found</h1>
+	<p><a href="/process">Back to home</a></p>
+</div>
+`)
+	w.Header().Set(consts.ContentType, consts.TypeHtml)
+	w.Write(html)
+}
+
+func (tm *DAG) render(w http.ResponseWriter, r *http.Request) {
+	ctx, data, err := parse(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
+	}
+	accept := r.Header.Get("Accept")
+	userCtx := UserContext(ctx)
+	ctx = context.WithValue(ctx, "method", r.Method)
+	if r.Method == "GET" && userCtx.Get("task_id") != "" {
+		manager, ok := tm.taskManager.Get(userCtx.Get("task_id"))
+		if !ok || manager == nil {
+			if strings.Contains(accept, "text/html") || accept == "" {
+				renderNotFound(w)
+				return
+			}
+			http.Error(w, fmt.Sprintf(`{"message": "%s"}`, "Task not found"), http.StatusInternalServerError)
+			return
+		}
 	}
 	result := tm.ProcessTask(ctx, data)
 	if result.Error != nil {
@@ -35,7 +61,7 @@ func (tm *DAG) render(w http.ResponseWriter, request *http.Request) {
 		}
 		w.Write([]byte(data))
 	default:
-		if request.Method != "POST" {
+		if r.Method != "POST" {
 			http.Error(w, `{"message": "not allowed"}`, http.StatusMethodNotAllowed)
 			return
 		}
