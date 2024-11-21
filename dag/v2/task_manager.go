@@ -15,7 +15,7 @@ import (
 const (
 	Delimiter          = "___"
 	ContextIndex       = "index"
-	DefaultChannelSize = 100
+	DefaultChannelSize = 1000
 	RetryInterval      = 5 * time.Second
 )
 
@@ -145,6 +145,7 @@ func (tm *TaskManager) processNode(exec *Task) {
 	}
 	state, _ := tm.taskStates.Get(exec.nodeID)
 	if state == nil {
+		log.Printf("State for node %s not found; creating new state.\n", exec.nodeID)
 		state = newTaskState(exec.nodeID)
 		tm.taskStates.Set(exec.nodeID, state)
 	}
@@ -319,6 +320,7 @@ func (tm *TaskManager) handleEdges(currentResult nodeResult, edges []Edge) {
 			var items []json.RawMessage
 			err := json.Unmarshal(currentResult.result.Data, &items)
 			if err != nil {
+				log.Printf("Error unmarshalling data for node %s: %v\n", edge.To.ID, err)
 				tm.resultQueue <- nodeResult{
 					ctx:    currentResult.ctx,
 					nodeID: edge.To.ID,
@@ -349,7 +351,9 @@ func (tm *TaskManager) handleEdges(currentResult nodeResult, edges []Edge) {
 }
 
 func (tm *TaskManager) retryDeferredTasks() {
-	for {
+	const maxRetries = 5
+	retries := 0
+	for retries < maxRetries {
 		select {
 		case <-tm.stopCh:
 			log.Println("Stopping Deferred Task Retrier")
@@ -357,6 +361,7 @@ func (tm *TaskManager) retryDeferredTasks() {
 		case <-time.After(RetryInterval):
 			tm.deferredTasks.ForEach(func(taskID string, task *Task) bool {
 				tm.send(task.ctx, task.nodeID, taskID, task.payload)
+				retries++
 				return true
 			})
 		}
