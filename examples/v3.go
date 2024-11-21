@@ -10,7 +10,7 @@ import (
 
 func main() {
 	dag := v2.NewDAG(func(taskID string, result v2.Result) {
-		// fmt.Printf("Final resuslt for Task %s: %s\n", taskID, string(result.Data))
+		// fmt.Printf("Final resuslt for Task %s: %s\n", taskID, string(result.Payload))
 	})
 	dag.AddNode(v2.Function, "GetData", GetData, true)
 	dag.AddNode(v2.Function, "Loop", Loop)
@@ -32,15 +32,15 @@ func main() {
 	if rs.Error != nil {
 		panic(rs.Error)
 	}
-	fmt.Println(rs.Status, rs.Topic, string(rs.Data))
+	fmt.Println(rs.Status, rs.Topic, string(rs.Payload))
 }
 
 func GetData(ctx context.Context, payload json.RawMessage) v2.Result {
-	return v2.Result{Ctx: ctx, Data: payload}
+	return v2.Result{Ctx: ctx, Payload: payload}
 }
 
 func Loop(ctx context.Context, payload json.RawMessage) v2.Result {
-	return v2.Result{Ctx: ctx, Data: payload}
+	return v2.Result{Ctx: ctx, Payload: payload}
 }
 
 func ValidateAge(ctx context.Context, payload json.RawMessage) v2.Result {
@@ -56,7 +56,7 @@ func ValidateAge(ctx context.Context, payload json.RawMessage) v2.Result {
 	}
 	data["age_voter"] = data["age"] == "18"
 	updatedPayload, _ := json.Marshal(data)
-	return v2.Result{Data: updatedPayload, Ctx: ctx, ConditionStatus: status}
+	return v2.Result{Payload: updatedPayload, Ctx: ctx, ConditionStatus: status}
 }
 
 func ValidateGender(ctx context.Context, payload json.RawMessage) v2.Result {
@@ -66,7 +66,7 @@ func ValidateGender(ctx context.Context, payload json.RawMessage) v2.Result {
 	}
 	data["female_voter"] = data["gender"] == "female"
 	updatedPayload, _ := json.Marshal(data)
-	return v2.Result{Data: updatedPayload, Ctx: ctx}
+	return v2.Result{Payload: updatedPayload, Ctx: ctx}
 }
 
 func Final(ctx context.Context, payload json.RawMessage) v2.Result {
@@ -82,5 +82,5 @@ func Final(ctx context.Context, payload json.RawMessage) v2.Result {
 	if err != nil {
 		panic(err)
 	}
-	return v2.Result{Data: updatedPayload, Ctx: ctx}
+	return v2.Result{Payload: updatedPayload, Ctx: ctx}
 }

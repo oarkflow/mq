@@ -29,7 +29,7 @@ func Form(ctx context.Context, payload json.RawMessage) v2.Result {
 		"html_content": rs,
 	}
 	bt, _ = json.Marshal(data)
-	return v2.Result{Data: bt, Ctx: ctx}
+	return v2.Result{Payload: bt, Ctx: ctx}
 }
 
 func NodeA(ctx context.Context, payload json.RawMessage) v2.Result {
@@ -39,7 +39,7 @@ func NodeA(ctx context.Context, payload json.RawMessage) v2.Result {
 	}
 	data["allowed_voting"] = data["age"] == "18"
 	updatedPayload, _ := json.Marshal(data)
-	return v2.Result{Data: updatedPayload, Ctx: ctx}
+	return v2.Result{Payload: updatedPayload, Ctx: ctx}
 }
 
 func NodeB(ctx context.Context, payload json.RawMessage) v2.Result {
@@ -49,7 +49,7 @@ func NodeB(ctx context.Context, payload json.RawMessage) v2.Result {
 	}
 	data["female_voter"] = data["gender"] == "female"
 	updatedPayload, _ := json.Marshal(data)
-	return v2.Result{Data: updatedPayload, Ctx: ctx}
+	return v2.Result{Payload: updatedPayload, Ctx: ctx}
 }
 
 func NodeC(ctx context.Context, payload json.RawMessage) v2.Result {
@@ -59,7 +59,7 @@ func NodeC(ctx context.Context, payload json.RawMessage) v2.Result {
 	}
 	data["voted"] = true
 	updatedPayload, _ := json.Marshal(data)
-	return v2.Result{Data: updatedPayload, Ctx: ctx}
+	return v2.Result{Payload: updatedPayload, Ctx: ctx}
 }
 
 func Result(ctx context.Context, payload json.RawMessage) v2.Result {
@@ -68,8 +68,10 @@ func Result(ctx context.Context, payload json.RawMessage) v2.Result {
 		return v2.Result{Error: err, Ctx: ctx}
 	}
 	var data map[string]any
-	if err := json.Unmarshal(payload, &data); err != nil {
-		return v2.Result{Error: err, Ctx: ctx}
+	if payload != nil {
+		if err := json.Unmarshal(payload, &data); err != nil {
+			return v2.Result{Error: err, Ctx: ctx}
+		}
 	}
 	if bt != nil {
 		parser := jet.NewWithMemory(jet.WithDelims("{{", "}}"))
@@ -82,13 +84,13 @@ func Result(ctx context.Context, payload json.RawMessage) v2.Result {
 			"html_content": rs,
 		}
 		bt, _ := json.Marshal(data)
-		return v2.Result{Data: bt, Ctx: ctx}
+		return v2.Result{Payload: bt, Ctx: ctx}
 	}
-	return v2.Result{Data: payload, Ctx: ctx}
+	return v2.Result{Payload: payload, Ctx: ctx}
 }
 
 func notify(taskID string, result v2.Result) {
-	fmt.Printf("Final result for Task %s: %s\n", taskID, string(result.Data))
+	fmt.Printf("Final result for Task %s: %s\n", taskID, string(result.Payload))
 }
 
 func main() {

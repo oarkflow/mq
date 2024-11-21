@@ -55,7 +55,7 @@ func (tm *DAG) render(w http.ResponseWriter, r *http.Request) {
 	switch contentType {
 	case consts.TypeHtml:
 		w.Header().Set(consts.ContentType, consts.TypeHtml)
-		data, err := jsonparser.GetString(result.Data, "html_content")
+		data, err := jsonparser.GetString(result.Payload, "html_content")
 		if err != nil {
 			return
 		}
@@ -66,7 +66,7 @@ func (tm *DAG) render(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.Header().Set(consts.ContentType, consts.TypeJson)
-		json.NewEncoder(w).Encode(result.Data)
+		json.NewEncoder(w).Encode(result.Payload)
 	}
 }
 
@@ -85,7 +85,7 @@ func (tm *DAG) taskStatusHandler(w http.ResponseWriter, r *http.Request) {
 	manager.taskStates.ForEach(func(key string, value *TaskState) bool {
 		key = strings.Split(key, Delimiter)[0]
 		nodeID := strings.Split(value.NodeID, Delimiter)[0]
-		rs := jsonparser.Delete(value.Result.Data, "html_content")
+		rs := jsonparser.Delete(value.Result.Payload, "html_content")
 		status := value.Status
 		if status == StatusProcessing {
 			status = StatusCompleted
@@ -95,9 +95,9 @@ func (tm *DAG) taskStatusHandler(w http.ResponseWriter, r *http.Request) {
 			Status:    status,
 			UpdatedAt: value.UpdatedAt,
 			Result: Result{
-				Data:   rs,
-				Error:  value.Result.Error,
-				Status: status,
+				Payload: rs,
+				Error:   value.Result.Error,
+				Status:  status,
 			},
 		}
 		result[key] = state

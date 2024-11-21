@@ -22,7 +22,7 @@ const (
 
 type Result struct {
 	Ctx             context.Context `json:"-"`
-	Data            json.RawMessage
+	Payload         json.RawMessage
 	Error           error
 	Status          TaskStatus
 	ConditionStatus string
@@ -261,12 +261,13 @@ func (tm *DAG) ProcessTask(ctx context.Context, payload []byte) Result {
 	} else {
 		manager.resultCh = resultCh
 	}
-	node, exists := tm.nodes.Get(manager.currentNode)
+	currentNode := strings.Split(manager.currentNode, Delimiter)[0]
+	node, exists := tm.nodes.Get(currentNode)
 	method, ok := ctx.Value("method").(string)
 	if method == "GET" && exists && node.Type == Page {
-		ctx = context.WithValue(ctx, "initial_node", manager.currentNode)
+		ctx = context.WithValue(ctx, "initial_node", currentNode)
 	} else if next == "true" {
-		nodes, err := tm.GetNextNodes(manager.currentNode)
+		nodes, err := tm.GetNextNodes(currentNode)
 		if err != nil {
 			return Result{Error: err, Ctx: ctx}
 		}

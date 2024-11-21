@@ -151,6 +151,7 @@ func (tm *TaskManager) processNode(exec *Task) {
 	}
 	state.Status = StatusProcessing
 	state.UpdatedAt = time.Now()
+	fmt.Println(exec.nodeID)
 	tm.currentNode = exec.nodeID
 	result := node.Handler(exec.ctx, exec.payload)
 	state.Result = result
@@ -178,7 +179,7 @@ func (tm *TaskManager) handlePrevious(ctx context.Context, state *TaskState, res
 			aggregatedData := make([]json.RawMessage, size)
 			i := 0
 			state.targetResults.ForEach(func(_ string, rs Result) bool {
-				aggregatedData[i] = rs.Data
+				aggregatedData[i] = rs.Payload
 				i++
 				return true
 			})
@@ -186,15 +187,15 @@ func (tm *TaskManager) handlePrevious(ctx context.Context, state *TaskState, res
 			if err != nil {
 				panic(err)
 			}
-			state.Result = Result{Data: aggregatedPayload, Status: StatusCompleted, Ctx: ctx, Topic: state.NodeID}
+			state.Result = Result{Payload: aggregatedPayload, Status: StatusCompleted, Ctx: ctx, Topic: state.NodeID}
 		} else if size == 1 {
 			state.Result = state.targetResults.Values()[0]
 		}
 		state.Status = result.Status
 		state.Result.Status = result.Status
 	}
-	if state.Result.Data == nil {
-		state.Result.Data = result.Data
+	if state.Result.Payload == nil {
+		state.Result.Payload = result.Payload
 	}
 	state.UpdatedAt = time.Now()
 	if result.Ctx == nil {
@@ -227,6 +228,7 @@ func (tm *TaskManager) handlePrevious(ctx context.Context, state *TaskState, res
 			}
 		}
 	} else {
+		state.Result.Topic = strings.Split(state.NodeID, Delimiter)[0]
 		tm.resultCh <- state.Result
 		tm.processFinalResult(state)
 	}
@@ -318,7 +320,7 @@ func (tm *TaskManager) handleEdges(currentResult nodeResult, edges []Edge) {
 		}
 		if edge.Type == Iterator {
 			var items []json.RawMessage
-			err := json.Unmarshal(currentResult.result.Data, &items)
+			err := json.Unmarshal(currentResult.result.Payload, &items)
 			if err != nil {
 				log.Printf("Error unmarshalling data for node %s: %v\n", edge.To.ID, err)
 				tm.resultQueue <- nodeResult{
@@ -345,7 +347,7 @@ func (tm *TaskManager) handleEdges(currentResult nodeResult, edges []Edge) {
 			childNode := fmt.Sprintf("%s%s%s", edge.To.ID, Delimiter, idx)
 			ctx := context.WithValue(currentResult.ctx, ContextIndex, idx)
 			tm.parentNodes.Set(childNode, parentNode)
-			tm.send(ctx, edge.To.ID, tm.taskID, currentResult.result.Data)
+			tm.send(ctx, edge.To.ID, tm.taskID, currentResult.result.Payload)
 		}
 	}
 }

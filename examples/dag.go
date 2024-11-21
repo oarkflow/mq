@@ -33,8 +33,8 @@ func subDAG() *dag.DAG {
 		AddNode("Store data", "store:data", &tasks.StoreData{Operation: dag.Operation{Type: "process"}}, true).
 		AddNode("Send SMS", "send:sms", &tasks.SendSms{Operation: dag.Operation{Type: "process"}}).
 		AddNode("Notification", "notification", &tasks.InAppNotification{Operation: dag.Operation{Type: "process"}}).
-		AddEdge("Store Data to send sms", "store:data", "send:sms").
-		AddEdge("Store Data to notification", "send:sms", "notification")
+		AddEdge("Store Payload to send sms", "store:data", "send:sms").
+		AddEdge("Store Payload to notification", "send:sms", "notification")
 	return f
 }
 
@@ -43,7 +43,7 @@ func setup(f *dag.DAG) {
 		AddNode("Email Delivery", "email:deliver", &tasks.EmailDelivery{Operation: dag.Operation{Type: "process"}}).
 		AddNode("Prepare Email", "prepare:email", &tasks.PrepareEmail{Operation: dag.Operation{Type: "process"}}).
 		AddNode("Get Input", "get:input", &tasks.GetData{Operation: dag.Operation{Type: "input"}}, true).
-		AddNode("Final Data", "final", &tasks.Final{Operation: dag.Operation{Type: "page"}}).
+		AddNode("Final Payload", "final", &tasks.Final{Operation: dag.Operation{Type: "page"}}).
 		AddNode("Iterator Processor", "loop", &tasks.Loop{Operation: dag.Operation{Type: "loop"}}).
 		AddNode("Condition", "condition", &tasks.Condition{Operation: dag.Operation{Type: "condition"}}).
 		AddDAGNode("Persistent", "persistent", subDAG()).
