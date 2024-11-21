@@ -108,6 +108,11 @@ func (tm *DAG) taskStatusHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (tm *DAG) Start(addr string) {
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		content := []byte(`<a href="/process">Start</a>`)
+		w.Header().Set(consts.ContentType, consts.TypeHtml)
+		w.Write(content)
+	})
 	http.HandleFunc("/process", tm.render)
 	http.HandleFunc("/task/status", tm.taskStatusHandler)
 	log.Printf("Server listening on http://%s", addr)

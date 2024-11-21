@@ -151,7 +151,6 @@ func (tm *TaskManager) processNode(exec *Task) {
 	}
 	state.Status = StatusProcessing
 	state.UpdatedAt = time.Now()
-	fmt.Println(exec.nodeID)
 	tm.currentNode = exec.nodeID
 	result := node.Handler(exec.ctx, exec.payload)
 	state.Result = result
