@@ -4,19 +4,21 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/oarkflow/mq"
+	"github.com/oarkflow/mq/dag"
 
 	v2 "github.com/oarkflow/mq/dag/v2"
 )
 
 func main() {
-	dag := v2.NewDAG(func(taskID string, result v2.Result) {
-		// fmt.Printf("Final result for Task %s: %s\n", taskID, string(result.Payload))
+	dag := v2.NewDAG(func(taskID string, result mq.Result) {
+		// fmt.Printf("Final result for task %s: %s\n", taskID, string(result.Payload))
 	})
-	dag.AddNode(v2.Function, "GetData", GetData, true)
-	dag.AddNode(v2.Function, "Loop", Loop)
-	dag.AddNode(v2.Function, "ValidateAge", ValidateAge)
-	dag.AddNode(v2.Function, "ValidateGender", ValidateGender)
-	dag.AddNode(v2.Function, "Final", Final)
+	dag.AddNode(v2.Function, "GetData", "GetData", &GetData{}, true)
+	dag.AddNode(v2.Function, "Loop", "Loop", &Loop{})
+	dag.AddNode(v2.Function, "ValidateAge", "ValidateAge", &ValidateAge{})
+	dag.AddNode(v2.Function, "ValidateGender", "ValidateGender", &ValidateGender{})
+	dag.AddNode(v2.Function, "Final", "Final", &Final{})
 
 	dag.AddEdge(v2.Simple, "GetData", "Loop")
 	dag.AddEdge(v2.Iterator, "Loop", "ValidateAge")
@@ -29,25 +31,37 @@ func main() {
 		panic(dag.Error)
 	}
 
-	rs := dag.ProcessTask(context.Background(), data)
+	rs := dag.Process(context.Background(), data)
 	if rs.Error != nil {
 		panic(rs.Error)
 	}
 	fmt.Println(rs.Status, rs.Topic, string(rs.Payload))
 }
 
-func GetData(ctx context.Context, payload json.RawMessage) v2.Result {
-	return v2.Result{Ctx: ctx, Payload: payload}
+type GetData struct {
+	dag.Operation
 }
 
-func Loop(ctx context.Context, payload json.RawMessage) v2.Result {
-	return v2.Result{Ctx: ctx, Payload: payload}
+func (p *GetData) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
+	return mq.Result{Ctx: ctx, Payload: task.Payload}
 }
 
-func ValidateAge(ctx context.Context, payload json.RawMessage) v2.Result {
+type Loop struct {
+	dag.Operation
+}
+
+func (p *Loop) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
+	return mq.Result{Ctx: ctx, Payload: task.Payload}
+}
+
+type ValidateAge struct {
+	dag.Operation
+}
+
+func (p *ValidateAge) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 	var data map[string]any
-	if err := json.Unmarshal(payload, &data); err != nil {
-		return v2.Result{Error: fmt.Errorf("ValidateAge Error: %s", err.Error()), Ctx: ctx}
+	if err := json.Unmarshal(task.Payload, &data); err != nil {
+		return mq.Result{Error: fmt.Errorf("ValidateAge Error: %s", err.Error()), Ctx: ctx}
 	}
 	var status string
 	if data["age"] == "18" {
@@ -56,23 +70,31 @@ func ValidateAge(ctx context.Context, payload json.RawMessage) v2.Result {
 		status = "default"
 	}
 	updatedPayload, _ := json.Marshal(data)
-	return v2.Result{Payload: updatedPayload, Ctx: ctx, ConditionStatus: status}
+	return mq.Result{Payload: updatedPayload, Ctx: ctx, ConditionStatus: status}
 }
 
-func ValidateGender(ctx context.Context, payload json.RawMessage) v2.Result {
+type ValidateGender struct {
+	dag.Operation
+}
+
+func (p *ValidateGender) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 	var data map[string]any
-	if err := json.Unmarshal(payload, &data); err != nil {
-		return v2.Result{Error: fmt.Errorf("ValidateGender Error: %s", err.Error()), Ctx: ctx}
+	if err := json.Unmarshal(task.Payload, &data); err != nil {
+		return mq.Result{Error: fmt.Errorf("ValidateGender Error: %s", err.Error()), Ctx: ctx}
 	}
 	data["female_voter"] = data["gender"] == "female"
 	updatedPayload, _ := json.Marshal(data)
-	return v2.Result{Payload: updatedPayload, Ctx: ctx}
+	return mq.Result{Payload: updatedPayload, Ctx: ctx}
 }
 
-func Final(ctx context.Context, payload json.RawMessage) v2.Result {
+type Final struct {
+	dag.Operation
+}
+
+func (p *Final) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 	var data []map[string]any
-	if err := json.Unmarshal(payload, &data); err != nil {
-		return v2.Result{Error: fmt.Errorf("Final Error: %s", err.Error()), Ctx: ctx}
+	if err := json.Unmarshal(task.Payload, &data); err != nil {
+		return mq.Result{Error: fmt.Errorf("Final Error: %s", err.Error()), Ctx: ctx}
 	}
 	for i, row := range data {
 		row["done"] = true
@@ -82,5 +104,5 @@ func Final(ctx context.Context, payload json.RawMessage) v2.Result {
 	if err != nil {
 		panic(err)
 	}
-	return v2.Result{Payload: updatedPayload, Ctx: ctx}
+	return mq.Result{Payload: updatedPayload, Ctx: ctx}
 }

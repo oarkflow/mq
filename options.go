@@ -12,6 +12,15 @@ import (
 	"github.com/oarkflow/mq/consts"
 )
 
+type Status string
+
+const (
+	Pending    Status = "Pending"
+	Processing Status = "Processing"
+	Completed  Status = "Completed"
+	Failed     Status = "Failed"
+)
+
 type Result struct {
 	CreatedAt       time.Time       `json:"created_at"`
 	ProcessedAt     time.Time       `json:"processed_at,omitempty"`
@@ -19,7 +28,7 @@ type Result struct {
 	Error           error           `json:"-"` // Keep error as an error type
 	Topic           string          `json:"topic"`
 	TaskID          string          `json:"task_id"`
-	Status          string          `json:"status"`
+	Status          Status          `json:"status"`
 	ConditionStatus string          `json:"condition_status"`
 	Ctx             context.Context `json:"-"`
 	Payload         json.RawMessage `json:"payload"`
@@ -67,8 +76,8 @@ func (r Result) Unmarshal(data any) error {
 	return json.Unmarshal(r.Payload, data)
 }
 
-func HandleError(ctx context.Context, err error, status ...string) Result {
-	st := "Failed"
+func HandleError(ctx context.Context, err error, status ...Status) Result {
+	st := Failed
 	if len(status) > 0 {
 		st = status[0]
 	}
@@ -82,7 +91,7 @@ func HandleError(ctx context.Context, err error, status ...string) Result {
 	}
 }
 
-func (r Result) WithData(status string, data []byte) Result {
+func (r Result) WithData(status Status, data []byte) Result {
 	if r.Error != nil {
 		return r
 	}

@@ -9,15 +9,6 @@ const (
 	RetryInterval      = 5 * time.Second
 )
 
-type Status string
-
-const (
-	Pending    Status = "Pending"
-	Processing Status = "Processing"
-	Completed  Status = "Completed"
-	Failed     Status = "Failed"
-)
-
 type NodeType int
 
 func (c NodeType) IsValid() bool { return c >= Function && c <= Page }

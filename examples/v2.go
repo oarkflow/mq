@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/oarkflow/mq"
+	"github.com/oarkflow/mq/dag"
 	"os"
 
 	"github.com/oarkflow/jet"
@@ -12,94 +14,114 @@ import (
 	v2 "github.com/oarkflow/mq/dag/v2"
 )
 
-func Form(ctx context.Context, payload json.RawMessage) v2.Result {
+type Form struct {
+	dag.Operation
+}
+
+func (p *Form) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 	bt, err := os.ReadFile("webroot/form.html")
 	if err != nil {
-		return v2.Result{Error: err, Ctx: ctx}
+		return mq.Result{Error: err, Ctx: ctx}
 	}
 	parser := jet.NewWithMemory(jet.WithDelims("{{", "}}"))
 	rs, err := parser.ParseTemplate(string(bt), map[string]any{
 		"task_id": ctx.Value("task_id"),
 	})
 	if err != nil {
-		return v2.Result{Error: err, Ctx: ctx}
+		return mq.Result{Error: err, Ctx: ctx}
 	}
 	ctx = context.WithValue(ctx, consts.ContentType, consts.TypeHtml)
 	data := map[string]any{
 		"html_content": rs,
 	}
 	bt, _ = json.Marshal(data)
-	return v2.Result{Payload: bt, Ctx: ctx}
+	return mq.Result{Payload: bt, Ctx: ctx}
 }
 
-func NodeA(ctx context.Context, payload json.RawMessage) v2.Result {
+type NodeA struct {
+	dag.Operation
+}
+
+func (p *NodeA) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 	var data map[string]any
-	if err := json.Unmarshal(payload, &data); err != nil {
-		return v2.Result{Error: err, Ctx: ctx}
+	if err := json.Unmarshal(task.Payload, &data); err != nil {
+		return mq.Result{Error: err, Ctx: ctx}
 	}
 	data["allowed_voting"] = data["age"] == "18"
 	updatedPayload, _ := json.Marshal(data)
-	return v2.Result{Payload: updatedPayload, Ctx: ctx}
+	return mq.Result{Payload: updatedPayload, Ctx: ctx}
 }
 
-func NodeB(ctx context.Context, payload json.RawMessage) v2.Result {
+type NodeB struct {
+	dag.Operation
+}
+
+func (p *NodeB) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 	var data map[string]any
-	if err := json.Unmarshal(payload, &data); err != nil {
-		return v2.Result{Error: err, Ctx: ctx}
+	if err := json.Unmarshal(task.Payload, &data); err != nil {
+		return mq.Result{Error: err, Ctx: ctx}
 	}
 	data["female_voter"] = data["gender"] == "female"
 	updatedPayload, _ := json.Marshal(data)
-	return v2.Result{Payload: updatedPayload, Ctx: ctx}
+	return mq.Result{Payload: updatedPayload, Ctx: ctx}
 }
 
-func NodeC(ctx context.Context, payload json.RawMessage) v2.Result {
+type NodeC struct {
+	dag.Operation
+}
+
+func (p *NodeC) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 	var data map[string]any
-	if err := json.Unmarshal(payload, &data); err != nil {
-		return v2.Result{Error: err, Ctx: ctx}
+	if err := json.Unmarshal(task.Payload, &data); err != nil {
+		return mq.Result{Error: err, Ctx: ctx}
 	}
 	data["voted"] = true
 	updatedPayload, _ := json.Marshal(data)
-	return v2.Result{Payload: updatedPayload, Ctx: ctx}
+	return mq.Result{Payload: updatedPayload, Ctx: ctx}
 }
 
-func Result(ctx context.Context, payload json.RawMessage) v2.Result {
+type Result struct {
+	dag.Operation
+}
+
+func (p *Result) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 	bt, err := os.ReadFile("webroot/result.html")
 	if err != nil {
-		return v2.Result{Error: err, Ctx: ctx}
+		return mq.Result{Error: err, Ctx: ctx}
 	}
 	var data map[string]any
-	if payload != nil {
-		if err := json.Unmarshal(payload, &data); err != nil {
-			return v2.Result{Error: err, Ctx: ctx}
+	if task.Payload != nil {
+		if err := json.Unmarshal(task.Payload, &data); err != nil {
+			return mq.Result{Error: err, Ctx: ctx}
 		}
 	}
 	if bt != nil {
 		parser := jet.NewWithMemory(jet.WithDelims("{{", "}}"))
 		rs, err := parser.ParseTemplate(string(bt), data)
 		if err != nil {
-			return v2.Result{Error: err, Ctx: ctx}
+			return mq.Result{Error: err, Ctx: ctx}
 		}
 		ctx = context.WithValue(ctx, consts.ContentType, consts.TypeHtml)
 		data := map[string]any{
 			"html_content": rs,
 		}
 		bt, _ := json.Marshal(data)
-		return v2.Result{Payload: bt, Ctx: ctx}
+		return mq.Result{Payload: bt, Ctx: ctx}
 	}
-	return v2.Result{Payload: payload, Ctx: ctx}
+	return mq.Result{Payload: task.Payload, Ctx: ctx}
 }
 
-func notify(taskID string, result v2.Result) {
-	fmt.Printf("Final result for Task %s: %s\n", taskID, string(result.Payload))
+func notify(taskID string, result mq.Result) {
+	fmt.Printf("Final result for task %s: %s\n", taskID, string(result.Payload))
 }
 
 func main() {
 	dag := v2.NewDAG(notify)
-	dag.AddNode(v2.Page, "Form", Form)
-	dag.AddNode(v2.Function, "NodeA", NodeA)
-	dag.AddNode(v2.Function, "NodeB", NodeB)
-	dag.AddNode(v2.Function, "NodeC", NodeC)
-	dag.AddNode(v2.Page, "Result", Result)
+	dag.AddNode(v2.Page, "Form", "Form", &Form{})
+	dag.AddNode(v2.Function, "NodeA", "NodeA", &NodeA{})
+	dag.AddNode(v2.Function, "NodeB", "NodeB", &NodeB{})
+	dag.AddNode(v2.Function, "NodeC", "NodeC", &NodeC{})
+	dag.AddNode(v2.Page, "Result", "Result", &Result{})
 	dag.AddEdge(v2.Simple, "Form", "NodeA")
 	dag.AddEdge(v2.Simple, "NodeA", "NodeB")
 	dag.AddEdge(v2.Simple, "NodeB", "NodeC")

@@ -335,7 +335,8 @@ func (tm *TaskManager) markParentTask(ctx context.Context, topic, nodeID string,
 
 func (tm *TaskManager) prepareResult(ctx context.Context, nodeStatus *taskNodeStatus) mq.Result {
 	aggregatedOutput := make([]json.RawMessage, 0)
-	var status, topic string
+	var status mq.Status
+	var topic string
 	var err1 error
 	if nodeStatus.totalItems == 1 {
 		rs := nodeStatus.itemResults.Values()[0]

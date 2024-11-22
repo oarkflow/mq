@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/oarkflow/mq"
 	"log"
 	"net/http"
 	"strings"
@@ -15,7 +16,7 @@ import (
 func renderNotFound(w http.ResponseWriter) {
 	html := []byte(`
 <div>
-	<h1>Task not found</h1>
+	<h1>task not found</h1>
 	<p><a href="/process">Back to home</a></p>
 </div>
 `)
@@ -39,11 +40,11 @@ func (tm *DAG) render(w http.ResponseWriter, r *http.Request) {
 				renderNotFound(w)
 				return
 			}
-			http.Error(w, fmt.Sprintf(`{"message": "%s"}`, "Task not found"), http.StatusInternalServerError)
+			http.Error(w, fmt.Sprintf(`{"message": "%s"}`, "task not found"), http.StatusInternalServerError)
 			return
 		}
 	}
-	result := tm.ProcessTask(ctx, data)
+	result := tm.Process(ctx, data)
 	if result.Error != nil {
 		http.Error(w, fmt.Sprintf(`{"message": "%s"}`, result.Error.Error()), http.StatusInternalServerError)
 		return
@@ -87,14 +88,14 @@ func (tm *DAG) taskStatusHandler(w http.ResponseWriter, r *http.Request) {
 		nodeID := strings.Split(value.NodeID, Delimiter)[0]
 		rs := jsonparser.Delete(value.Result.Payload, "html_content")
 		status := value.Status
-		if status == Processing {
-			status = Completed
+		if status == mq.Processing {
+			status = mq.Completed
 		}
 		state := TaskState{
 			NodeID:    nodeID,
 			Status:    status,
 			UpdatedAt: value.UpdatedAt,
-			Result: Result{
+			Result: mq.Result{
 				Payload: rs,
 				Error:   value.Result.Error,
 				Status:  status,
