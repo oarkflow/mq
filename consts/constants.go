@@ -80,7 +80,7 @@ func (c CMD) String() string {
 var (
 	ConsumerKey      = "Consumer-Key"
 	PublisherKey     = "Publisher-Key"
-	ContentType      = "Content-Type"
+	ContentType      = "Content-NodeType"
 	AwaitResponseKey = "Await-Response"
 	QueueKey         = "Topic"
 	TypeJson         = "application/json; charset=utf-8"

@@ -12,16 +12,9 @@ import (
 	"github.com/oarkflow/mq/storage/memory"
 )
 
-const (
-	Delimiter          = "___"
-	ContextIndex       = "index"
-	DefaultChannelSize = 1000
-	RetryInterval      = 5 * time.Second
-)
-
 type TaskState struct {
 	NodeID        string
-	Status        TaskStatus
+	Status        Status
 	UpdatedAt     time.Time
 	Result        Result
 	targetResults storage.IMap[string, Result]
@@ -30,7 +23,7 @@ type TaskState struct {
 func newTaskState(nodeID string) *TaskState {
 	return &TaskState{
 		NodeID:        nodeID,
-		Status:        StatusPending,
+		Status:        Pending,
 		UpdatedAt:     time.Now(),
 		targetResults: memory.New[string, Result](),
 	}
@@ -39,7 +32,7 @@ func newTaskState(nodeID string) *TaskState {
 type nodeResult struct {
 	ctx    context.Context
 	nodeID string
-	status TaskStatus
+	status Status
 	result Result
 }
 
@@ -151,7 +144,7 @@ func (tm *TaskManager) processNode(exec *Task) {
 		state = newTaskState(exec.nodeID)
 		tm.taskStates.Set(exec.nodeID, state)
 	}
-	state.Status = StatusProcessing
+	state.Status = Processing
 	state.UpdatedAt = time.Now()
 	tm.currentNode = exec.nodeID
 	result := node.Handler(exec.ctx, exec.payload)
@@ -162,7 +155,7 @@ func (tm *TaskManager) processNode(exec *Task) {
 		tm.processFinalResult(state)
 		return
 	}
-	if node.Type == Page {
+	if node.NodeType == Page {
 		tm.resultCh <- result
 		return
 	}
@@ -188,7 +181,7 @@ func (tm *TaskManager) handlePrevious(ctx context.Context, state *TaskState, res
 			if err != nil {
 				panic(err)
 			}
-			state.Result = Result{Payload: aggregatedPayload, Status: StatusCompleted, Ctx: ctx, Topic: state.NodeID}
+			state.Result = Result{Payload: aggregatedPayload, Status: Completed, Ctx: ctx, Topic: state.NodeID}
 		} else if size == 1 {
 			state.Result = state.targetResults.Values()[0]
 		}
@@ -203,11 +196,11 @@ func (tm *TaskManager) handlePrevious(ctx context.Context, state *TaskState, res
 		result.Ctx = ctx
 	}
 	if result.Error != nil {
-		state.Status = StatusFailed
+		state.Status = Failed
 	}
 	pn, ok := tm.parentNodes.Get(state.NodeID)
-	if edges, exists := tm.iteratorNodes.Get(nodeID[0]); exists && state.Status == StatusCompleted {
-		state.Status = StatusProcessing
+	if edges, exists := tm.iteratorNodes.Get(nodeID[0]); exists && state.Status == Completed {
+		state.Status = Processing
 		tm.iteratorNodes.Del(nodeID[0])
 		state.targetResults.Clear()
 		if len(nodeID) == 2 {
@@ -241,11 +234,11 @@ func (tm *TaskManager) handleNext(ctx context.Context, node *Node, state *TaskSt
 		result.Ctx = ctx
 	}
 	if result.Error != nil {
-		state.Status = StatusFailed
+		state.Status = Failed
 	} else {
 		edges := tm.getConditionalEdges(node, result)
 		if len(edges) == 0 {
-			state.Status = StatusCompleted
+			state.Status = Completed
 		}
 	}
 	if result.Status == "" {
@@ -327,7 +320,7 @@ func (tm *TaskManager) handleEdges(currentResult nodeResult, edges []Edge) {
 				tm.resultQueue <- nodeResult{
 					ctx:    currentResult.ctx,
 					nodeID: edge.To.ID,
-					status: StatusFailed,
+					status: Failed,
 					result: Result{Error: err},
 				}
 				return

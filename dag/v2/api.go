@@ -87,8 +87,8 @@ func (tm *DAG) taskStatusHandler(w http.ResponseWriter, r *http.Request) {
 		nodeID := strings.Split(value.NodeID, Delimiter)[0]
 		rs := jsonparser.Delete(value.Result.Payload, "html_content")
 		status := value.Status
-		if status == StatusProcessing {
-			status = StatusCompleted
+		if status == Processing {
+			status = Completed
 		}
 		state := TaskState{
 			NodeID:    nodeID,
