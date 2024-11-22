@@ -10,7 +10,7 @@ import (
 
 func main() {
 	dag := v2.NewDAG(func(taskID string, result v2.Result) {
-		// fmt.Printf("Final resuslt for Task %s: %s\n", taskID, string(result.Payload))
+		// fmt.Printf("Final result for Task %s: %s\n", taskID, string(result.Payload))
 	})
 	dag.AddNode(v2.Function, "GetData", GetData, true)
 	dag.AddNode(v2.Function, "Loop", Loop)
@@ -20,14 +20,15 @@ func main() {
 
 	dag.AddEdge(v2.Simple, "GetData", "Loop")
 	dag.AddEdge(v2.Iterator, "Loop", "ValidateAge")
-	dag.AddEdge(v2.Simple, "ValidateAge", "ValidateGender")
-	// dag.AddCondition("ValidateAge", map[string]string{"pass": "ValidateGender"})
+	dag.AddCondition("ValidateAge", map[string]string{"pass": "ValidateGender"})
 	dag.AddEdge(v2.Simple, "Loop", "Final")
 
+	// dag.Start(":8080")
 	data := []byte(`[{"age": "15", "gender": "female"}, {"age": "18", "gender": "male"}]`)
 	if dag.Error != nil {
 		panic(dag.Error)
 	}
+
 	rs := dag.ProcessTask(context.Background(), data)
 	if rs.Error != nil {
 		panic(rs.Error)
@@ -46,7 +47,7 @@ func Loop(ctx context.Context, payload json.RawMessage) v2.Result {
 func ValidateAge(ctx context.Context, payload json.RawMessage) v2.Result {
 	var data map[string]any
 	if err := json.Unmarshal(payload, &data); err != nil {
-		return v2.Result{Error: err, Ctx: ctx}
+		return v2.Result{Error: fmt.Errorf("ValidateAge Error: %s", err.Error()), Ctx: ctx}
 	}
 	var status string
 	if data["age"] == "18" {
@@ -54,7 +55,6 @@ func ValidateAge(ctx context.Context, payload json.RawMessage) v2.Result {
 	} else {
 		status = "default"
 	}
-	data["age_voter"] = data["age"] == "18"
 	updatedPayload, _ := json.Marshal(data)
 	return v2.Result{Payload: updatedPayload, Ctx: ctx, ConditionStatus: status}
 }
@@ -62,7 +62,7 @@ func ValidateAge(ctx context.Context, payload json.RawMessage) v2.Result {
 func ValidateGender(ctx context.Context, payload json.RawMessage) v2.Result {
 	var data map[string]any
 	if err := json.Unmarshal(payload, &data); err != nil {
-		return v2.Result{Error: err, Ctx: ctx}
+		return v2.Result{Error: fmt.Errorf("ValidateGender Error: %s", err.Error()), Ctx: ctx}
 	}
 	data["female_voter"] = data["gender"] == "female"
 	updatedPayload, _ := json.Marshal(data)
@@ -72,7 +72,7 @@ func ValidateGender(ctx context.Context, payload json.RawMessage) v2.Result {
 func Final(ctx context.Context, payload json.RawMessage) v2.Result {
 	var data []map[string]any
 	if err := json.Unmarshal(payload, &data); err != nil {
-		return v2.Result{Error: err, Ctx: ctx}
+		return v2.Result{Error: fmt.Errorf("Final Error: %s", err.Error()), Ctx: ctx}
 	}
 	for i, row := range data {
 		row["done"] = true

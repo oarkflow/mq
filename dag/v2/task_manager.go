@@ -48,6 +48,7 @@ type TaskManager struct {
 	parentNodes   storage.IMap[string, string]
 	childNodes    storage.IMap[string, int]
 	deferredTasks storage.IMap[string, *Task]
+	iteratorNodes storage.IMap[string, []Edge]
 	currentNode   string
 	dag           *DAG
 	taskID        string
@@ -73,7 +74,7 @@ func NewTask(ctx context.Context, taskID, nodeID string, payload json.RawMessage
 	}
 }
 
-func NewTaskManager(dag *DAG, taskID string, resultCh chan Result) *TaskManager {
+func NewTaskManager(dag *DAG, taskID string, resultCh chan Result, iteratorNodes storage.IMap[string, []Edge]) *TaskManager {
 	tm := &TaskManager{
 		taskStates:    memory.New[string, *TaskState](),
 		parentNodes:   memory.New[string, string](),
@@ -81,6 +82,7 @@ func NewTaskManager(dag *DAG, taskID string, resultCh chan Result) *TaskManager 
 		deferredTasks: memory.New[string, *Task](),
 		taskQueue:     make(chan *Task, DefaultChannelSize),
 		resultQueue:   make(chan nodeResult, DefaultChannelSize),
+		iteratorNodes: iteratorNodes,
 		stopCh:        make(chan struct{}),
 		resultCh:      resultCh,
 		taskID:        taskID,
@@ -204,9 +206,9 @@ func (tm *TaskManager) handlePrevious(ctx context.Context, state *TaskState, res
 		state.Status = StatusFailed
 	}
 	pn, ok := tm.parentNodes.Get(state.NodeID)
-	if edges, exists := tm.dag.iteratorNodes.Get(nodeID[0]); exists && state.Status == StatusCompleted {
+	if edges, exists := tm.iteratorNodes.Get(nodeID[0]); exists && state.Status == StatusCompleted {
 		state.Status = StatusProcessing
-		tm.dag.iteratorNodes.Del(nodeID[0])
+		tm.iteratorNodes.Del(nodeID[0])
 		state.targetResults.Clear()
 		if len(nodeID) == 2 {
 			ctx = context.WithValue(ctx, ContextIndex, nodeID[1])
@@ -313,7 +315,7 @@ func (tm *TaskManager) handleEdges(currentResult nodeResult, edges []Edge) {
 		}
 		parentNode := fmt.Sprintf("%s%s%s", edge.From.ID, Delimiter, index)
 		if edge.Type == Simple {
-			if _, ok := tm.dag.iteratorNodes.Get(edge.From.ID); ok {
+			if _, ok := tm.iteratorNodes.Get(edge.From.ID); ok {
 				continue
 			}
 		}

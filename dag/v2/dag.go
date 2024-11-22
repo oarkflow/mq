@@ -256,7 +256,7 @@ func (tm *DAG) ProcessTask(ctx context.Context, payload []byte) Result {
 	manager, ok := tm.taskManager.Get(taskID)
 	resultCh := make(chan Result, 1)
 	if !ok {
-		manager = NewTaskManager(tm, taskID, resultCh)
+		manager = NewTaskManager(tm, taskID, resultCh, tm.iteratorNodes.Clone())
 		tm.taskManager.Set(taskID, manager)
 	} else {
 		manager.resultCh = resultCh
