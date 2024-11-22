@@ -18,10 +18,10 @@ func main() {
 	flow.AddNode(v2.Function, "ValidateGender", "ValidateGender", &ValidateGender{})
 	flow.AddNode(v2.Function, "Final", "Final", &Final{})
 
-	flow.AddEdge(v2.Simple, "GetData", "Loop")
-	flow.AddEdge(v2.Iterator, "Loop", "ValidateAge")
+	flow.AddEdge(v2.Simple, "GetData", "GetData", "Loop")
+	flow.AddEdge(v2.Iterator, "Validate age for each item", "Loop", "ValidateAge")
 	flow.AddCondition("ValidateAge", map[string]string{"pass": "ValidateGender"})
-	flow.AddEdge(v2.Simple, "Loop", "Final")
+	flow.AddEdge(v2.Simple, "Mark as Done", "Loop", "Final")
 
 	// flow.Start(":8080")
 	data := []byte(`[{"age": "15", "gender": "female"}, {"age": "18", "gender": "male"}]`)
@@ -29,7 +29,7 @@ func main() {
 		panic(flow.Error)
 	}
 
-	fmt.Println(flow.ClassifyEdges())
+	fmt.Println(flow.ExportDOT())
 	rs := flow.Process(context.Background(), data)
 	if rs.Error != nil {
 		panic(rs.Error)

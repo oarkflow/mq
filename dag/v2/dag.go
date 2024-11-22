@@ -211,7 +211,6 @@ func (tm *DAG) AddNode(nodeType NodeType, name, nodeID string, handler mq.Proces
 		n.isReady = true
 	}
 	tm.nodes.Set(nodeID, n)
-	tm.nodes.Set(nodeID, &Node{ID: nodeID, processor: handler, NodeType: nodeType})
 	if len(startNode) > 0 && startNode[0] {
 		tm.startNode = nodeID
 	}
@@ -245,7 +244,7 @@ func (tm *DAG) IsReady() bool {
 	return isReady
 }
 
-func (tm *DAG) AddEdge(edgeType EdgeType, from string, targets ...string) *DAG {
+func (tm *DAG) AddEdge(edgeType EdgeType, label, from string, targets ...string) *DAG {
 	if tm.Error != nil {
 		return tm
 	}
@@ -259,7 +258,7 @@ func (tm *DAG) AddEdge(edgeType EdgeType, from string, targets ...string) *DAG {
 	}
 	for _, target := range targets {
 		if targetNode, ok := tm.nodes.Get(target); ok {
-			edge := Edge{From: node, To: targetNode, Type: edgeType}
+			edge := Edge{From: node, To: targetNode, Type: edgeType, Label: label}
 			node.Edges = append(node.Edges, edge)
 			if edgeType != Iterator {
 				if edges, ok := tm.iteratorNodes.Get(node.ID); ok {

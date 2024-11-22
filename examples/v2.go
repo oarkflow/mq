@@ -121,10 +121,10 @@ func main() {
 	flow.AddNode(v2.Function, "NodeB", "NodeB", &NodeB{})
 	flow.AddNode(v2.Function, "NodeC", "NodeC", &NodeC{})
 	flow.AddNode(v2.Page, "Result", "Result", &Result{})
-	flow.AddEdge(v2.Simple, "Form", "NodeA")
-	flow.AddEdge(v2.Simple, "NodeA", "NodeB")
-	flow.AddEdge(v2.Simple, "NodeB", "NodeC")
-	flow.AddEdge(v2.Simple, "NodeC", "Result")
+	flow.AddEdge(v2.Simple, "Form", "Form", "NodeA")
+	flow.AddEdge(v2.Simple, "NodeA", "NodeA", "NodeB")
+	flow.AddEdge(v2.Simple, "NodeB", "NodeB", "NodeC")
+	flow.AddEdge(v2.Simple, "NodeC", "NodeC", "Result")
 	if flow.Error != nil {
 		panic(flow.Error)
 	}

@@ -229,7 +229,9 @@ func (tm *DAG) ExportDOT() string {
 func (tm *DAG) TopologicalSort() (stack []string) {
 	visited := make(map[string]bool)
 	tm.nodes.ForEach(func(_ string, node *Node) bool {
-		tm.topologicalSortUtil(node.ID, visited, &stack)
+		if !visited[node.ID] {
+			tm.topologicalSortUtil(node.ID, visited, &stack)
+		}
 		return true
 	})
 	for i, j := 0, len(stack)-1; i < j; i, j = i+1, j-1 {
@@ -240,7 +242,10 @@ func (tm *DAG) TopologicalSort() (stack []string) {
 
 func (tm *DAG) topologicalSortUtil(v string, visited map[string]bool, stack *[]string) {
 	visited[v] = true
-	node, _ := tm.nodes.Get(v)
+	node, ok := tm.nodes.Get(v)
+	if !ok {
+		fmt.Println("Not found", v)
+	}
 	for _, edge := range node.Edges {
 		if !visited[edge.To.ID] {
 			tm.topologicalSortUtil(edge.To.ID, visited, stack)
