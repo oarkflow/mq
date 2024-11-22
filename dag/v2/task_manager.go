@@ -367,7 +367,9 @@ func (tm *TaskManager) retryDeferredTasks() {
 
 func (tm *TaskManager) processFinalResult(state *TaskState) {
 	state.targetResults.Clear()
-	tm.dag.finalResult(tm.taskID, state.Result)
+	if tm.dag.finalResult != nil {
+		tm.dag.finalResult(tm.taskID, state.Result)
+	}
 }
 
 func (tm *TaskManager) Stop() {

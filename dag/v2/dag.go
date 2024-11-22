@@ -22,9 +22,10 @@ type Node struct {
 }
 
 type Edge struct {
-	From *Node
-	To   *Node
-	Type EdgeType
+	From  *Node
+	To    *Node
+	Type  EdgeType
+	Label string
 }
 
 type DAG struct {
@@ -38,6 +39,7 @@ type DAG struct {
 	name                     string
 	key                      string
 	startNode                string
+	opts                     []mq.Option
 	conditions               map[string]map[string]string
 	consumerTopic            string
 	reportNodeResultCallback func(mq.Result)
@@ -47,14 +49,31 @@ type DAG struct {
 	report                   string
 }
 
-func NewDAG(finalResultCallback func(taskID string, result mq.Result)) *DAG {
-	return &DAG{
+func NewDAG(name, key string, finalResultCallback func(taskID string, result mq.Result), opts ...mq.Option) *DAG {
+	callback := func(ctx context.Context, result mq.Result) error { return nil }
+	d := &DAG{
+		name:          name,
+		key:           key,
 		nodes:         memory.New[string, *Node](),
 		taskManager:   memory.New[string, *TaskManager](),
 		iteratorNodes: memory.New[string, []Edge](),
 		conditions:    make(map[string]map[string]string),
 		finalResult:   finalResultCallback,
 	}
+	opts = append(opts, mq.WithCallback(d.onTaskCallback), mq.WithConsumerOnSubscribe(d.onConsumerJoin), mq.WithConsumerOnClose(d.onConsumerClose))
+	d.server = mq.NewBroker(opts...)
+	d.opts = opts
+	options := d.server.Options()
+	d.pool = mq.NewPool(
+		options.NumOfWorkers(),
+		mq.WithTaskQueueSize(options.QueueSize()),
+		mq.WithMaxMemoryLoad(options.MaxMemoryLoad()),
+		mq.WithHandler(d.ProcessTask),
+		mq.WithPoolCallback(callback),
+		mq.WithTaskStorage(options.Storage()),
+	)
+	d.pool.Start(d.server.Options().NumOfWorkers())
+	return d
 }
 
 func (tm *DAG) SetKey(key string) {
@@ -63,6 +82,18 @@ func (tm *DAG) SetKey(key string) {
 
 func (tm *DAG) ReportNodeResult(callback func(mq.Result)) {
 	tm.reportNodeResultCallback = callback
+}
+
+func (tm *DAG) onTaskCallback(ctx context.Context, result mq.Result) mq.Result {
+	if manager, ok := tm.taskManager.Get(result.TaskID); ok && result.Topic != "" {
+		manager.onNodeCompleted(nodeResult{
+			ctx:    ctx,
+			nodeID: result.Topic,
+			status: result.Status,
+			result: result,
+		})
+	}
+	return mq.Result{}
 }
 
 func (tm *DAG) GetType() string {
@@ -95,17 +126,6 @@ func (tm *DAG) GetKey() string {
 func (tm *DAG) AssignTopic(topic string) {
 	tm.consumer = mq.NewConsumer(topic, topic, tm.ProcessTask, mq.WithRespondPendingResult(false), mq.WithBrokerURL(tm.server.URL()))
 	tm.consumerTopic = topic
-}
-
-func (tm *DAG) onTaskCallback(ctx context.Context, result mq.Result) {
-	if manager, ok := tm.taskManager.Get(result.TaskID); ok && result.Topic != "" {
-		manager.onNodeCompleted(nodeResult{
-			ctx:    ctx,
-			nodeID: result.Topic,
-			status: result.Status,
-			result: result,
-		})
-	}
 }
 
 func (tm *DAG) callbackToConsumer(ctx context.Context, result mq.Result) {

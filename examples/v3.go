@@ -5,33 +5,32 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/oarkflow/mq"
-	"github.com/oarkflow/mq/dag"
-
 	v2 "github.com/oarkflow/mq/dag/v2"
 )
 
 func main() {
-	dag := v2.NewDAG(func(taskID string, result mq.Result) {
+	flow := v2.NewDAG("Sample DAG", "sample-dag", func(taskID string, result mq.Result) {
 		// fmt.Printf("Final result for task %s: %s\n", taskID, string(result.Payload))
 	})
-	dag.AddNode(v2.Function, "GetData", "GetData", &GetData{}, true)
-	dag.AddNode(v2.Function, "Loop", "Loop", &Loop{})
-	dag.AddNode(v2.Function, "ValidateAge", "ValidateAge", &ValidateAge{})
-	dag.AddNode(v2.Function, "ValidateGender", "ValidateGender", &ValidateGender{})
-	dag.AddNode(v2.Function, "Final", "Final", &Final{})
+	flow.AddNode(v2.Function, "GetData", "GetData", &GetData{}, true)
+	flow.AddNode(v2.Function, "Loop", "Loop", &Loop{})
+	flow.AddNode(v2.Function, "ValidateAge", "ValidateAge", &ValidateAge{})
+	flow.AddNode(v2.Function, "ValidateGender", "ValidateGender", &ValidateGender{})
+	flow.AddNode(v2.Function, "Final", "Final", &Final{})
 
-	dag.AddEdge(v2.Simple, "GetData", "Loop")
-	dag.AddEdge(v2.Iterator, "Loop", "ValidateAge")
-	dag.AddCondition("ValidateAge", map[string]string{"pass": "ValidateGender"})
-	dag.AddEdge(v2.Simple, "Loop", "Final")
+	flow.AddEdge(v2.Simple, "GetData", "Loop")
+	flow.AddEdge(v2.Iterator, "Loop", "ValidateAge")
+	flow.AddCondition("ValidateAge", map[string]string{"pass": "ValidateGender"})
+	flow.AddEdge(v2.Simple, "Loop", "Final")
 
-	// dag.Start(":8080")
+	// flow.Start(":8080")
 	data := []byte(`[{"age": "15", "gender": "female"}, {"age": "18", "gender": "male"}]`)
-	if dag.Error != nil {
-		panic(dag.Error)
+	if flow.Error != nil {
+		panic(flow.Error)
 	}
 
-	rs := dag.Process(context.Background(), data)
+	fmt.Println(flow.ClassifyEdges())
+	rs := flow.Process(context.Background(), data)
 	if rs.Error != nil {
 		panic(rs.Error)
 	}
@@ -39,7 +38,7 @@ func main() {
 }
 
 type GetData struct {
-	dag.Operation
+	v2.Operation
 }
 
 func (p *GetData) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
@@ -47,7 +46,7 @@ func (p *GetData) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 }
 
 type Loop struct {
-	dag.Operation
+	v2.Operation
 }
 
 func (p *Loop) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
@@ -55,7 +54,7 @@ func (p *Loop) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 }
 
 type ValidateAge struct {
-	dag.Operation
+	v2.Operation
 }
 
 func (p *ValidateAge) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
@@ -74,7 +73,7 @@ func (p *ValidateAge) ProcessTask(ctx context.Context, task *mq.Task) mq.Result 
 }
 
 type ValidateGender struct {
-	dag.Operation
+	v2.Operation
 }
 
 func (p *ValidateGender) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
@@ -88,7 +87,7 @@ func (p *ValidateGender) ProcessTask(ctx context.Context, task *mq.Task) mq.Resu
 }
 
 type Final struct {
-	dag.Operation
+	v2.Operation
 }
 
 func (p *Final) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
