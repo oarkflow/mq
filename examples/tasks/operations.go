@@ -2,15 +2,15 @@ package tasks
 
 import (
 	"context"
+	v2 "github.com/oarkflow/mq/dag/v2"
 
 	"github.com/oarkflow/json"
 
 	"github.com/oarkflow/mq"
-	"github.com/oarkflow/mq/dag"
 )
 
 type GetData struct {
-	dag.Operation
+	v2.Operation
 }
 
 func (e *GetData) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
@@ -18,7 +18,7 @@ func (e *GetData) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 }
 
 type Loop struct {
-	dag.Operation
+	v2.Operation
 }
 
 func (e *Loop) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
@@ -26,7 +26,7 @@ func (e *Loop) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 }
 
 type Condition struct {
-	dag.Operation
+	v2.Operation
 }
 
 func (e *Condition) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
@@ -47,7 +47,7 @@ func (e *Condition) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 }
 
 type PrepareEmail struct {
-	dag.Operation
+	v2.Operation
 }
 
 func (e *PrepareEmail) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
@@ -62,7 +62,7 @@ func (e *PrepareEmail) ProcessTask(ctx context.Context, task *mq.Task) mq.Result
 }
 
 type EmailDelivery struct {
-	dag.Operation
+	v2.Operation
 }
 
 func (e *EmailDelivery) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
@@ -77,7 +77,7 @@ func (e *EmailDelivery) ProcessTask(ctx context.Context, task *mq.Task) mq.Resul
 }
 
 type SendSms struct {
-	dag.Operation
+	v2.Operation
 }
 
 func (e *SendSms) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
@@ -90,7 +90,7 @@ func (e *SendSms) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 }
 
 type StoreData struct {
-	dag.Operation
+	v2.Operation
 }
 
 func (e *StoreData) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
@@ -98,7 +98,7 @@ func (e *StoreData) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 }
 
 type InAppNotification struct {
-	dag.Operation
+	v2.Operation
 }
 
 func (e *InAppNotification) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
@@ -111,7 +111,7 @@ func (e *InAppNotification) ProcessTask(ctx context.Context, task *mq.Task) mq.R
 }
 
 type Final struct {
-	dag.Operation
+	v2.Operation
 }
 
 func (e *Final) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {

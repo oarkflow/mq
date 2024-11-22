@@ -3,9 +3,13 @@ package v2
 import (
 	"context"
 	"fmt"
+	"github.com/oarkflow/mq/consts"
 	"github.com/oarkflow/mq/sio"
+	"golang.org/x/time/rate"
 	"log"
+	"net/http"
 	"strings"
+	"time"
 
 	"github.com/oarkflow/mq"
 	"github.com/oarkflow/mq/storage"
@@ -317,4 +321,159 @@ func (tm *DAG) Process(ctx context.Context, payload []byte) mq.Result {
 		taskID = mq.NewID()
 	}
 	return tm.ProcessTask(ctx, mq.NewTask(taskID, payload, ""))
+}
+
+func (tm *DAG) Validate() error {
+	report, hasCycle, err := tm.ClassifyEdges()
+	if hasCycle || err != nil {
+		tm.Error = err
+		return err
+	}
+	tm.report = report
+	return nil
+}
+
+func (tm *DAG) GetReport() string {
+	return tm.report
+}
+
+func (tm *DAG) AddDAGNode(name string, key string, dag *DAG, firstNode ...bool) *DAG {
+	dag.AssignTopic(key)
+	tm.nodes.Set(key, &Node{
+		Label:     name,
+		ID:        key,
+		processor: dag,
+		isReady:   true,
+	})
+	if len(firstNode) > 0 && firstNode[0] {
+		tm.startNode = key
+	}
+	return tm
+}
+
+func (tm *DAG) Start(ctx context.Context, addr string) error {
+	// Start the server in a separate goroutine
+	go func() {
+		defer mq.RecoverPanic(mq.RecoverTitle)
+		if err := tm.server.Start(ctx); err != nil {
+			panic(err)
+		}
+	}()
+
+	// Start the node consumers if not in sync mode
+	if !tm.server.SyncMode() {
+		tm.nodes.ForEach(func(_ string, con *Node) bool {
+			go func(con *Node) {
+				defer mq.RecoverPanic(mq.RecoverTitle)
+				limiter := rate.NewLimiter(rate.Every(1*time.Second), 1) // Retry every second
+				for {
+					err := con.processor.Consume(ctx)
+					if err != nil {
+						log.Printf("[ERROR] - Consumer %s failed to start: %v", con.ID, err)
+					} else {
+						log.Printf("[INFO] - Consumer %s started successfully", con.ID)
+						break
+					}
+					limiter.Wait(ctx) // Wait with rate limiting before retrying
+				}
+			}(con)
+			return true
+		})
+	}
+	log.Printf("DAG - HTTP_SERVER ~> started on http://%s", addr)
+	tm.Handlers()
+	config := tm.server.TLSConfig()
+	log.Printf("Server listening on http://%s", addr)
+	if config.UseTLS {
+		return http.ListenAndServeTLS(addr, config.CertPath, config.KeyPath, nil)
+	}
+	return http.ListenAndServe(addr, nil)
+}
+
+func (tm *DAG) ScheduleTask(ctx context.Context, payload []byte, opts ...mq.SchedulerOption) mq.Result {
+	var taskID string
+	userCtx := UserContext(ctx)
+	if val := userCtx.Get("task_id"); val != "" {
+		taskID = val
+	} else {
+		taskID = mq.NewID()
+	}
+	t := mq.NewTask(taskID, payload, "")
+
+	ctx = context.WithValue(ctx, "task_id", taskID)
+	userContext := UserContext(ctx)
+	next := userContext.Get("next")
+	manager, ok := tm.taskManager.Get(taskID)
+	resultCh := make(chan mq.Result, 1)
+	if !ok {
+		manager = NewTaskManager(tm, taskID, resultCh, tm.iteratorNodes.Clone())
+		tm.taskManager.Set(taskID, manager)
+	} else {
+		manager.resultCh = resultCh
+	}
+	currentNode := strings.Split(manager.currentNode, Delimiter)[0]
+	node, exists := tm.nodes.Get(currentNode)
+	method, ok := ctx.Value("method").(string)
+	if method == "GET" && exists && node.NodeType == Page {
+		ctx = context.WithValue(ctx, "initial_node", currentNode)
+	} else if next == "true" {
+		nodes, err := tm.GetNextNodes(currentNode)
+		if err != nil {
+			return mq.Result{Error: err, Ctx: ctx}
+		}
+		if len(nodes) > 0 {
+			ctx = context.WithValue(ctx, "initial_node", nodes[0].ID)
+		}
+	}
+	firstNode, err := tm.parseInitialNode(ctx)
+	if err != nil {
+		return mq.Result{Error: err, Ctx: ctx}
+	}
+	node, ok = tm.nodes.Get(firstNode)
+	if ok && node.NodeType != Page && t.Payload == nil {
+		return mq.Result{Error: fmt.Errorf("payload is required for node %s", firstNode), Ctx: ctx}
+	}
+	t.Topic = firstNode
+	ctx = context.WithValue(ctx, ContextIndex, "0")
+
+	headers, ok := mq.GetHeaders(ctx)
+	ctxx := context.Background()
+	if ok {
+		ctxx = mq.SetHeaders(ctxx, headers.AsMap())
+	}
+	tm.pool.Scheduler().AddTask(ctxx, t, opts...)
+	return mq.Result{CreatedAt: t.CreatedAt, TaskID: t.ID, Topic: t.Topic, Status: "PENDING"}
+}
+
+func (tm *DAG) PauseConsumer(ctx context.Context, id string) {
+	tm.doConsumer(ctx, id, consts.CONSUMER_PAUSE)
+}
+
+func (tm *DAG) ResumeConsumer(ctx context.Context, id string) {
+	tm.doConsumer(ctx, id, consts.CONSUMER_RESUME)
+}
+
+func (tm *DAG) doConsumer(ctx context.Context, id string, action consts.CMD) {
+	if node, ok := tm.nodes.Get(id); ok {
+		switch action {
+		case consts.CONSUMER_PAUSE:
+			err := node.processor.Pause(ctx)
+			if err == nil {
+				node.isReady = false
+				log.Printf("[INFO] - Consumer %s paused successfully", node.ID)
+			} else {
+				log.Printf("[ERROR] - Failed to pause consumer %s: %v", node.ID, err)
+			}
+		case consts.CONSUMER_RESUME:
+			err := node.processor.Resume(ctx)
+			if err == nil {
+				node.isReady = true
+				log.Printf("[INFO] - Consumer %s resumed successfully", node.ID)
+			} else {
+				log.Printf("[ERROR] - Failed to resume consumer %s: %v", node.ID, err)
+			}
+		}
+	} else {
+		log.Printf("[WARNING] - Consumer %s not found", id)
+	}
 }

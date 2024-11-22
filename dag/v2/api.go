@@ -5,8 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/oarkflow/mq"
-	"log"
+	"github.com/oarkflow/mq/sio"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/oarkflow/mq/consts"
@@ -108,14 +109,43 @@ func (tm *DAG) taskStatusHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(result)
 }
 
-func (tm *DAG) Start(addr string) {
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		content := []byte(`<a href="/process">Start</a>`)
-		w.Header().Set(consts.ContentType, consts.TypeHtml)
-		w.Write(content)
+func (tm *DAG) SetupWS() *sio.Server {
+	ws := sio.New(sio.Config{
+		CheckOrigin:       func(r *http.Request) bool { return true },
+		EnableCompression: true,
 	})
+	WsEvents(ws)
+	tm.Notifier = ws
+	return ws
+}
+
+func (tm *DAG) Handlers() {
+	http.Handle("/", http.FileServer(http.Dir("webroot")))
+	http.Handle("/notify", tm.SetupWS())
 	http.HandleFunc("/process", tm.render)
+	http.HandleFunc("/request", tm.render)
 	http.HandleFunc("/task/status", tm.taskStatusHandler)
-	log.Printf("Server listening on http://%s", addr)
-	http.ListenAndServe(addr, nil)
+	http.HandleFunc("/dot", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		fmt.Fprintln(w, tm.ExportDOT())
+	})
+	http.HandleFunc("/ui", func(w http.ResponseWriter, r *http.Request) {
+		image := fmt.Sprintf("%s.svg", mq.NewID())
+		err := tm.SaveSVG(image)
+		if err != nil {
+			http.Error(w, "Failed to read request body", http.StatusBadRequest)
+			return
+		}
+		defer os.Remove(image)
+		svgBytes, err := os.ReadFile(image)
+		if err != nil {
+			http.Error(w, "Could not read SVG file", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "image/svg+xml")
+		if _, err := w.Write(svgBytes); err != nil {
+			http.Error(w, "Could not write SVG response", http.StatusInternalServerError)
+			return
+		}
+	})
 }
