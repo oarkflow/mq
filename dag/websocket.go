@@ -11,7 +11,6 @@ func WsEvents(s *sio.Server) {
 }
 
 func join(s *sio.Socket, data []byte) {
-	//just one room at a time for the simple example
 	currentRooms := s.GetRooms()
 	for _, room := range currentRooms {
 		s.Leave(room)

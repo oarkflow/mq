@@ -4,25 +4,25 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/oarkflow/mq/dag"
 
 	"github.com/oarkflow/jet"
 
 	"github.com/oarkflow/mq"
 	"github.com/oarkflow/mq/consts"
-	v2 "github.com/oarkflow/mq/dag/v2"
 )
 
 func main() {
-	flow := v2.NewDAG("Multi-Step Form", "multi-step-form", func(taskID string, result mq.Result) {
+	flow := dag.NewDAG("Multi-Step Form", "multi-step-form", func(taskID string, result mq.Result) {
 		fmt.Printf("Final result for task %s: %s\n", taskID, string(result.Payload))
 	})
-	flow.AddNode(v2.Page, "FormStep1", "FormStep1", &FormStep1{})
-	flow.AddNode(v2.Page, "FormStep2", "FormStep2", &FormStep2{})
-	flow.AddNode(v2.Page, "FormResult", "FormResult", &FormResult{})
+	flow.AddNode(dag.Page, "FormStep1", "FormStep1", &FormStep1{})
+	flow.AddNode(dag.Page, "FormStep2", "FormStep2", &FormStep2{})
+	flow.AddNode(dag.Page, "FormResult", "FormResult", &FormResult{})
 
 	// Define edges
-	flow.AddEdge(v2.Simple, "FormStep1", "FormStep1", "FormStep2")
-	flow.AddEdge(v2.Simple, "FormStep2", "FormStep2", "FormResult")
+	flow.AddEdge(dag.Simple, "FormStep1", "FormStep1", "FormStep2")
+	flow.AddEdge(dag.Simple, "FormStep2", "FormStep2", "FormResult")
 
 	// Start the flow
 	if flow.Error != nil {
@@ -32,7 +32,7 @@ func main() {
 }
 
 type FormStep1 struct {
-	v2.Operation
+	dag.Operation
 }
 
 func (p *FormStep1) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
@@ -68,7 +68,7 @@ func (p *FormStep1) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 }
 
 type FormStep2 struct {
-	v2.Operation
+	dag.Operation
 }
 
 func (p *FormStep2) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
@@ -111,7 +111,7 @@ func (p *FormStep2) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 }
 
 type FormResult struct {
-	v2.Operation
+	dag.Operation
 }
 
 func (p *FormResult) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {

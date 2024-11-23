@@ -3,21 +3,21 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/oarkflow/mq/dag/v1"
 
 	"github.com/oarkflow/mq/examples/tasks"
 
 	"github.com/oarkflow/mq"
-	"github.com/oarkflow/mq/dag"
 )
 
 func main() {
-	d := dag.NewDAG(
+	d := v1.NewDAG(
 		"Sample DAG",
 		"sample-dag",
 		mq.WithSyncMode(true),
 		mq.WithNotifyResponse(tasks.NotifyResponse),
 	)
-	subDag := dag.NewDAG(
+	subDag := v1.NewDAG(
 		"Sub DAG",
 		"D",
 		mq.WithNotifyResponse(tasks.NotifySubDAGResponse),
@@ -35,7 +35,7 @@ func main() {
 	d.AddDAGNode("D", "D", subDag)
 	d.AddNode("E", "E", &tasks.Node5{})
 	d.AddIterator("Send each item", "A", "B")
-	d.AddCondition("C", map[dag.When]dag.Then{"PASS": "D", "FAIL": "E"})
+	d.AddCondition("C", map[v1.When]v1.Then{"PASS": "D", "FAIL": "E"})
 	d.AddEdge("Label 1", "B", "C")
 
 	fmt.Println(d.ExportDOT())

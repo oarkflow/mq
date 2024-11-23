@@ -5,16 +5,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/oarkflow/mq"
+	"github.com/oarkflow/mq/dag"
 	"os"
 
 	"github.com/oarkflow/jet"
 
 	"github.com/oarkflow/mq/consts"
-	v2 "github.com/oarkflow/mq/dag/v2"
 )
 
 type Form struct {
-	v2.Operation
+	dag.Operation
 }
 
 func (p *Form) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
@@ -38,7 +38,7 @@ func (p *Form) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 }
 
 type NodeA struct {
-	v2.Operation
+	dag.Operation
 }
 
 func (p *NodeA) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
@@ -52,7 +52,7 @@ func (p *NodeA) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 }
 
 type NodeB struct {
-	v2.Operation
+	dag.Operation
 }
 
 func (p *NodeB) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
@@ -66,7 +66,7 @@ func (p *NodeB) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 }
 
 type NodeC struct {
-	v2.Operation
+	dag.Operation
 }
 
 func (p *NodeC) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
@@ -80,7 +80,7 @@ func (p *NodeC) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 }
 
 type Result struct {
-	v2.Operation
+	dag.Operation
 }
 
 func (p *Result) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
@@ -115,16 +115,16 @@ func notify(taskID string, result mq.Result) {
 }
 
 func main() {
-	flow := v2.NewDAG("Sample DAG", "sample-dag", notify)
-	flow.AddNode(v2.Page, "Form", "Form", &Form{})
-	flow.AddNode(v2.Function, "NodeA", "NodeA", &NodeA{})
-	flow.AddNode(v2.Function, "NodeB", "NodeB", &NodeB{})
-	flow.AddNode(v2.Function, "NodeC", "NodeC", &NodeC{})
-	flow.AddNode(v2.Page, "Result", "Result", &Result{})
-	flow.AddEdge(v2.Simple, "Form", "Form", "NodeA")
-	flow.AddEdge(v2.Simple, "NodeA", "NodeA", "NodeB")
-	flow.AddEdge(v2.Simple, "NodeB", "NodeB", "NodeC")
-	flow.AddEdge(v2.Simple, "NodeC", "NodeC", "Result")
+	flow := dag.NewDAG("Sample DAG", "sample-dag", notify)
+	flow.AddNode(dag.Page, "Form", "Form", &Form{})
+	flow.AddNode(dag.Function, "NodeA", "NodeA", &NodeA{})
+	flow.AddNode(dag.Function, "NodeB", "NodeB", &NodeB{})
+	flow.AddNode(dag.Function, "NodeC", "NodeC", &NodeC{})
+	flow.AddNode(dag.Page, "Result", "Result", &Result{})
+	flow.AddEdge(dag.Simple, "Form", "Form", "NodeA")
+	flow.AddEdge(dag.Simple, "NodeA", "NodeA", "NodeB")
+	flow.AddEdge(dag.Simple, "NodeB", "NodeB", "NodeC")
+	flow.AddEdge(dag.Simple, "NodeC", "NodeC", "Result")
 	if flow.Error != nil {
 		panic(flow.Error)
 	}

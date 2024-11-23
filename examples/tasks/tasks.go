@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	v2 "github.com/oarkflow/mq/dag/v2"
+	v2 "github.com/oarkflow/mq/dag"
 	"log"
 
 	"github.com/oarkflow/mq"

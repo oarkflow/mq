@@ -2,9 +2,8 @@ package tasks
 
 import (
 	"context"
-	v2 "github.com/oarkflow/mq/dag/v2"
-
 	"github.com/oarkflow/json"
+	v2 "github.com/oarkflow/mq/dag"
 
 	"github.com/oarkflow/mq"
 )
