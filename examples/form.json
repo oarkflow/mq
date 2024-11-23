@@ -1,0 +1,44 @@
+{
+	"name": "Multi-Step Form",
+	"key": "multi-step-form",
+	"nodes": [
+		{
+			"name": "Form Step1",
+			"id": "FormStep1",
+			"node": "Page",
+			"data": {
+				"template": "<html><body><form method=\\\"post\\\" action=\\\"/process?task_id={{task_id}}&next=true\\\"><label>Name:</label><input type=\\\"text\\\" name=\\\"name\\\" required><label>Age:</label><input type=\\\"number\\\" name=\\\"age\\\" required><button type=\\\"submit\\\">Next</button></form></body></html>",
+				"mapping": {}
+			},
+			"first_node": true
+		},
+		{
+			"name": "Form Step2",
+			"id": "FormStep2",
+			"node": "Page",
+			"data": {
+				"template": "<html><body><form method=\\\"post\\\" action=\\\"/process?task_id={{task_id}}&next=true\\\">{{ if show_voting_controls }}<label>Do you want to register to vote?</label><input type=\\\"checkbox\\\" name=\\\"register_vote\\\"><button type=\\\"submit\\\">Next</button>{{ else }}<p>You are not eligible to vote.</p>{{ end }}</form></body></html>",
+				"mapping": {}
+			}
+		},
+		{
+			"name": "Form Result",
+			"id": "FormResult",
+			"node": "Page",
+			"data": {
+				"template": "<html><body><h1>Form Summary</h1><p>Name: {{ name }}</p><p>Age: {{ age }}</p>{{ if register_vote }}<p>You have registered to vote!</p>{{ else }}<p>You did not register to vote.</p>{{ end }}</body></html>",
+				"mapping": {}
+			}
+		}
+	],
+	"edges": [
+		{
+			"source": "FormStep1",
+			"target": ["FormStep2"]
+		},
+		{
+			"source": "FormStep2",
+			"target": ["FormResult"]
+		}
+	]
+}

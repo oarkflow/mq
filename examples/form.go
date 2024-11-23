@@ -16,13 +16,13 @@ func main() {
 	flow := dag.NewDAG("Multi-Step Form", "multi-step-form", func(taskID string, result mq.Result) {
 		fmt.Printf("Final result for task %s: %s\n", taskID, string(result.Payload))
 	})
-	flow.AddNode(dag.Page, "FormStep1", "FormStep1", &FormStep1{})
-	flow.AddNode(dag.Page, "FormStep2", "FormStep2", &FormStep2{})
-	flow.AddNode(dag.Page, "FormResult", "FormResult", &FormResult{})
+	flow.AddNode(dag.Page, "Form Step1", "FormStep1", &FormStep1{})
+	flow.AddNode(dag.Page, "Form Step2", "FormStep2", &FormStep2{})
+	flow.AddNode(dag.Page, "Form Result", "FormResult", &FormResult{})
 
 	// Define edges
-	flow.AddEdge(dag.Simple, "FormStep1", "FormStep1", "FormStep2")
-	flow.AddEdge(dag.Simple, "FormStep2", "FormStep2", "FormResult")
+	flow.AddEdge(dag.Simple, "Form Step1", "FormStep1", "FormStep2")
+	flow.AddEdge(dag.Simple, "Form Step2", "FormStep2", "FormResult")
 
 	// Start the flow
 	if flow.Error != nil {
