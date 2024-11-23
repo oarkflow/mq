@@ -46,6 +46,8 @@ type TaskManager struct {
 	iteratorNodes      storage.IMap[string, []Edge]
 	currentNodePayload storage.IMap[string, json.RawMessage]
 	currentNodeResult  storage.IMap[string, mq.Result]
+	createdAt          time.Time
+	latency            string
 	result             *mq.Result
 	dag                *DAG
 	taskID             string
@@ -82,6 +84,7 @@ func NewTaskManager(dag *DAG, taskID string, resultCh chan mq.Result, iteratorNo
 		taskQueue:          make(chan *task, DefaultChannelSize),
 		resultQueue:        make(chan nodeResult, DefaultChannelSize),
 		iteratorNodes:      iteratorNodes,
+		createdAt:          time.Now(),
 		stopCh:             make(chan struct{}),
 		resultCh:           resultCh,
 		taskID:             taskID,
@@ -160,17 +163,26 @@ func (tm *TaskManager) processNode(exec *task) {
 	state.Result = result
 	result.Topic = node.ID
 	if result.Error != nil {
+		tm.updateTimestamps(&result)
 		tm.result = &result
 		tm.resultCh <- result
 		tm.processFinalResult(state)
 		return
 	}
 	if node.NodeType == Page {
+		tm.updateTimestamps(&result)
 		tm.result = &result
 		tm.resultCh <- result
 		return
 	}
 	tm.handleNext(exec.ctx, node, state, result)
+}
+
+func (tm *TaskManager) updateTimestamps(rs *mq.Result) {
+	rs.CreatedAt = tm.createdAt
+	rs.ProcessedAt = time.Now()
+	rs.Latency = time.Since(rs.CreatedAt).String()
+	fmt.Println(rs.Latency)
 }
 
 func (tm *TaskManager) handlePrevious(ctx context.Context, state *TaskState, result mq.Result, childNode string, dispatchFinal bool) {
@@ -233,6 +245,7 @@ func (tm *TaskManager) handlePrevious(ctx context.Context, state *TaskState, res
 			}
 		}
 	} else {
+		tm.updateTimestamps(&state.Result)
 		tm.result = &state.Result
 		state.Result.Topic = strings.Split(state.NodeID, Delimiter)[0]
 		tm.resultCh <- state.Result
@@ -285,6 +298,12 @@ func (tm *TaskManager) onNodeCompleted(rs nodeResult) {
 				if parentState != nil {
 					pn = strings.Split(pn, Delimiter)[0]
 					tm.handlePrevious(rs.ctx, parentState, rs.result, rs.nodeID, true)
+				}
+			} else {
+				tm.updateTimestamps(&rs.result)
+				tm.resultCh <- rs.result
+				if state, ok := tm.taskStates.Get(rs.nodeID); ok {
+					tm.processFinalResult(state)
 				}
 			}
 		}

@@ -53,7 +53,7 @@ type Payload struct {
 
 type Operation struct {
 	ID              string   `json:"id"`
-	Type            string   `json:"type"`
+	Type            NodeType `json:"type"`
 	Key             string   `json:"key"`
 	RequiredFields  []string `json:"required_fields"`
 	OptionalFields  []string `json:"optional_fields"`
@@ -91,7 +91,7 @@ func (e *Operation) SetConfig(payload Payload) {
 }
 
 func (e *Operation) GetType() string {
-	return e.Type
+	return e.Type.String()
 }
 
 func (e *Operation) GetKey() string {

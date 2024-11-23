@@ -13,6 +13,16 @@ type NodeType int
 
 func (c NodeType) IsValid() bool { return c >= Function && c <= Page }
 
+func (c NodeType) String() string {
+	switch c {
+	case Function:
+		return "Function"
+	case Page:
+		return "Page"
+	}
+	return "Function"
+}
+
 const (
 	Function NodeType = iota
 	Page

@@ -336,9 +336,6 @@ func (tm *DAG) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 		return mq.Result{Error: err, Ctx: ctx}
 	}
 	node, ok = tm.nodes.Get(firstNode)
-	if ok && node.NodeType != Page && task.Payload == nil {
-		return mq.Result{Error: fmt.Errorf("payload is required for node %s", firstNode), Ctx: ctx}
-	}
 	task.Topic = firstNode
 	ctx = context.WithValue(ctx, ContextIndex, "0")
 	manager.ProcessTask(ctx, firstNode, task.Payload)
@@ -475,9 +472,6 @@ func (tm *DAG) ScheduleTask(ctx context.Context, payload []byte, opts ...mq.Sche
 		return mq.Result{Error: err, Ctx: ctx}
 	}
 	node, ok = tm.nodes.Get(firstNode)
-	if ok && node.NodeType != Page && t.Payload == nil {
-		return mq.Result{Error: fmt.Errorf("payload is required for node %s", firstNode), Ctx: ctx}
-	}
 	t.Topic = firstNode
 	ctx = context.WithValue(ctx, ContextIndex, "0")
 
