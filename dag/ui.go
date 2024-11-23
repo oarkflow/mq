@@ -143,7 +143,7 @@ func (tm *DAG) ExportDOT() string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf(`digraph "%s" {`, tm.name))
 	sb.WriteString("\n")
-	sb.WriteString(`  label="Enhanced DAG Representation";`)
+	sb.WriteString(fmt.Sprintf(`  label="%s";`, tm.name))
 	sb.WriteString("\n")
 	sb.WriteString(`  labelloc="t"; fontsize=22; fontname="Helvetica";`)
 	sb.WriteString("\n")
