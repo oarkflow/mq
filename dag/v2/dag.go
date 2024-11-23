@@ -2,14 +2,17 @@ package v2
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
-	"github.com/oarkflow/mq/consts"
-	"github.com/oarkflow/mq/sio"
-	"golang.org/x/time/rate"
 	"log"
 	"net/http"
 	"strings"
 	"time"
+
+	"golang.org/x/time/rate"
+
+	"github.com/oarkflow/mq/consts"
+	"github.com/oarkflow/mq/sio"
 
 	"github.com/oarkflow/mq"
 	"github.com/oarkflow/mq/storage"
@@ -271,6 +274,13 @@ func (tm *DAG) AddEdge(edgeType EdgeType, label, from string, targets ...string)
 	return tm
 }
 
+func (tm *DAG) getCurrentNode(manager *TaskManager) string {
+	if manager.currentNodePayload.Size() == 0 {
+		return ""
+	}
+	return manager.currentNodePayload.Keys()[0]
+}
+
 func (tm *DAG) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 	ctx = context.WithValue(ctx, "task_id", task.ID)
 	userContext := UserContext(ctx)
@@ -283,11 +293,24 @@ func (tm *DAG) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 	} else {
 		manager.resultCh = resultCh
 	}
-	currentNode := strings.Split(manager.currentNode, Delimiter)[0]
+	currentKey := tm.getCurrentNode(manager)
+	currentNode := strings.Split(currentKey, Delimiter)[0]
 	node, exists := tm.nodes.Get(currentNode)
 	method, ok := ctx.Value("method").(string)
 	if method == "GET" && exists && node.NodeType == Page {
 		ctx = context.WithValue(ctx, "initial_node", currentNode)
+		/*
+			if isLastNode, err := tm.IsLastNode(currentNode); err != nil && isLastNode {
+				if manager.result != nil {
+					fmt.Println(string(manager.result.Payload))
+					resultCh <- *manager.result
+					return <-resultCh
+				}
+			}
+		*/
+		if manager.result != nil {
+			task.Payload = manager.result.Payload
+		}
 	} else if next == "true" {
 		nodes, err := tm.GetNextNodes(currentNode)
 		if err != nil {
@@ -295,6 +318,17 @@ func (tm *DAG) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 		}
 		if len(nodes) > 0 {
 			ctx = context.WithValue(ctx, "initial_node", nodes[0].ID)
+		}
+	}
+	if currentNodeResult, hasResult := manager.currentNodeResult.Get(currentKey); hasResult {
+		var taskPayload, resultPayload map[string]any
+		if err := json.Unmarshal(task.Payload, &taskPayload); err == nil {
+			if err = json.Unmarshal(currentNodeResult.Payload, &resultPayload); err == nil {
+				for key, val := range resultPayload {
+					taskPayload[key] = val
+				}
+				task.Payload, _ = json.Marshal(taskPayload)
+			}
 		}
 	}
 	firstNode, err := tm.parseInitialNode(ctx)
@@ -410,7 +444,8 @@ func (tm *DAG) ScheduleTask(ctx context.Context, payload []byte, opts ...mq.Sche
 	} else {
 		manager.resultCh = resultCh
 	}
-	currentNode := strings.Split(manager.currentNode, Delimiter)[0]
+	currentKey := tm.getCurrentNode(manager)
+	currentNode := strings.Split(currentKey, Delimiter)[0]
 	node, exists := tm.nodes.Get(currentNode)
 	method, ok := ctx.Value("method").(string)
 	if method == "GET" && exists && node.NodeType == Page {
@@ -422,6 +457,17 @@ func (tm *DAG) ScheduleTask(ctx context.Context, payload []byte, opts ...mq.Sche
 		}
 		if len(nodes) > 0 {
 			ctx = context.WithValue(ctx, "initial_node", nodes[0].ID)
+		}
+	}
+	if currentNodeResult, hasResult := manager.currentNodeResult.Get(currentKey); hasResult {
+		var taskPayload, resultPayload map[string]any
+		if err := json.Unmarshal(payload, &taskPayload); err == nil {
+			if err = json.Unmarshal(currentNodeResult.Payload, &resultPayload); err == nil {
+				for key, val := range resultPayload {
+					taskPayload[key] = val
+				}
+				payload, _ = json.Marshal(taskPayload)
+			}
 		}
 	}
 	firstNode, err := tm.parseInitialNode(ctx)

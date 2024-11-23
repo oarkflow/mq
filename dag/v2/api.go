@@ -4,11 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/oarkflow/mq"
-	"github.com/oarkflow/mq/sio"
 	"net/http"
 	"os"
 	"strings"
+
+	"github.com/oarkflow/mq"
+	"github.com/oarkflow/mq/sio"
 
 	"github.com/oarkflow/mq/consts"
 	"github.com/oarkflow/mq/jsonparser"

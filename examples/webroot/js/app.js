@@ -13,23 +13,38 @@
     }
 
     window.onload = function() {
-        loadSVG('http://localhost:8083/ui');
+        loadSVG('http://localhost:8082/ui');
     };
     document.getElementById('send-request').addEventListener('click', function() {
         const input = document.getElementById('payload');
         const payloadData = JSON.parse(input.value);
         const data = { payload: payloadData };
 
-        fetch('http://localhost:8083/request', {
+        fetch('http://localhost:8082/request', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
             },
             body: JSON.stringify(data),
         })
-            .then(response => response.json())
-            .then(data => console.log('Success:', data))
-            .catch((error) => console.error('Error:', error));
+            .then(response => {
+                const contentType = response.headers.get('Content-Type');
+                if (contentType && contentType.includes("text/html")) {
+                    return response.text().then(html => ({ html }));
+                } else {
+                    return response.json();
+                }
+            })
+            .then(data => {
+                if (data.html) {
+                    const el = document.getElementById("response");
+                    el.innerHTML = data.html;
+                } else {
+                    console.log("Success", data);
+                }
+            })
+            .catch(error => console.error('Error:', error));
+
     });
 
     const tasks = {};

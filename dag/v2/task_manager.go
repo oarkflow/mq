@@ -4,10 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/oarkflow/mq"
 	"log"
 	"strings"
 	"time"
+
+	"github.com/oarkflow/mq"
 
 	"github.com/oarkflow/mq/storage"
 	"github.com/oarkflow/mq/storage/memory"
@@ -38,18 +39,20 @@ type nodeResult struct {
 }
 
 type TaskManager struct {
-	taskStates    storage.IMap[string, *TaskState]
-	parentNodes   storage.IMap[string, string]
-	childNodes    storage.IMap[string, int]
-	deferredTasks storage.IMap[string, *task]
-	iteratorNodes storage.IMap[string, []Edge]
-	currentNode   string
-	dag           *DAG
-	taskID        string
-	taskQueue     chan *task
-	resultQueue   chan nodeResult
-	resultCh      chan mq.Result
-	stopCh        chan struct{}
+	taskStates         storage.IMap[string, *TaskState]
+	parentNodes        storage.IMap[string, string]
+	childNodes         storage.IMap[string, int]
+	deferredTasks      storage.IMap[string, *task]
+	iteratorNodes      storage.IMap[string, []Edge]
+	currentNodePayload storage.IMap[string, json.RawMessage]
+	currentNodeResult  storage.IMap[string, mq.Result]
+	result             *mq.Result
+	dag                *DAG
+	taskID             string
+	taskQueue          chan *task
+	resultQueue        chan nodeResult
+	resultCh           chan mq.Result
+	stopCh             chan struct{}
 }
 
 type task struct {
@@ -70,17 +73,19 @@ func newTask(ctx context.Context, taskID, nodeID string, payload json.RawMessage
 
 func NewTaskManager(dag *DAG, taskID string, resultCh chan mq.Result, iteratorNodes storage.IMap[string, []Edge]) *TaskManager {
 	tm := &TaskManager{
-		taskStates:    memory.New[string, *TaskState](),
-		parentNodes:   memory.New[string, string](),
-		childNodes:    memory.New[string, int](),
-		deferredTasks: memory.New[string, *task](),
-		taskQueue:     make(chan *task, DefaultChannelSize),
-		resultQueue:   make(chan nodeResult, DefaultChannelSize),
-		iteratorNodes: iteratorNodes,
-		stopCh:        make(chan struct{}),
-		resultCh:      resultCh,
-		taskID:        taskID,
-		dag:           dag,
+		taskStates:         memory.New[string, *TaskState](),
+		parentNodes:        memory.New[string, string](),
+		childNodes:         memory.New[string, int](),
+		deferredTasks:      memory.New[string, *task](),
+		currentNodePayload: memory.New[string, json.RawMessage](),
+		currentNodeResult:  memory.New[string, mq.Result](),
+		taskQueue:          make(chan *task, DefaultChannelSize),
+		resultQueue:        make(chan nodeResult, DefaultChannelSize),
+		iteratorNodes:      iteratorNodes,
+		stopCh:             make(chan struct{}),
+		resultCh:           resultCh,
+		taskID:             taskID,
+		dag:                dag,
 	}
 	go tm.run()
 	go tm.waitForResult()
@@ -147,16 +152,21 @@ func (tm *TaskManager) processNode(exec *task) {
 	}
 	state.Status = mq.Processing
 	state.UpdatedAt = time.Now()
-	tm.currentNode = exec.nodeID
+	tm.currentNodePayload.Clear()
+	tm.currentNodeResult.Clear()
+	tm.currentNodePayload.Set(exec.nodeID, exec.payload)
 	result := node.processor.ProcessTask(exec.ctx, mq.NewTask(exec.taskID, exec.payload, exec.nodeID))
+	tm.currentNodeResult.Set(exec.nodeID, result)
 	state.Result = result
 	result.Topic = node.ID
 	if result.Error != nil {
+		tm.result = &result
 		tm.resultCh <- result
 		tm.processFinalResult(state)
 		return
 	}
 	if node.NodeType == Page {
+		tm.result = &result
 		tm.resultCh <- result
 		return
 	}
@@ -223,6 +233,7 @@ func (tm *TaskManager) handlePrevious(ctx context.Context, state *TaskState, res
 			}
 		}
 	} else {
+		tm.result = &state.Result
 		state.Result.Topic = strings.Split(state.NodeID, Delimiter)[0]
 		tm.resultCh <- state.Result
 		tm.processFinalResult(state)
