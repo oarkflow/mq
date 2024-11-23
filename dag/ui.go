@@ -153,53 +153,59 @@ func (tm *DAG) ExportDOT() string {
 	sb.WriteString("\n")
 	sb.WriteString(`  rankdir=TB;`)
 	sb.WriteString("\n")
+
+	// Render main DAG nodes
 	sortedNodes := tm.TopologicalSort()
 	for _, nodeKey := range sortedNodes {
 		node, _ := tm.nodes.Get(nodeKey)
-		nodeColor := "lightgray"
-		nodeShape := "box"
-		labelSuffix := ""
-
-		// Apply styles based on NodeType
-		switch node.NodeType {
-		case Function:
-			nodeColor = "#D4EDDA"
-			labelSuffix = " [Function]"
-		case Page:
-			nodeColor = "#f0d2d1"
-			labelSuffix = " [Page]"
-		}
-		sb.WriteString(fmt.Sprintf(
-			`  "%s" [label="%s%s",  fontcolor="#2C3E50", fillcolor="%s", shape="%s", style="rounded,filled", id="node_%s"];`,
-			node.ID, node.Label, labelSuffix, nodeColor, nodeShape, node.ID))
-		sb.WriteString("\n")
+		renderNode(&sb, node)
 	}
 
-	// Define edges with unique styling by EdgeType
+	// Render main DAG edges
 	for _, nodeKey := range sortedNodes {
 		node, _ := tm.nodes.Get(nodeKey)
-		for _, edge := range node.Edges {
-			edgeStyle := "solid"
-			edgeColor := "black"
-			labelSuffix := ""
+		renderEdges(&sb, node)
+	}
 
-			// Apply styles based on EdgeType
-			switch edge.Type {
-			case Iterator:
-				edgeStyle = "dashed"
-				edgeColor = "blue"
-				labelSuffix = " [Iter]"
-			case Simple:
-				edgeStyle = "solid"
-				edgeColor = "black"
-				labelSuffix = ""
+	// Render SubDAGs as clusters and connect edges
+	for _, nodeKey := range sortedNodes {
+		node, _ := tm.nodes.Get(nodeKey)
+		if node.processor != nil {
+			if subDAG, ok := isDAGNode(node); ok && subDAG.consumerTopic != "" {
+				// Render SubDAG as a cluster
+				sb.WriteString(fmt.Sprintf(`  subgraph "cluster_%s" {`, subDAG.name))
+				sb.WriteString("\n")
+				sb.WriteString(fmt.Sprintf(`    label="SubDAG: %s";`, subDAG.name))
+				sb.WriteString("\n")
+				sb.WriteString(`    style=filled; color=gray90;`)
+				sb.WriteString("\n")
+
+				// Render SubDAG nodes
+				for _, subNodeKey := range subDAG.TopologicalSort() {
+					subNode, _ := subDAG.nodes.Get(subNodeKey)
+					renderNode(&sb, subNode, subDAG.name+"_")
+				}
+
+				// Render SubDAG edges
+				for _, subNodeKey := range subDAG.TopologicalSort() {
+					subNode, _ := subDAG.nodes.Get(subNodeKey)
+					renderEdges(&sb, subNode, subDAG.name+"_")
+				}
+
+				sb.WriteString("  }\n")
+
+				// Connect main DAG to SubDAG's start node
+				if startNodeKey := subDAG.TopologicalSort()[0]; startNodeKey != "" {
+					sb.WriteString(fmt.Sprintf(
+						`  "%s" -> "%s%s" [label=" Connect to SubDAG", color="red", style=bold];`,
+						nodeKey, subDAG.name+"_", startNodeKey))
+					sb.WriteString("\n")
+				}
 			}
-			sb.WriteString(fmt.Sprintf(
-				`  "%s" -> "%s" [label="%s%s", color="%s", style="%s"];`,
-				node.ID, edge.To.ID, edge.Label, labelSuffix, edgeColor, edgeStyle))
-			sb.WriteString("\n")
 		}
 	}
+
+	// Add conditional edges
 	for fromNodeKey, conditions := range tm.conditions {
 		for when, then := range conditions {
 			if toNode, ok := tm.nodes.Get(then); ok {
@@ -209,37 +215,52 @@ func (tm *DAG) ExportDOT() string {
 		}
 	}
 
-	// Optional: Group related nodes into subgraphs (e.g., loops)
-	for _, nodeKey := range sortedNodes {
-		node, _ := tm.nodes.Get(nodeKey)
-		if node.processor != nil {
-			subDAG, _ := isDAGNode(node)
-			if subDAG != nil {
-				sb.WriteString(fmt.Sprintf(`  subgraph "cluster_%s" {`, subDAG.name))
-				sb.WriteString("\n")
-				sb.WriteString(fmt.Sprintf(`    label="Subgraph: %s";`, subDAG.name))
-				sb.WriteString("\n")
-				sb.WriteString(`    style=filled; color=gray90;`)
-				sb.WriteString("\n")
-				subDAG.nodes.ForEach(func(subNodeKey string, subNode *Node) bool {
-					sb.WriteString(fmt.Sprintf(`    "%s" [label="%s"];`, subNode.ID, subNode.Label))
-					sb.WriteString("\n")
-					return true
-				})
-				subDAG.nodes.ForEach(func(subNodeKey string, subNode *Node) bool {
-					for _, edge := range subNode.Edges {
-						sb.WriteString(fmt.Sprintf(`    "%s" -> "%s" [label="%s"];`, subNodeKey, edge.To.ID, edge.Label))
-						sb.WriteString("\n")
-					}
-					return true
-				})
-				sb.WriteString("  }\n")
-			}
-		}
-	}
-
 	sb.WriteString("}\n")
 	return sb.String()
+}
+
+// Helper function to render a node
+func renderNode(sb *strings.Builder, node *Node, prefix ...string) {
+	prefixedID := fmt.Sprintf("%s%s", strings.Join(prefix, ""), node.ID)
+	labelSuffix := ""
+	nodeColor := "lightgray"
+	switch node.NodeType {
+	case Function:
+		nodeColor = "#D4EDDA"
+		labelSuffix = " [Function]"
+	case Page:
+		nodeColor = "#f0d2d1"
+		labelSuffix = " [Page]"
+	}
+	sb.WriteString(fmt.Sprintf(
+		`  "%s" [label="%s%s", fontcolor="#2C3E50", fillcolor="%s", style="rounded,filled", id="node_%s"];`,
+		prefixedID, node.Label, labelSuffix, nodeColor, prefixedID))
+	sb.WriteString("\n")
+}
+
+// Helper function to render edges
+func renderEdges(sb *strings.Builder, node *Node, prefix ...string) {
+	prefixedID := fmt.Sprintf("%s%s", strings.Join(prefix, ""), node.ID)
+	for _, edge := range node.Edges {
+		edgeStyle := "solid"
+		edgeColor := "black"
+		labelSuffix := ""
+		switch edge.Type {
+		case Iterator:
+			edgeStyle = "dashed"
+			edgeColor = "blue"
+			labelSuffix = " [Iter]"
+		case Simple:
+			edgeStyle = "solid"
+			edgeColor = "black"
+			labelSuffix = ""
+		}
+		toPrefixedID := fmt.Sprintf("%s%s", strings.Join(prefix, ""), edge.To.ID)
+		sb.WriteString(fmt.Sprintf(
+			`  "%s" -> "%s" [label="%s%s", color="%s", style="%s"];`,
+			prefixedID, toPrefixedID, edge.Label, labelSuffix, edgeColor, edgeStyle))
+		sb.WriteString("\n")
+	}
 }
 
 func (tm *DAG) TopologicalSort() (stack []string) {
