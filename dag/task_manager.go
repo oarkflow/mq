@@ -379,16 +379,17 @@ func (tm *TaskManager) handleEdges(currentResult nodeResult, edges []Edge) {
 
 func (tm *TaskManager) retryDeferredTasks() {
 	const maxRetries = 5
-	retries := 0
-	for retries < maxRetries {
+	backoff := time.Second
+
+	for retries := 0; retries < maxRetries; retries++ {
 		select {
 		case <-tm.stopCh:
 			log.Println("Stopping Deferred task Retrier")
 			return
-		case <-time.After(RetryInterval):
+		case <-time.After(backoff):
 			tm.deferredTasks.ForEach(func(taskID string, task *task) bool {
 				tm.send(task.ctx, task.nodeID, taskID, task.payload)
-				retries++
+				backoff = backoff * 2 // Exponential backoff
 				return true
 			})
 		}
