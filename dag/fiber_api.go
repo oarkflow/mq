@@ -1,12 +1,10 @@
 package dag
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/url"
 	"os"
 	"strings"
 
@@ -14,6 +12,7 @@ import (
 	"github.com/oarkflow/errors"
 
 	"github.com/oarkflow/mq"
+	"github.com/oarkflow/mq/utils"
 
 	"github.com/oarkflow/mq/consts"
 	"github.com/oarkflow/mq/jsonparser"
@@ -216,9 +215,12 @@ func parseRequest(c *fiber.Ctx) (context.Context, []byte, error) {
 		if body == nil {
 			return ctx, nil, errors.New("empty form body")
 		}
-		formData := ParseFormToMap(body, &userContext.Query)
-		if formData != nil {
-			return ctx, nil, fmt.Errorf("failed to parse form data: %v", formData)
+		val, err := utils.DecodeForm(body)
+		if err != nil {
+			return ctx, nil, fmt.Errorf("failed to parse form data: %v", err.Error())
+		}
+		for key, v := range val {
+			userContext.Query[key] = v
 		}
 		result = userContext.Query
 	default:
@@ -231,53 +233,4 @@ func parseRequest(c *fiber.Ctx) (context.Context, []byte, error) {
 	}
 
 	return ctx, bt, nil
-}
-
-// ParseFormToMap parses form-encoded data into the provided map
-func ParseFormToMap(body []byte, data *map[string]any) error {
-	if data == nil {
-		return errors.New("data map is nil")
-	}
-	if len(body) == 0 {
-		return errors.New("empty form body")
-	}
-	start := 0
-	for i := 0; i <= len(body); i++ {
-		if i == len(body) || body[i] == '&' {
-			if err := processPair(body[start:i], data); err != nil {
-				return err
-			}
-			start = i + 1
-		}
-	}
-	return nil
-}
-
-// processPair processes a key-value pair and inserts it into the map
-func processPair(pair []byte, data *map[string]any) error {
-	if len(pair) == 0 {
-		return nil // Ignore empty pairs
-	}
-	eqIndex := bytes.IndexByte(pair, '=')
-	if eqIndex == -1 {
-		return errors.New("malformed key-value pair")
-	}
-
-	// Extract key and value
-	key := pair[:eqIndex]
-	value := pair[eqIndex+1:]
-
-	// Decode key and value (zero-allocation alternatives can replace this)
-	decodedKey, err := url.QueryUnescape(string(key))
-	if err != nil {
-		return err
-	}
-	decodedValue, err := url.QueryUnescape(string(value))
-	if err != nil {
-		return err
-	}
-
-	// Insert into the map
-	(*data)[decodedKey] = decodedValue
-	return nil
 }
