@@ -182,7 +182,6 @@ func (tm *TaskManager) updateTimestamps(rs *mq.Result) {
 	rs.CreatedAt = tm.createdAt
 	rs.ProcessedAt = time.Now()
 	rs.Latency = time.Since(rs.CreatedAt).String()
-	fmt.Println(rs.Latency)
 }
 
 func (tm *TaskManager) handlePrevious(ctx context.Context, state *TaskState, result mq.Result, childNode string, dispatchFinal bool) {

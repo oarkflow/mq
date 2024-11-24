@@ -5,10 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"net/http"
 	"strings"
 	"time"
 
+	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/recover"
 	"golang.org/x/time/rate"
 
 	"github.com/oarkflow/mq/sio"
@@ -360,14 +361,12 @@ func (tm *DAG) Start(ctx context.Context, addr string) error {
 			return true
 		})
 	}
-	log.Printf("DAG - HTTP_SERVER ~> started on http://%s", addr)
-	tm.Handlers()
-	config := tm.server.TLSConfig()
-	log.Printf("Server listening on http://%s", addr)
-	if config.UseTLS {
-		return http.ListenAndServeTLS(addr, config.CertPath, config.KeyPath, nil)
-	}
-	return http.ListenAndServe(addr, nil)
+	app := fiber.New()
+	app.Use(recover.New(recover.Config{
+		EnableStackTrace: true,
+	}))
+	tm.Handlers(app)
+	return app.Listen(addr)
 }
 
 func (tm *DAG) ScheduleTask(ctx context.Context, payload []byte, opts ...mq.SchedulerOption) mq.Result {

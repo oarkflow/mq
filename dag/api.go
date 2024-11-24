@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 	"strings"
 
 	"github.com/oarkflow/mq"
@@ -118,35 +117,4 @@ func (tm *DAG) SetupWS() *sio.Server {
 	WsEvents(ws)
 	tm.Notifier = ws
 	return ws
-}
-
-func (tm *DAG) Handlers() {
-	http.Handle("/", http.FileServer(http.Dir("webroot")))
-	http.Handle("/notify", tm.SetupWS())
-	http.HandleFunc("/process", tm.render)
-	http.HandleFunc("/request", tm.render)
-	http.HandleFunc("/task/status", tm.taskStatusHandler)
-	http.HandleFunc("/dot", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/plain")
-		fmt.Fprintln(w, tm.ExportDOT())
-	})
-	http.HandleFunc("/ui", func(w http.ResponseWriter, r *http.Request) {
-		image := fmt.Sprintf("%s.svg", mq.NewID())
-		err := tm.SaveSVG(image)
-		if err != nil {
-			http.Error(w, "Failed to read request body", http.StatusBadRequest)
-			return
-		}
-		defer os.Remove(image)
-		svgBytes, err := os.ReadFile(image)
-		if err != nil {
-			http.Error(w, "Could not read SVG file", http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "image/svg+xml")
-		if _, err := w.Write(svgBytes); err != nil {
-			http.Error(w, "Could not write SVG response", http.StatusInternalServerError)
-			return
-		}
-	})
 }

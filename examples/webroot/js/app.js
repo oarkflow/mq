@@ -13,14 +13,14 @@
     }
 
     window.onload = function() {
-        loadSVG('http://localhost:8082/ui');
+        loadSVG('/ui');
     };
     document.getElementById('send-request').addEventListener('click', function() {
         const input = document.getElementById('payload');
         const payloadData = JSON.parse(input.value);
         const data = { payload: payloadData };
 
-        fetch('http://localhost:8082/request', {
+        fetch('/request', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
