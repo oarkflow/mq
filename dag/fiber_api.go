@@ -124,7 +124,7 @@ func (tm *DAG) Handlers(app any) {
 		a.Get("/dot", func(c *fiber.Ctx) error {
 			return c.Type(fiber.MIMETextPlain).SendString(tm.ExportDOT())
 		})
-		a.Get("/ui", func(c *fiber.Ctx) error {
+		a.Get("/", func(c *fiber.Ctx) error {
 			image := fmt.Sprintf("%s.svg", mq.NewID())
 			defer os.Remove(image)
 
@@ -140,7 +140,6 @@ func (tm *DAG) Handlers(app any) {
 			return c.Send(svgBytes)
 		})
 	default:
-		http.Handle("/", http.FileServer(http.Dir("webroot")))
 		http.Handle("/notify", tm.SetupWS())
 		http.HandleFunc("/process", tm.render)
 		http.HandleFunc("/request", tm.render)
@@ -149,7 +148,7 @@ func (tm *DAG) Handlers(app any) {
 			w.Header().Set("Content-Type", "text/plain")
 			fmt.Fprintln(w, tm.ExportDOT())
 		})
-		http.HandleFunc("/ui", func(w http.ResponseWriter, r *http.Request) {
+		http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 			image := fmt.Sprintf("%s.svg", mq.NewID())
 			err := tm.SaveSVG(image)
 			if err != nil {

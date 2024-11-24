@@ -149,7 +149,7 @@ func (tm *DAG) ExportDOT() string {
 	sb.WriteString("\n")
 	sb.WriteString(`  node [shape=box, fontname="Helvetica", fillcolor="#B3CDE0", fontcolor="#2C3E50", fontsize=10, margin="0.25,0.15", style="rounded,filled"];`)
 	sb.WriteString("\n")
-	sb.WriteString(`  edge [fontname="Helvetica", fontsize=12, arrowsize=0.8];`)
+	sb.WriteString(`  edge [fontname="Helvetica", fontsize=10, arrowsize=0.8];`)
 	sb.WriteString("\n")
 	sb.WriteString(`  rankdir=TB;`)
 	sb.WriteString("\n")
@@ -186,7 +186,7 @@ func (tm *DAG) ExportDOT() string {
 				sb.WriteString("  }\n")
 				if startNodeKey := subDAG.TopologicalSort()[0]; startNodeKey != "" {
 					sb.WriteString(fmt.Sprintf(
-						`  "%s" -> "%s%s" [label=" Connect to %s", color="#93CCEA"];`,
+						`  "%s" -> "%s%s" [label="  Connect to %s", color="#93CCEA"];`,
 						nodeKey, subDAG.name+"_", startNodeKey, startNodeKey))
 					sb.WriteString("\n")
 				}
@@ -196,7 +196,7 @@ func (tm *DAG) ExportDOT() string {
 	for fromNodeKey, conditions := range tm.conditions {
 		for when, then := range conditions {
 			if toNode, ok := tm.nodes.Get(then); ok {
-				sb.WriteString(fmt.Sprintf(`  "%s" -> "%s" [label=" %s", color="purple", style=dotted, fontsize=10, arrowsize=0.6];`, fromNodeKey, toNode.ID, when))
+				sb.WriteString(fmt.Sprintf(`  "%s" -> "%s" [label="  %s", color="purple", style=dotted, fontsize=10, arrowsize=0.6];`, fromNodeKey, toNode.ID, when))
 				sb.WriteString("\n")
 			}
 		}
@@ -250,7 +250,7 @@ func renderEdges(sb *strings.Builder, node *Node, prefix ...string) {
 		}
 		toPrefixedID := fmt.Sprintf("%s%s", strings.Join(prefix, ""), edge.To.ID)
 		sb.WriteString(fmt.Sprintf(
-			`  "%s" -> "%s" [label="%s%s", color="%s", style="%s"];`,
+			`  "%s" -> "%s" [label=" %s%s", color="%s", style="%s"];`,
 			prefixedID, toPrefixedID, edge.Label, labelSuffix, edgeColor, edgeStyle))
 		sb.WriteString("\n")
 	}
