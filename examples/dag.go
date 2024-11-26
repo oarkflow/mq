@@ -12,7 +12,7 @@ import (
 
 func subDAG() *dag.DAG {
 	f := dag.NewDAG("Sub DAG", "sub-dag", func(taskID string, result mq.Result) {
-		fmt.Printf("Final result for task %s: %s\n", taskID, string(result.Payload))
+		fmt.Printf("Sub DAG Final result for task %s: %s\n", taskID, string(result.Payload))
 	}, mq.WithSyncMode(true))
 	f.
 		AddNode(dag.Function, "Store data", "store:data", &tasks.StoreData{Operation: dag.Operation{Type: dag.Function}}, true).
@@ -25,7 +25,7 @@ func subDAG() *dag.DAG {
 
 func main() {
 	flow := dag.NewDAG("Sample DAG", "sample-dag", func(taskID string, result mq.Result) {
-		// fmt.Printf("Final result for task %s: %s\n", taskID, string(result.Payload))
+		fmt.Printf("DAG Final result for task %s: %s\n", taskID, string(result.Payload))
 	})
 	flow.AddNode(dag.Function, "GetData", "GetData", &GetData{}, true)
 	flow.AddNode(dag.Function, "Loop", "Loop", &Loop{})
