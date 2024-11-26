@@ -173,7 +173,7 @@ func (tm *DAG) ExportDOT() string {
 				sb.WriteString(`    labelloc="b"; labeljust="c"; fontsize=16;`)
 				sb.WriteString("\n")
 				sb.WriteString(`    margin=50;`)
-				sb.WriteString(`    style=filled,bold; color=gray90;`)
+				sb.WriteString(`    style="filled,bold"; color="gray90";`)
 				sb.WriteString("\n")
 				for _, subNodeKey := range subDAG.TopologicalSort() {
 					subNode, _ := subDAG.nodes.Get(subNodeKey)
@@ -214,7 +214,7 @@ func renderNode(sb *strings.Builder, node *Node, prefix ...string) {
 	switch node.NodeType {
 	case Function:
 		nodeColor = "#D4EDDA" // Light green background for Function
-		labelSuffix = " ƒ"    // Function symbol (ƒ) as a graphical representation
+		labelSuffix = " ƒ(x)" // Function symbol (ƒ) as a graphical representation
 
 	case Page:
 		nodeColor = "#f0d2d1" // Light red background for Page

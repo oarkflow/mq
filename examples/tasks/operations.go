@@ -2,7 +2,9 @@ package tasks
 
 import (
 	"context"
+
 	"github.com/oarkflow/json"
+
 	v2 "github.com/oarkflow/mq/dag"
 
 	"github.com/oarkflow/mq"
@@ -85,7 +87,9 @@ func (e *SendSms) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 	if err != nil {
 		panic(err)
 	}
-	return mq.Result{Payload: task.Payload, Error: nil, Ctx: ctx}
+	data["sms_sent"] = true
+	d, _ := json.Marshal(data)
+	return mq.Result{Payload: d, Ctx: ctx}
 }
 
 type StoreData struct {
@@ -93,7 +97,14 @@ type StoreData struct {
 }
 
 func (e *StoreData) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
-	return mq.Result{Payload: task.Payload, Ctx: ctx}
+	var data map[string]any
+	err := json.Unmarshal(task.Payload, &data)
+	if err != nil {
+		panic(err)
+	}
+	data["stored"] = true
+	d, _ := json.Marshal(data)
+	return mq.Result{Payload: d, Ctx: ctx}
 }
 
 type InAppNotification struct {
@@ -106,7 +117,9 @@ func (e *InAppNotification) ProcessTask(ctx context.Context, task *mq.Task) mq.R
 	if err != nil {
 		panic(err)
 	}
-	return mq.Result{Payload: task.Payload, Ctx: ctx}
+	data["notified"] = true
+	d, _ := json.Marshal(data)
+	return mq.Result{Payload: d, Ctx: ctx}
 }
 
 type Final struct {
