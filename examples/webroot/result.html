@@ -179,7 +179,7 @@
                                 <td>${taskID}</td>
                                 <td class="${getStatusClass(data.Result.Status)}">${data.Result.Status}</td>
                                 <td>${formatDate(data.Result.UpdatedAt)}</td>
-                                <td><pre>${JSON.stringify(data.Result.Result.Payload, null, 2)}</pre></td>
+                                <td><pre>${JSON.stringify(data.Result.Result.payload, null, 2)}</pre></td>
                             </tr>
                         </table>
                     `;
@@ -202,7 +202,7 @@
                                     <td>${node.NodeID}</td>
                                     <td class="${getStatusClass(node.Status)}">${node.Status}</td>
                                     <td>${formatDate(node.UpdatedAt)}</td>
-                                    <td><pre>${JSON.stringify(node.Result.Payload, null, 2)}</pre></td>
+                                    <td><pre>${JSON.stringify(node.Result.payload, null, 2)}</pre></td>
                                 </tr>
                             `;
                         }

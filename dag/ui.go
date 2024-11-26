@@ -156,11 +156,11 @@ func (tm *DAG) ExportDOT() string {
 	sortedNodes := tm.TopologicalSort()
 	for _, nodeKey := range sortedNodes {
 		node, _ := tm.nodes.Get(nodeKey)
-		renderNode(&sb, node)
+		renderNode(&sb, node, `  `)
 	}
 	for _, nodeKey := range sortedNodes {
 		node, _ := tm.nodes.Get(nodeKey)
-		renderEdges(&sb, node)
+		renderEdges(&sb, node, `  `)
 	}
 	for _, nodeKey := range sortedNodes {
 		node, _ := tm.nodes.Get(nodeKey)
@@ -177,11 +177,11 @@ func (tm *DAG) ExportDOT() string {
 				sb.WriteString("\n")
 				for _, subNodeKey := range subDAG.TopologicalSort() {
 					subNode, _ := subDAG.nodes.Get(subNodeKey)
-					renderNode(&sb, subNode, subDAG.name+"_")
+					renderNode(&sb, subNode, `    `, subDAG.name+"_")
 				}
 				for _, subNodeKey := range subDAG.TopologicalSort() {
 					subNode, _ := subDAG.nodes.Get(subNodeKey)
-					renderEdges(&sb, subNode, subDAG.name+"_")
+					renderEdges(&sb, subNode, `    `, subDAG.name+"_")
 				}
 				sb.WriteString("  }\n")
 				if startNodeKey := subDAG.TopologicalSort()[0]; startNodeKey != "" {
@@ -205,7 +205,7 @@ func (tm *DAG) ExportDOT() string {
 	return sb.String()
 }
 
-func renderNode(sb *strings.Builder, node *Node, prefix ...string) {
+func renderNode(sb *strings.Builder, node *Node, indent string, prefix ...string) {
 	prefixedID := fmt.Sprintf("%s%s", strings.Join(prefix, ""), node.ID)
 	labelSuffix := ""
 	nodeColor := "lightgray"
@@ -227,12 +227,12 @@ func renderNode(sb *strings.Builder, node *Node, prefix ...string) {
 
 	// Write the formatted node representation with a separator between label and labelSuffix
 	sb.WriteString(fmt.Sprintf(
-		`  "%s" [label="%s%s", fontcolor="#2C3E50", fillcolor="%s", style="rounded,filled", id="node_%s"];`,
-		prefixedID, label, labelSuffix, nodeColor, prefixedID))
+		`%s"%s" [label="%s%s", fontcolor="#2C3E50", fillcolor="%s", style="rounded,filled", id="node_%s"];`,
+		indent, prefixedID, label, labelSuffix, nodeColor, prefixedID))
 	sb.WriteString("\n")
 }
 
-func renderEdges(sb *strings.Builder, node *Node, prefix ...string) {
+func renderEdges(sb *strings.Builder, node *Node, indent string, prefix ...string) {
 	prefixedID := fmt.Sprintf("%s%s", strings.Join(prefix, ""), node.ID)
 	for _, edge := range node.Edges {
 		edgeStyle := "solid"
@@ -250,8 +250,8 @@ func renderEdges(sb *strings.Builder, node *Node, prefix ...string) {
 		}
 		toPrefixedID := fmt.Sprintf("%s%s", strings.Join(prefix, ""), edge.To.ID)
 		sb.WriteString(fmt.Sprintf(
-			`  "%s" -> "%s" [label=" %s%s", color="%s", style="%s"];`,
-			prefixedID, toPrefixedID, edge.Label, labelSuffix, edgeColor, edgeStyle))
+			`%s"%s" -> "%s" [label=" %s%s", color="%s", style="%s"];`,
+			indent, prefixedID, toPrefixedID, edge.Label, labelSuffix, edgeColor, edgeStyle))
 		sb.WriteString("\n")
 	}
 }
