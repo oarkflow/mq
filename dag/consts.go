@@ -36,3 +36,10 @@ const (
 	Simple EdgeType = iota
 	Iterator
 )
+
+type Direction string
+
+const (
+	TB Direction = "TB"
+	LR Direction = "LR"
+)

@@ -318,11 +318,12 @@ func (tm *DAG) GetReport() string {
 	return tm.report
 }
 
-func (tm *DAG) AddDAGNode(name string, key string, dag *DAG, firstNode ...bool) *DAG {
+func (tm *DAG) AddDAGNode(nodeType NodeType, name string, key string, dag *DAG, firstNode ...bool) *DAG {
 	dag.AssignTopic(key)
 	tm.nodes.Set(key, &Node{
 		Label:     name,
 		ID:        key,
+		NodeType:  nodeType,
 		processor: dag,
 		isReady:   true,
 	})

@@ -111,8 +111,8 @@ func (tm *DAG) handleConditionalEdges(v string, visited map[string]bool, discove
 	return false, nil
 }
 
-func (tm *DAG) SaveDOTFile(filename string) error {
-	dotContent := tm.ExportDOT()
+func (tm *DAG) SaveDOTFile(filename string, direction ...Direction) error {
+	dotContent := tm.ExportDOT(direction...)
 	return os.WriteFile(filename, []byte(dotContent), 0644)
 }
 
@@ -139,7 +139,11 @@ func (tm *DAG) saveImage(fileName string, arg string) error {
 	return nil
 }
 
-func (tm *DAG) ExportDOT() string {
+func (tm *DAG) ExportDOT(direction ...Direction) string {
+	rankDir := TB
+	if len(direction) > 0 && direction[0] != "" {
+		rankDir = direction[0]
+	}
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf(`digraph "%s" {`, tm.name))
 	sb.WriteString("\n")
@@ -151,7 +155,7 @@ func (tm *DAG) ExportDOT() string {
 	sb.WriteString("\n")
 	sb.WriteString(`  edge [fontname="Helvetica", fontsize=10, arrowsize=0.8];`)
 	sb.WriteString("\n")
-	sb.WriteString(`  rankdir=TB;`)
+	sb.WriteString(fmt.Sprintf(`  rankdir=%s;`, rankDir))
 	sb.WriteString("\n")
 	sortedNodes := tm.TopologicalSort()
 	for _, nodeKey := range sortedNodes {

@@ -32,7 +32,7 @@ func main() {
 	flow.AddNode(dag.Function, "ValidateAge", "ValidateAge", &ValidateAge{})
 	flow.AddNode(dag.Function, "ValidateGender", "ValidateGender", &ValidateGender{})
 	flow.AddNode(dag.Function, "Final", "Final", &Final{})
-	flow.AddDAGNode("Check", "persistent", subDAG())
+	flow.AddDAGNode(dag.Function, "Check", "persistent", subDAG())
 	flow.AddEdge(dag.Simple, "GetData", "GetData", "Loop")
 	flow.AddEdge(dag.Iterator, "Validate age for each item", "Loop", "ValidateAge")
 	flow.AddCondition("ValidateAge", map[string]string{"pass": "ValidateGender", "default": "persistent"})

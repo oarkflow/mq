@@ -1,70 +1,68 @@
 package utils
 
 import (
-	"fmt"
 	"net/url"
 	"strings"
 )
 
 type form struct {
-	dest      map[string]any
 	raw       string
 	pathCache map[string]int
 }
 
 func newForm(raw string) *form {
-	f := new(form)
-	f.raw = raw
-	f.pathCache = make(map[string]int)
-	return f
+	return &form{
+		raw:       raw,
+		pathCache: make(map[string]int),
+	}
 }
 
-func (f *form) reset() {
-	f.dest = make(map[string]any)
-}
+func (f *form) decode() (map[string]interface{}, error) {
+	vals := make(map[string]interface{})
+	keyBuffer := make([]byte, 0, len(f.raw))
+	valBuffer := make([]byte, 0, len(f.raw))
 
-func (f *form) decode() (map[string]any, error) {
-	f.reset()
-	vals := make(map[string]any)
 	for _, v := range strings.Split(f.raw, "&") {
 		if v == "" {
 			continue
 		}
-		index := strings.Index(v, "=")
-		if index > 0 {
-			key := v[:index]
-			val := v[index+1:]
 
-			f.insertValue(&vals, key, val)
+		eqIndex := strings.IndexByte(v, '=')
+		if eqIndex > 0 {
+			key := v[:eqIndex]
+			val := v[eqIndex+1:]
+			keyBuffer = append(keyBuffer[:0], key...)
+			valBuffer = append(valBuffer[:0], val...)
+			f.insertValue(&vals, string(keyBuffer), string(valBuffer))
 		} else {
-			f.insertValue(&vals, v, "")
+			keyBuffer = append(keyBuffer[:0], v...)
+			f.insertValue(&vals, string(keyBuffer), "")
 		}
 	}
 	return f.parseArray(vals), nil
 }
 
-func (f *form) insertValue(destP *map[string]any, key string, val string) {
+func (f *form) insertValue(destP *map[string]interface{}, key, val string) {
 	key, _ = url.PathUnescape(key)
 	var path []string
-	if strings.Contains(key, "[") || strings.Contains(key, "]") {
-		var current string
-		for _, c := range key {
-			switch c {
+	if strings.IndexByte(key, '[') >= 0 || strings.IndexByte(key, ']') >= 0 {
+		start := 0
+		for i := 0; i < len(key); i++ {
+			switch key[i] {
 			case '[':
-				if len(current) > 0 {
-					path = append(path, current)
-					current = ""
+				if i > start {
+					path = append(path, key[start:i])
 				}
+				start = i + 1
 			case ']':
-				path = append(path, current)
-				current = ""
-				continue
-			default:
-				current += string(c)
+				if i > start {
+					path = append(path, key[start:i])
+				}
+				start = i + 1
 			}
 		}
-		if len(current) > 0 {
-			path = append(path, current)
+		if start < len(key) {
+			path = append(path, key[start:])
 		}
 	} else {
 		path = append(path, key)
@@ -76,45 +74,50 @@ func (f *form) insertValue(destP *map[string]any, key string, val string) {
 		}
 		if k == "" {
 			c := strings.Join(path, ",")
-			k = fmt.Sprint(f.pathCache[c])
-			f.pathCache[c] = f.pathCache[c] + 1
+			k = string(rune(f.pathCache[c] + '0'))
+			f.pathCache[c]++
 		}
-		if _, ok := dest[k].(map[string]any); !ok {
-			dest[k] = make(map[string]any)
+		if next, ok := dest[k].(map[string]interface{}); !ok {
+			next = make(map[string]interface{})
+			dest[k] = next
+			dest = next
+		} else {
+			dest = next
 		}
-		dest = dest[k].(map[string]any)
 	}
-	p := path[len(path)-1]
-	if p == "" {
-		p = fmt.Sprint(len(dest))
+	last := path[len(path)-1]
+	if last == "" {
+		last = string(rune(len(dest)))
 	}
 	val, _ = url.QueryUnescape(val)
-	dest[p] = val
+	dest[last] = val
 }
 
-func (f *form) parseArrayItem(dest map[string]any) any {
-	var arr []any
-	for i := 0; i < len(dest); i++ {
-		item, ok := dest[fmt.Sprint(i)]
+func (f *form) parseArrayItem(dest map[string]interface{}) interface{} {
+	var arr []interface{}
+	for i := 0; ; i++ {
+		key := string(rune(i + '0'))
+		item, ok := dest[key]
 		if !ok {
-			return dest
+			break
 		}
 		arr = append(arr, item)
+	}
+	if len(arr) == 0 {
+		return dest
 	}
 	return arr
 }
 
-func (f *form) parseArray(dest map[string]any) map[string]any {
+func (f *form) parseArray(dest map[string]interface{}) map[string]interface{} {
 	for k, v := range dest {
-		mv, ok := v.(map[string]any)
-		if ok {
-			f.parseArray(mv)
-			dest[k] = f.parseArrayItem(mv)
+		if mv, ok := v.(map[string]interface{}); ok {
+			dest[k] = f.parseArrayItem(f.parseArray(mv))
 		}
 	}
 	return dest
 }
 
-func DecodeForm(src []byte) (map[string]any, error) {
-	return newForm(FromByte(src)).decode()
+func DecodeForm(src []byte) (map[string]interface{}, error) {
+	return newForm(string(src)).decode()
 }
