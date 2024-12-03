@@ -2,17 +2,15 @@ package dag
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/oarkflow/errors"
+	"github.com/oarkflow/form"
 
 	"github.com/oarkflow/mq"
-	"github.com/oarkflow/mq/utils"
 
 	"github.com/oarkflow/mq/consts"
 	"github.com/oarkflow/mq/jsonparser"
@@ -32,12 +30,12 @@ func renderFiberNotFound(c *fiber.Ctx) error {
 
 // Render handles process and request routes.
 func (tm *DAG) renderFiber(c *fiber.Ctx) error {
-	ctx, data, err := parseRequest(c)
+	ctx, data, err := form.ParseBodyAsJSON(c.UserContext(), c.Get("Content-Type"), c.Body(), c.Queries())
 	if err != nil {
 		return c.Status(fiber.StatusNotFound).SendString(err.Error())
 	}
 	accept := c.Get("Accept")
-	userCtx := UserContext(ctx)
+	userCtx := form.UserContext(ctx)
 	ctx = context.WithValue(ctx, "method", c.Method())
 
 	if c.Method() == fiber.MethodGet && userCtx.Get("task_id") != "" {
@@ -168,68 +166,4 @@ func (tm *DAG) Handlers(app any) {
 			}
 		})
 	}
-}
-
-// parseRequest handles Fiber requests and extracts context and JSON payload.
-func parseRequest(c *fiber.Ctx) (context.Context, []byte, error) {
-	ctx := c.UserContext()
-	userContext := &Context{Query: make(map[string]any)}
-	queryParams := c.Queries()
-	for key, value := range queryParams {
-		userContext.Query[key] = value
-	}
-	ctx = context.WithValue(ctx, "UserContext", userContext)
-
-	contentType := c.Get("Content-Type")
-	var result any
-
-	switch {
-	case strings.Contains(contentType, fiber.MIMEApplicationJSON):
-		body := c.Body()
-		if len(body) == 0 {
-			return ctx, nil, nil
-		}
-		var temp any
-		if err := json.Unmarshal(body, &temp); err != nil {
-			return ctx, nil, fmt.Errorf("failed to parse body: %v", err)
-		}
-		switch v := temp.(type) {
-		case map[string]any:
-			result = v
-		case []any:
-			parsedArray := make([]map[string]any, len(v))
-			for i, item := range v {
-				obj, ok := item.(map[string]any)
-				if !ok {
-					return ctx, nil, fmt.Errorf("invalid JSON array item at index %d", i)
-				}
-				parsedArray[i] = obj
-			}
-			result = parsedArray
-		default:
-			return ctx, nil, fmt.Errorf("unsupported JSON structure: %T", v)
-		}
-	case strings.Contains(contentType, fiber.MIMEApplicationForm):
-		body := c.BodyRaw()
-		if body == nil {
-			return ctx, nil, errors.New("empty form body")
-		}
-		val, err := utils.DecodeForm(body)
-		if err != nil {
-			return ctx, nil, fmt.Errorf("failed to parse form data: %v", err.Error())
-		}
-		for key, v := range val {
-			userContext.Query[key] = v
-		}
-		result = userContext.Query
-	default:
-		return ctx, nil, nil
-	}
-
-	bt, err := json.Marshal(result)
-	if err != nil {
-		return ctx, nil, err
-	}
-
-	return ctx, bt, nil
 }

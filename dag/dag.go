@@ -10,6 +10,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/recover"
+	"github.com/oarkflow/form"
 	"golang.org/x/time/rate"
 
 	"github.com/oarkflow/mq/sio"
@@ -231,7 +232,7 @@ func (tm *DAG) getCurrentNode(manager *TaskManager) string {
 
 func (tm *DAG) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 	ctx = context.WithValue(ctx, "task_id", task.ID)
-	userContext := UserContext(ctx)
+	userContext := form.UserContext(ctx)
 	next := userContext.Get("next")
 	manager, ok := tm.taskManager.Get(task.ID)
 	resultCh := make(chan mq.Result, 1)
@@ -295,7 +296,7 @@ func (tm *DAG) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 
 func (tm *DAG) Process(ctx context.Context, payload []byte) mq.Result {
 	var taskID string
-	userCtx := UserContext(ctx)
+	userCtx := form.UserContext(ctx)
 	if val := userCtx.Get("task_id"); val != "" {
 		taskID = val
 	} else {
@@ -372,7 +373,7 @@ func (tm *DAG) Start(ctx context.Context, addr string) error {
 
 func (tm *DAG) ScheduleTask(ctx context.Context, payload []byte, opts ...mq.SchedulerOption) mq.Result {
 	var taskID string
-	userCtx := UserContext(ctx)
+	userCtx := form.UserContext(ctx)
 	if val := userCtx.Get("task_id"); val != "" {
 		taskID = val
 	} else {
@@ -381,7 +382,7 @@ func (tm *DAG) ScheduleTask(ctx context.Context, payload []byte, opts ...mq.Sche
 	t := mq.NewTask(taskID, payload, "")
 
 	ctx = context.WithValue(ctx, "task_id", taskID)
-	userContext := UserContext(ctx)
+	userContext := form.UserContext(ctx)
 	next := userContext.Get("next")
 	manager, ok := tm.taskManager.Get(taskID)
 	resultCh := make(chan mq.Result, 1)
@@ -431,5 +432,5 @@ func (tm *DAG) ScheduleTask(ctx context.Context, payload []byte, opts ...mq.Sche
 		ctxx = mq.SetHeaders(ctxx, headers.AsMap())
 	}
 	tm.pool.Scheduler().AddTask(ctxx, t, opts...)
-	return mq.Result{CreatedAt: t.CreatedAt, TaskID: t.ID, Topic: t.Topic, Status: "PENDING"}
+	return mq.Result{CreatedAt: t.CreatedAt, TaskID: t.ID, Topic: t.Topic, Status: mq.Pending}
 }

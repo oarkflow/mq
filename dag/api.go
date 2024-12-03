@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
+
+	"github.com/oarkflow/form"
 
 	"github.com/oarkflow/mq"
 	"github.com/oarkflow/mq/sio"
@@ -26,13 +29,27 @@ func renderNotFound(w http.ResponseWriter) {
 }
 
 func (tm *DAG) render(w http.ResponseWriter, r *http.Request) {
-	ctx, data, err := parse(r)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"message": "%s"}`, "unable to ready body"), http.StatusInternalServerError)
+		return
+	}
+	query := make(map[string]string)
+	queryParams := r.URL.Query()
+	for key, values := range queryParams {
+		if len(values) > 0 {
+			query[key] = values[0]
+		} else {
+			query[key] = ""
+		}
+	}
+	ctx, data, err := form.ParseBodyAsJSON(r.Context(), r.Header.Get("Content-Type"), body, query)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
 	accept := r.Header.Get("Accept")
-	userCtx := UserContext(ctx)
+	userCtx := form.UserContext(ctx)
 	ctx = context.WithValue(ctx, "method", r.Method)
 	if r.Method == "GET" && userCtx.Get("task_id") != "" {
 		manager, ok := tm.taskManager.Get(userCtx.Get("task_id"))
