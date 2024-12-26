@@ -15,11 +15,11 @@ import (
 )
 
 type TaskState struct {
+	UpdatedAt     time.Time
+	targetResults storage.IMap[string, mq.Result]
 	NodeID        string
 	Status        mq.Status
-	UpdatedAt     time.Time
 	Result        mq.Result
-	targetResults storage.IMap[string, mq.Result]
 }
 
 func newTaskState(nodeID string) *TaskState {
@@ -39,6 +39,7 @@ type nodeResult struct {
 }
 
 type TaskManager struct {
+	createdAt          time.Time
 	taskStates         storage.IMap[string, *TaskState]
 	parentNodes        storage.IMap[string, string]
 	childNodes         storage.IMap[string, int]
@@ -46,15 +47,14 @@ type TaskManager struct {
 	iteratorNodes      storage.IMap[string, []Edge]
 	currentNodePayload storage.IMap[string, json.RawMessage]
 	currentNodeResult  storage.IMap[string, mq.Result]
-	createdAt          time.Time
-	latency            string
+	taskQueue          chan *task
 	result             *mq.Result
 	dag                *DAG
-	taskID             string
-	taskQueue          chan *task
 	resultQueue        chan nodeResult
 	resultCh           chan mq.Result
 	stopCh             chan struct{}
+	taskID             string
+	latency            string
 }
 
 type task struct {

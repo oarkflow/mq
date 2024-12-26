@@ -21,41 +21,41 @@ import (
 )
 
 type Node struct {
-	NodeType  NodeType
+	processor mq.Processor
 	Label     string
 	ID        string
 	Edges     []Edge
-	processor mq.Processor
+	NodeType  NodeType
 	isReady   bool
 }
 
 type Edge struct {
 	From  *Node
 	To    *Node
-	Type  EdgeType
 	Label string
+	Type  EdgeType
 }
 
 type DAG struct {
-	server                   *mq.Broker
-	consumer                 *mq.Consumer
 	nodes                    storage.IMap[string, *Node]
 	taskManager              storage.IMap[string, *TaskManager]
 	iteratorNodes            storage.IMap[string, []Edge]
+	Error                    error
+	conditions               map[string]map[string]string
+	consumer                 *mq.Consumer
 	finalResult              func(taskID string, result mq.Result)
 	pool                     *mq.Pool
-	name                     string
-	key                      string
-	startNode                string
-	opts                     []mq.Option
-	conditions               map[string]map[string]string
-	consumerTopic            string
-	hasPageNode              bool
-	reportNodeResultCallback func(mq.Result)
-	Error                    error
 	Notifier                 *sio.Server
-	paused                   bool
+	server                   *mq.Broker
+	reportNodeResultCallback func(mq.Result)
+	key                      string
+	consumerTopic            string
+	startNode                string
+	name                     string
 	report                   string
+	opts                     []mq.Option
+	hasPageNode              bool
+	paused                   bool
 }
 
 func NewDAG(name, key string, finalResultCallback func(taskID string, result mq.Result), opts ...mq.Option) *DAG {

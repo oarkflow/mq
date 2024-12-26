@@ -12,8 +12,8 @@ import (
 type ScheduleOptions struct {
 	Handler   Handler
 	Callback  Callback
-	Overlap   bool
 	Interval  time.Duration
+	Overlap   bool
 	Recurring bool
 }
 
@@ -74,12 +74,12 @@ type ScheduledTask struct {
 }
 
 type Schedule struct {
-	Interval   time.Duration
+	TimeOfDay  time.Time
+	CronSpec   string
 	DayOfWeek  []time.Weekday
 	DayOfMonth []int
-	TimeOfDay  time.Time
+	Interval   time.Duration
 	Recurring  bool
-	CronSpec   string
 }
 
 func (s *Schedule) ToHumanReadable() string {
@@ -216,9 +216,9 @@ func parseCronValue(field string) ([]string, error) {
 }
 
 type Scheduler struct {
+	pool  *Pool
 	tasks []ScheduledTask
 	mu    sync.Mutex
-	pool  *Pool
 }
 
 func (s *Scheduler) Start() {

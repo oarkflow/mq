@@ -51,8 +51,8 @@ func (r Result) MarshalJSON() ([]byte, error) {
 func (r *Result) UnmarshalJSON(data []byte) error {
 	type Alias Result
 	aux := &struct {
-		ErrMsg string `json:"error,omitempty"`
 		*Alias
+		ErrMsg string `json:"error,omitempty"`
 	}{
 		Alias: (*Alias)(r),
 	}
@@ -110,18 +110,18 @@ type TLSConfig struct {
 }
 
 type Options struct {
+	storage              TaskStorage
 	consumerOnSubscribe  func(ctx context.Context, topic, consumerName string)
 	consumerOnClose      func(ctx context.Context, topic, consumerName string)
 	notifyResponse       func(context.Context, Result) error
-	tlsConfig            TLSConfig
 	brokerAddr           string
+	tlsConfig            TLSConfig
 	callback             []func(context.Context, Result) Result
-	maxRetries           int
+	queueSize            int
 	initialDelay         time.Duration
-	storage              TaskStorage
 	maxBackoff           time.Duration
 	jitterPercent        float64
-	queueSize            int
+	maxRetries           int
 	numOfWorkers         int
 	maxMemoryLoad        int64
 	syncMode             bool

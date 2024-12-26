@@ -52,13 +52,13 @@ type Payload struct {
 }
 
 type Operation struct {
-	ID              string   `json:"id"`
-	Type            NodeType `json:"type"`
-	Key             string   `json:"key"`
+	ID              string `json:"id"`
+	Key             string `json:"key"`
+	Payload         Payload
 	RequiredFields  []string `json:"required_fields"`
 	OptionalFields  []string `json:"optional_fields"`
 	GeneratedFields []string `json:"generated_fields"`
-	Payload         Payload
+	Type            NodeType `json:"type"`
 }
 
 func (e *Operation) Consume(_ context.Context) error {

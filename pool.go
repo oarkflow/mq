@@ -26,29 +26,29 @@ type Metrics struct {
 
 type Pool struct {
 	taskStorage            TaskStorage
-	taskQueue              PriorityQueue
-	taskQueueLock          sync.Mutex
+	scheduler              *Scheduler
 	stop                   chan struct{}
 	taskNotify             chan struct{}
 	workerAdjust           chan int
-	wg                     sync.WaitGroup
-	maxMemoryLoad          int64
-	numOfWorkers           int32
-	metrics                Metrics
-	paused                 bool
-	scheduler              *Scheduler
-	overflowBufferLock     sync.RWMutex
-	overflowBuffer         []*QueueTask
-	taskAvailableCond      *sync.Cond
 	handler                Handler
-	callback               Callback
-	batchSize              int
-	timeout                time.Duration
 	completionCallback     CompletionCallback
+	taskAvailableCond      *sync.Cond
+	callback               Callback
+	taskQueue              PriorityQueue
+	overflowBuffer         []*QueueTask
+	metrics                Metrics
+	wg                     sync.WaitGroup
 	taskCompletionNotifier sync.WaitGroup
+	timeout                time.Duration
+	batchSize              int
+	maxMemoryLoad          int64
 	idleTimeout            time.Duration
 	backoffDuration        time.Duration
-	maxRetries             int // Max retries for tasks
+	maxRetries             int
+	overflowBufferLock     sync.RWMutex
+	taskQueueLock          sync.Mutex
+	numOfWorkers           int32
+	paused                 bool
 }
 
 func NewPool(numOfWorkers int, opts ...PoolOption) *Pool {
