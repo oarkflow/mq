@@ -5,9 +5,11 @@ import (
 	"mime"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/compress"
+	"github.com/gofiber/fiber/v2/middleware/rewrite"
 )
 
 type Config struct {
@@ -22,7 +24,7 @@ func main() {
 	app := fiber.New()
 	config := Config{
 		Prefix:   "/data",
-		Root:     "./dist",
+		Root:     "/Users/sujit/Sites/mq/examples/webroot",
 		UseIndex: true,
 		Compress: true,
 	}
@@ -49,8 +51,17 @@ func New(router fiber.Router, cfg ...Config) {
 			Level: compress.LevelBestSpeed,
 		}))
 	}
+	rules := make(map[string]string)
+	root := filepath.Clean(config.Root)
+	filepath.WalkDir(config.Root, func(path string, d os.DirEntry, err error) error {
+		if !d.IsDir() {
+			path = strings.TrimPrefix(path, root)
+			rules[path] = filepath.Join(config.Prefix, path)
+		}
+		return nil
+	})
+	router.Use(rewrite.New(rewrite.Config{Rules: rules}))
 	router.Get(config.Prefix+"/*", handleStaticFile(config))
-	router.Get("/*", handleStaticFile(config))
 }
 
 func handleStaticFile(config Config) fiber.Handler {

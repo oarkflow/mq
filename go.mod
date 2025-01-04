@@ -9,6 +9,7 @@ require (
 	github.com/oarkflow/dipper v0.0.6
 	github.com/oarkflow/errors v0.0.6
 	github.com/oarkflow/expr v0.0.11
+	github.com/oarkflow/form v0.0.0-20241203111156-b1be5636af43
 	github.com/oarkflow/jet v0.0.4
 	github.com/oarkflow/json v0.0.13
 	github.com/oarkflow/xid v1.2.5
@@ -27,7 +28,6 @@ require (
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mattn/go-runewidth v0.0.15 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
-	github.com/oarkflow/form v0.0.0-20241203111156-b1be5636af43 // indirect
 	github.com/prometheus/client_model v0.6.1 // indirect
 	github.com/prometheus/common v0.60.1 // indirect
 	github.com/prometheus/procfs v0.15.1 // indirect
