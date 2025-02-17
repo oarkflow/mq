@@ -110,8 +110,40 @@ func (p *Result) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 	return mq.Result{Payload: task.Payload, Ctx: ctx}
 }
 
+// RemoveHTMLContent recursively removes the "html_content" field from the given JSON.
+func RemoveHTMLContent(data json.RawMessage, field string) (json.RawMessage, error) {
+	var result interface{}
+	if err := json.Unmarshal(data, &result); err != nil {
+		return nil, err
+	}
+	removeField(result, field)
+	return json.Marshal(result)
+}
+
+// removeField recursively traverses the structure and removes "html_content" field.
+func removeField(v interface{}, field string) {
+	switch v := v.(type) {
+	case map[string]interface{}:
+		// Check if the field is in the map and remove it.
+		delete(v, field)
+		// Recursively remove the field from nested objects.
+		for _, value := range v {
+			removeField(value, field)
+		}
+	case []interface{}:
+		// If it's an array, recursively process each item.
+		for _, item := range v {
+			removeField(item, field)
+		}
+	}
+}
+
 func notify(taskID string, result mq.Result) {
-	fmt.Printf("Final result for task %s: %s\n", taskID, string(result.Payload))
+	filteredData, err := RemoveHTMLContent(result.Payload, "html_content")
+	if err != nil {
+		panic(err)
+	}
+	fmt.Printf("Final result for task %s: %s\n", taskID, string(filteredData))
 }
 
 func main() {

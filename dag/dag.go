@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/oarkflow/mq/logger"
 	"log"
 	"strings"
 	"time"
@@ -53,7 +54,6 @@ type DAG struct {
 	startNode                string
 	name                     string
 	report                   string
-	opts                     []mq.Option
 	hasPageNode              bool
 	paused                   bool
 }
@@ -75,7 +75,6 @@ func NewDAG(name, key string, finalResultCallback func(taskID string, result mq.
 		mq.WithConsumerOnClose(d.onConsumerClose),
 	)
 	d.server = mq.NewBroker(opts...)
-	d.opts = opts
 	options := d.server.Options()
 	d.pool = mq.NewPool(
 		options.NumOfWorkers(),
@@ -230,6 +229,10 @@ func (tm *DAG) getCurrentNode(manager *TaskManager) string {
 	return manager.currentNodePayload.Keys()[0]
 }
 
+func (tm *DAG) Logger() logger.Logger {
+	return tm.server.Options().Logger()
+}
+
 func (tm *DAG) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 	ctx = context.WithValue(ctx, "task_id", task.ID)
 	userContext := form.UserContext(ctx)
@@ -239,8 +242,18 @@ func (tm *DAG) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 	if !ok {
 		manager = NewTaskManager(tm, task.ID, resultCh, tm.iteratorNodes.Clone())
 		tm.taskManager.Set(task.ID, manager)
+		tm.Logger().Info("Processing task",
+			logger.Field{Key: "taskID", Value: task.ID},
+			logger.Field{Key: "phase", Value: "start"},
+			logger.Field{Key: "timestamp", Value: time.Now()},
+		)
 	} else {
 		manager.resultCh = resultCh
+		tm.Logger().Info("Resuming task",
+			logger.Field{Key: "taskID", Value: task.ID},
+			logger.Field{Key: "phase", Value: "resume"},
+			logger.Field{Key: "timestamp", Value: time.Now()},
+		)
 	}
 	currentKey := tm.getCurrentNode(manager)
 	currentNode := strings.Split(currentKey, Delimiter)[0]
@@ -282,16 +295,133 @@ func (tm *DAG) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 	if tm.hasPageNode {
 		return <-resultCh
 	}
-	// Timeout handling
 	select {
 	case result := <-resultCh:
 		return result
-	case <-time.After(30 * time.Second): // Set a timeout duration
+	case <-time.After(30 * time.Second):
 		return mq.Result{
 			Error: fmt.Errorf("timeout waiting for task result"),
 			Ctx:   ctx,
 		}
 	}
+}
+
+func (tm *DAG) ProcessTaskNew(ctx context.Context, task *mq.Task) mq.Result {
+	ctx = context.WithValue(ctx, "task_id", task.ID)
+	userContext := form.UserContext(ctx)
+	next := userContext.Get("next")
+	manager, ok := tm.taskManager.Get(task.ID)
+	resultCh := make(chan mq.Result, 1)
+	if !ok {
+		manager = NewTaskManager(tm, task.ID, resultCh, tm.iteratorNodes.Clone())
+		tm.taskManager.Set(task.ID, manager)
+		tm.Logger().Info("Processing task",
+			logger.Field{Key: "taskID", Value: task.ID},
+			logger.Field{Key: "phase", Value: "start"},
+			logger.Field{Key: "timestamp", Value: time.Now()},
+		)
+	} else {
+		manager.resultCh = resultCh
+		tm.Logger().Info("Resuming task",
+			logger.Field{Key: "taskID", Value: task.ID},
+			logger.Field{Key: "phase", Value: "resume"},
+			logger.Field{Key: "timestamp", Value: time.Now()},
+		)
+	}
+	currentKey := tm.getCurrentNode(manager)
+	currentNode := strings.Split(currentKey, Delimiter)[0]
+	node, exists := tm.nodes.Get(currentNode)
+	method, _ := ctx.Value("method").(string)
+	if method == "GET" && exists && node.NodeType == Page {
+		ctx = context.WithValue(ctx, "initial_node", currentNode)
+		if manager.result != nil {
+			task.Payload = manager.result.Payload
+			tm.Logger().Debug("Merged previous result payload into task",
+				logger.Field{Key: "taskID", Value: task.ID})
+		}
+	} else if next == "true" {
+		nodes, err := tm.GetNextNodes(currentNode)
+		if err != nil {
+			tm.Logger().Error("Error retrieving next nodes",
+				logger.Field{Key: "error", Value: err})
+			return mq.Result{Error: err, Ctx: ctx}
+		}
+		if len(nodes) > 0 {
+			ctx = context.WithValue(ctx, "initial_node", nodes[0].ID)
+		}
+	}
+	if currentNodeResult, hasResult := manager.currentNodeResult.Get(currentKey); hasResult {
+		var taskPayload, resultPayload map[string]any
+		if err := json.Unmarshal(task.Payload, &taskPayload); err == nil {
+			if err = json.Unmarshal(currentNodeResult.Payload, &resultPayload); err == nil {
+				for key, val := range resultPayload {
+					taskPayload[key] = val
+				}
+				if newPayload, err := json.Marshal(taskPayload); err != nil {
+					tm.Logger().Error("Error marshalling merged payload",
+						logger.Field{Key: "error", Value: err})
+				} else {
+					task.Payload = newPayload
+					tm.Logger().Debug("Merged previous node result into task payload",
+						logger.Field{Key: "taskID", Value: task.ID})
+				}
+			} else {
+				tm.Logger().Error("Error unmarshalling current node result payload",
+					logger.Field{Key: "error", Value: err})
+			}
+		} else {
+			tm.Logger().Error("Error unmarshalling task payload",
+				logger.Field{Key: "error", Value: err})
+		}
+	}
+
+	// Parse the initial node from context.
+	firstNode, err := tm.parseInitialNode(ctx)
+	if err != nil {
+		tm.Logger().Error("Error parsing initial node", logger.Field{Key: "error", Value: err})
+		return mq.Result{Error: err, Ctx: ctx}
+	}
+	node, ok = tm.nodes.Get(firstNode)
+	task.Topic = firstNode
+	ctx = context.WithValue(ctx, ContextIndex, "0")
+
+	// Dispatch the task to the TaskManager.
+	tm.Logger().Info("Dispatching task to TaskManager",
+		logger.Field{Key: "firstNode", Value: firstNode},
+		logger.Field{Key: "taskID", Value: task.ID})
+	manager.ProcessTask(ctx, firstNode, task.Payload)
+
+	// Wait for task result. If there's an HTML page node, the task will pause.
+	var result mq.Result
+	if tm.hasPageNode {
+		if !result.Last {
+			tm.Logger().Info("Page node detected; pausing task until user processes HTML",
+				logger.Field{Key: "taskID", Value: task.ID})
+		}
+		result = <-resultCh
+	} else {
+		select {
+		case result = <-resultCh:
+			tm.Logger().Info("Received task result",
+				logger.Field{Key: "taskID", Value: task.ID})
+		case <-time.After(30 * time.Second):
+			result = mq.Result{
+				Error: fmt.Errorf("timeout waiting for task result"),
+				Ctx:   ctx,
+			}
+			tm.Logger().Error("Task result timeout",
+				logger.Field{Key: "taskID", Value: task.ID})
+		}
+	}
+
+	if result.Last {
+		tm.Logger().Info("Task completed",
+			logger.Field{Key: "taskID", Value: task.ID},
+			logger.Field{Key: "lastExecuted", Value: time.Now()},
+			logger.Field{Key: "success", Value: result.Error == nil},
+		)
+	}
+	return result
 }
 
 func (tm *DAG) Process(ctx context.Context, payload []byte) mq.Result {
@@ -335,7 +465,7 @@ func (tm *DAG) AddDAGNode(nodeType NodeType, name string, key string, dag *DAG, 
 }
 
 func (tm *DAG) Start(ctx context.Context, addr string) error {
-	// Start the server in a separate goroutine
+
 	go func() {
 		defer mq.RecoverPanic(mq.RecoverTitle)
 		if err := tm.server.Start(ctx); err != nil {
@@ -343,12 +473,11 @@ func (tm *DAG) Start(ctx context.Context, addr string) error {
 		}
 	}()
 
-	// Start the node consumers if not in sync mode
 	if !tm.server.SyncMode() {
 		tm.nodes.ForEach(func(_ string, con *Node) bool {
 			go func(con *Node) {
 				defer mq.RecoverPanic(mq.RecoverTitle)
-				limiter := rate.NewLimiter(rate.Every(1*time.Second), 1) // Retry every second
+				limiter := rate.NewLimiter(rate.Every(1*time.Second), 1)
 				for {
 					err := con.processor.Consume(ctx)
 					if err != nil {
@@ -357,7 +486,7 @@ func (tm *DAG) Start(ctx context.Context, addr string) error {
 						log.Printf("[INFO] - Consumer %s started successfully", con.ID)
 						break
 					}
-					limiter.Wait(ctx) // Wait with rate limiting before retrying
+					limiter.Wait(ctx)
 				}
 			}(con)
 			return true
