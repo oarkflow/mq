@@ -4,9 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+
 	"github.com/oarkflow/mq"
 	"github.com/oarkflow/mq/dag"
-	"os"
 
 	"github.com/oarkflow/jet"
 
@@ -143,11 +144,11 @@ func notify(taskID string, result mq.Result) {
 	if err != nil {
 		panic(err)
 	}
-	fmt.Printf("Final result for task %s: %s\n", taskID, string(filteredData))
+	fmt.Printf("Final result for task %s: %s, status: %s, latency: %s\n", taskID, string(filteredData), result.Status, result.Latency)
 }
 
 func main() {
-	flow := dag.NewDAG("Sample DAG", "sample-dag", notify)
+	flow := dag.NewDAG("Sample DAG", "sample-dag", notify, mq.WithSyncMode(true))
 	flow.AddNode(dag.Page, "Form", "Form", &Form{})
 	flow.AddNode(dag.Function, "NodeA", "NodeA", &NodeA{})
 	flow.AddNode(dag.Function, "NodeB", "NodeB", &NodeB{})

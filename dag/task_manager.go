@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/oarkflow/mq"
+	"github.com/oarkflow/mq/logger"
 
 	"github.com/oarkflow/mq/storage"
 	"github.com/oarkflow/mq/storage/memory"
@@ -141,15 +142,18 @@ func (tm *TaskManager) waitForResult() {
 }
 
 func (tm *TaskManager) processNode(exec *task) {
+	startTime := time.Now()
 	pureNodeID := strings.Split(exec.nodeID, Delimiter)[0]
 	node, exists := tm.dag.nodes.Get(pureNodeID)
 	if !exists {
-		log.Printf("Node %s does not exist while processing node\n", pureNodeID)
+		tm.dag.Logger().Error("Node not found while processing node",
+			logger.Field{Key: "nodeID", Value: pureNodeID})
 		return
 	}
 	state, _ := tm.taskStates.Get(exec.nodeID)
 	if state == nil {
-		log.Printf("State for node %s not found; creating new state.\n", exec.nodeID)
+		tm.dag.Logger().Warn("State not found; creating new state",
+			logger.Field{Key: "nodeID", Value: exec.nodeID})
 		state = newTaskState(exec.nodeID)
 		tm.taskStates.Set(exec.nodeID, state)
 	}
@@ -158,28 +162,59 @@ func (tm *TaskManager) processNode(exec *task) {
 	tm.currentNodePayload.Clear()
 	tm.currentNodeResult.Clear()
 	tm.currentNodePayload.Set(exec.nodeID, exec.payload)
+
+	// Execute the node’s task.
 	result := node.processor.ProcessTask(exec.ctx, mq.NewTask(exec.taskID, exec.payload, exec.nodeID))
+	// Calculate the per-node latency.
+	nodeLatency := time.Since(startTime)
+
+	// Log the result of node execution with comprehensive details.
+	logFields := []logger.Field{
+		{Key: "nodeID", Value: exec.nodeID},
+		{Key: "pureNodeID", Value: pureNodeID},
+		{Key: "taskID", Value: exec.taskID},
+		{Key: "latency", Value: nodeLatency.String()},
+	}
+	if result.Error != nil {
+		logFields = append(logFields, logger.Field{Key: "error", Value: result.Error.Error()})
+		logFields = append(logFields, logger.Field{Key: "status", Value: mq.Failed})
+		tm.dag.Logger().Error("Node execution failed", logFields...)
+	} else {
+		logFields = append(logFields, logger.Field{Key: "status", Value: mq.Completed})
+		tm.dag.Logger().Info("Node executed successfully", logFields...)
+	}
+
+	// If this is the last node, mark it accordingly.
 	isLast, err := tm.dag.IsLastNode(pureNodeID)
 	if err != nil {
-		log.Printf("Error checking if node %s is last: %v\n", pureNodeID, err)
+		tm.dag.Logger().Error("Error checking if node is last",
+			logger.Field{Key: "nodeID", Value: pureNodeID},
+			logger.Field{Key: "error", Value: err.Error()})
 	} else if isLast {
 		result.Last = true
 	}
+
 	tm.currentNodeResult.Set(exec.nodeID, result)
 	state.Result = result
 	result.Topic = node.ID
+	tm.updateTimestamps(&result)
 	if result.Error != nil {
-		tm.updateTimestamps(&result)
+		result.Status = mq.Failed
+		state.Status = mq.Failed
+		state.Result.Status = mq.Failed
+		state.Result.Latency = result.Latency
 		tm.result = &result
 		tm.resultCh <- result
 		tm.processFinalResult(state)
 		return
 	}
+	result.Status = mq.Completed
+	state.Result.Status = mq.Completed
+	state.Result.Latency = result.Latency
 	if isLast {
 		tm.processFinalResult(state)
 	}
 	if node.NodeType == Page {
-		tm.updateTimestamps(&result)
 		tm.result = &result
 		tm.resultCh <- result
 		return
@@ -407,6 +442,7 @@ func (tm *TaskManager) retryDeferredTasks() {
 }
 
 func (tm *TaskManager) processFinalResult(state *TaskState) {
+	state.Status = mq.Completed
 	state.targetResults.Clear()
 	if tm.dag.finalResult != nil {
 		tm.dag.finalResult(tm.taskID, state.Result)
