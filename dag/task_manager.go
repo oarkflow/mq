@@ -159,6 +159,12 @@ func (tm *TaskManager) processNode(exec *task) {
 	tm.currentNodeResult.Clear()
 	tm.currentNodePayload.Set(exec.nodeID, exec.payload)
 	result := node.processor.ProcessTask(exec.ctx, mq.NewTask(exec.taskID, exec.payload, exec.nodeID))
+	isLast, err := tm.dag.IsLastNode(pureNodeID)
+	if err != nil {
+		log.Printf("Error checking if node %s is last: %v\n", pureNodeID, err)
+	} else if isLast {
+		result.Last = true
+	}
 	tm.currentNodeResult.Set(exec.nodeID, result)
 	state.Result = result
 	result.Topic = node.ID
@@ -169,13 +175,18 @@ func (tm *TaskManager) processNode(exec *task) {
 		tm.processFinalResult(state)
 		return
 	}
+	if isLast {
+		tm.processFinalResult(state)
+	}
 	if node.NodeType == Page {
 		tm.updateTimestamps(&result)
 		tm.result = &result
 		tm.resultCh <- result
 		return
 	}
-	tm.handleNext(exec.ctx, node, state, result)
+	if !isLast {
+		tm.handleNext(exec.ctx, node, state, result)
+	}
 }
 
 func (tm *TaskManager) updateTimestamps(rs *mq.Result) {

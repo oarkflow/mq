@@ -33,6 +33,7 @@ type Result struct {
 	ConditionStatus string          `json:"condition_status"`
 	Ctx             context.Context `json:"-"`
 	Payload         json.RawMessage `json:"payload"`
+	Last            bool
 }
 
 func (r Result) MarshalJSON() ([]byte, error) {
