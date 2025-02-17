@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/oarkflow/mq"
 	"github.com/oarkflow/mq/logger"
-
 	"github.com/oarkflow/mq/storage"
 	"github.com/oarkflow/mq/storage/memory"
 )
@@ -50,12 +50,13 @@ type TaskManager struct {
 	currentNodeResult  storage.IMap[string, mq.Result]
 	taskQueue          chan *task
 	result             *mq.Result
-	dag                *DAG
 	resultQueue        chan nodeResult
 	resultCh           chan mq.Result
 	stopCh             chan struct{}
 	taskID             string
-	latency            string
+	dag                *DAG
+
+	wg sync.WaitGroup
 }
 
 type task struct {
@@ -76,6 +77,7 @@ func newTask(ctx context.Context, taskID, nodeID string, payload json.RawMessage
 
 func NewTaskManager(dag *DAG, taskID string, resultCh chan mq.Result, iteratorNodes storage.IMap[string, []Edge]) *TaskManager {
 	tm := &TaskManager{
+		createdAt:          time.Now(),
 		taskStates:         memory.New[string, *TaskState](),
 		parentNodes:        memory.New[string, string](),
 		childNodes:         memory.New[string, int](),
@@ -85,58 +87,63 @@ func NewTaskManager(dag *DAG, taskID string, resultCh chan mq.Result, iteratorNo
 		taskQueue:          make(chan *task, DefaultChannelSize),
 		resultQueue:        make(chan nodeResult, DefaultChannelSize),
 		iteratorNodes:      iteratorNodes,
-		createdAt:          time.Now(),
 		stopCh:             make(chan struct{}),
 		resultCh:           resultCh,
 		taskID:             taskID,
 		dag:                dag,
 	}
+
+	tm.wg.Add(2)
 	go tm.run()
 	go tm.waitForResult()
 	return tm
 }
 
 func (tm *TaskManager) ProcessTask(ctx context.Context, startNode string, payload json.RawMessage) {
-	tm.send(ctx, startNode, tm.taskID, payload)
+	tm.enqueueTask(ctx, startNode, tm.taskID, payload)
 }
 
-func (tm *TaskManager) send(ctx context.Context, startNode, taskID string, payload json.RawMessage) {
+func (tm *TaskManager) enqueueTask(ctx context.Context, startNode, taskID string, payload json.RawMessage) {
+
 	if index, ok := ctx.Value(ContextIndex).(string); ok {
-		startNode = strings.Split(startNode, Delimiter)[0]
-		startNode = fmt.Sprintf("%s%s%s", startNode, Delimiter, index)
+		base := strings.Split(startNode, Delimiter)[0]
+		startNode = fmt.Sprintf("%s%s%s", base, Delimiter, index)
 	}
 	if _, exists := tm.taskStates.Get(startNode); !exists {
 		tm.taskStates.Set(startNode, newTaskState(startNode))
 	}
+
 	t := newTask(ctx, taskID, startNode, payload)
 	select {
 	case tm.taskQueue <- t:
 	default:
-		log.Println("task queue is full, dropping task.")
+		log.Println("task queue is full, deferring task")
 		tm.deferredTasks.Set(taskID, t)
 	}
 }
 
 func (tm *TaskManager) run() {
+	defer tm.wg.Done()
 	for {
 		select {
 		case <-tm.stopCh:
 			log.Println("Stopping TaskManager")
 			return
-		case task := <-tm.taskQueue:
-			tm.processNode(task)
+		case tsk := <-tm.taskQueue:
+			tm.processNode(tsk)
 		}
 	}
 }
 
 func (tm *TaskManager) waitForResult() {
+	defer tm.wg.Done()
 	for {
 		select {
 		case <-tm.stopCh:
 			log.Println("Stopping Result Listener")
 			return
-		case nr := <-tm.resultQueue:
-			tm.onNodeCompleted(nr)
+		case res := <-tm.resultQueue:
+			tm.onNodeCompleted(res)
 		}
 	}
 }
@@ -144,12 +151,14 @@ func (tm *TaskManager) waitForResult() {
 func (tm *TaskManager) processNode(exec *task) {
 	startTime := time.Now()
 	pureNodeID := strings.Split(exec.nodeID, Delimiter)[0]
+
 	node, exists := tm.dag.nodes.Get(pureNodeID)
 	if !exists {
 		tm.dag.Logger().Error("Node not found while processing node",
 			logger.Field{Key: "nodeID", Value: pureNodeID})
 		return
 	}
+
 	state, _ := tm.taskStates.Get(exec.nodeID)
 	if state == nil {
 		tm.dag.Logger().Warn("State not found; creating new state",
@@ -157,36 +166,18 @@ func (tm *TaskManager) processNode(exec *task) {
 		state = newTaskState(exec.nodeID)
 		tm.taskStates.Set(exec.nodeID, state)
 	}
+
 	state.Status = mq.Processing
 	state.UpdatedAt = time.Now()
 	tm.currentNodePayload.Clear()
 	tm.currentNodeResult.Clear()
 	tm.currentNodePayload.Set(exec.nodeID, exec.payload)
 
-	// Execute the node’s task.
 	result := node.processor.ProcessTask(exec.ctx, mq.NewTask(exec.taskID, exec.payload, exec.nodeID))
-	// Calculate the per-node latency.
 	nodeLatency := time.Since(startTime)
+	tm.logNodeExecution(exec, pureNodeID, result, nodeLatency)
 
-	// Log the result of node execution with comprehensive details.
-	logFields := []logger.Field{
-		{Key: "nodeID", Value: exec.nodeID},
-		{Key: "pureNodeID", Value: pureNodeID},
-		{Key: "taskID", Value: exec.taskID},
-		{Key: "latency", Value: nodeLatency.String()},
-	}
-	if result.Error != nil {
-		logFields = append(logFields, logger.Field{Key: "error", Value: result.Error.Error()})
-		logFields = append(logFields, logger.Field{Key: "status", Value: mq.Failed})
-		tm.dag.Logger().Error("Node execution failed", logFields...)
-	} else {
-		logFields = append(logFields, logger.Field{Key: "status", Value: mq.Completed})
-		tm.dag.Logger().Info("Node executed successfully", logFields...)
-	}
-
-	// If this is the last node, mark it accordingly.
-	isLast, err := tm.dag.IsLastNode(pureNodeID)
-	if err != nil {
+	if isLast, err := tm.dag.IsLastNode(pureNodeID); err != nil {
 		tm.dag.Logger().Error("Error checking if node is last",
 			logger.Field{Key: "nodeID", Value: pureNodeID},
 			logger.Field{Key: "error", Value: err.Error()})
@@ -198,6 +189,7 @@ func (tm *TaskManager) processNode(exec *task) {
 	state.Result = result
 	result.Topic = node.ID
 	tm.updateTimestamps(&result)
+
 	if result.Error != nil {
 		result.Status = mq.Failed
 		state.Status = mq.Failed
@@ -208,19 +200,38 @@ func (tm *TaskManager) processNode(exec *task) {
 		tm.processFinalResult(state)
 		return
 	}
+
 	result.Status = mq.Completed
 	state.Result.Status = mq.Completed
 	state.Result.Latency = result.Latency
-	if isLast {
-		tm.processFinalResult(state)
-	}
-	if node.NodeType == Page {
+
+	if result.Last || node.NodeType == Page {
 		tm.result = &result
 		tm.resultCh <- result
+		if result.Last {
+			tm.processFinalResult(state)
+		}
 		return
 	}
-	if !isLast {
-		tm.handleNext(exec.ctx, node, state, result)
+
+	tm.handleNext(exec.ctx, node, state, result)
+}
+
+func (tm *TaskManager) logNodeExecution(exec *task, pureNodeID string, result mq.Result, latency time.Duration) {
+	fields := []logger.Field{
+		{Key: "nodeID", Value: exec.nodeID},
+		{Key: "pureNodeID", Value: pureNodeID},
+		{Key: "taskID", Value: exec.taskID},
+		{Key: "latency", Value: latency.String()},
+	}
+
+	if result.Error != nil {
+		fields = append(fields, logger.Field{Key: "error", Value: result.Error.Error()})
+		fields = append(fields, logger.Field{Key: "status", Value: mq.Failed})
+		tm.dag.Logger().Error("Node execution failed", fields...)
+	} else {
+		fields = append(fields, logger.Field{Key: "status", Value: mq.Completed})
+		tm.dag.Logger().Info("Node executed successfully", fields...)
 	}
 }
 
@@ -233,15 +244,16 @@ func (tm *TaskManager) updateTimestamps(rs *mq.Result) {
 func (tm *TaskManager) handlePrevious(ctx context.Context, state *TaskState, result mq.Result, childNode string, dispatchFinal bool) {
 	state.targetResults.Set(childNode, result)
 	state.targetResults.Del(state.NodeID)
-	targetsCount, _ := tm.childNodes.Get(state.NodeID)
+
+	targetCount, _ := tm.childNodes.Get(state.NodeID)
 	size := state.targetResults.Size()
-	nodeID := strings.Split(state.NodeID, Delimiter)
-	if size == targetsCount {
+
+	if size == targetCount {
 		if size > 1 {
 			aggregatedData := make([]json.RawMessage, size)
 			i := 0
-			state.targetResults.ForEach(func(_ string, rs mq.Result) bool {
-				aggregatedData[i] = rs.Payload
+			state.targetResults.ForEach(func(_ string, res mq.Result) bool {
+				aggregatedData[i] = res.Payload
 				i++
 				return true
 			})
@@ -256,6 +268,7 @@ func (tm *TaskManager) handlePrevious(ctx context.Context, state *TaskState, res
 		state.Status = result.Status
 		state.Result.Status = result.Status
 	}
+
 	if state.Result.Payload == nil {
 		state.Result.Payload = result.Payload
 	}
@@ -266,25 +279,26 @@ func (tm *TaskManager) handlePrevious(ctx context.Context, state *TaskState, res
 	if result.Error != nil {
 		state.Status = mq.Failed
 	}
-	pn, ok := tm.parentNodes.Get(state.NodeID)
-	if edges, exists := tm.iteratorNodes.Get(nodeID[0]); exists && state.Status == mq.Completed {
-		state.Status = mq.Processing
-		tm.iteratorNodes.Del(nodeID[0])
-		state.targetResults.Clear()
-		if len(nodeID) == 2 {
-			ctx = context.WithValue(ctx, ContextIndex, nodeID[1])
-		}
-		toProcess := nodeResult{
-			ctx:    ctx,
-			nodeID: state.NodeID,
-			status: state.Status,
-			result: state.Result,
-		}
-		tm.handleEdges(toProcess, edges)
-	} else if ok {
-		if targetsCount == size {
-			parentState, _ := tm.taskStates.Get(pn)
-			if parentState != nil {
+
+	if parentKey, ok := tm.parentNodes.Get(state.NodeID); ok {
+
+		nodeIDParts := strings.Split(state.NodeID, Delimiter)
+		if edges, exists := tm.iteratorNodes.Get(nodeIDParts[0]); exists && state.Status == mq.Completed {
+			state.Status = mq.Processing
+			tm.iteratorNodes.Del(nodeIDParts[0])
+			state.targetResults.Clear()
+			if len(nodeIDParts) == 2 {
+				ctx = context.WithValue(ctx, ContextIndex, nodeIDParts[1])
+			}
+			toProcess := nodeResult{
+				ctx:    ctx,
+				nodeID: state.NodeID,
+				status: state.Status,
+				result: state.Result,
+			}
+			tm.handleEdges(toProcess, edges)
+		} else if size == targetCount {
+			if parentState, _ := tm.taskStates.Get(parentKey); parentState != nil {
 				state.Result.Topic = state.NodeID
 				tm.handlePrevious(ctx, parentState, state.Result, state.NodeID, dispatchFinal)
 			}
@@ -314,47 +328,48 @@ func (tm *TaskManager) handleNext(ctx context.Context, node *Node, state *TaskSt
 	if result.Status == "" {
 		result.Status = state.Status
 	}
-	select {
-	case tm.resultQueue <- nodeResult{
+	tm.enqueueResult(nodeResult{
 		ctx:    ctx,
 		nodeID: state.NodeID,
-		result: result,
 		status: state.Status,
-	}:
+		result: result,
+	})
+}
+
+func (tm *TaskManager) enqueueResult(nr nodeResult) {
+	select {
+	case tm.resultQueue <- nr:
 	default:
 		log.Println("Result queue is full, dropping result.")
 	}
 }
 
-func (tm *TaskManager) onNodeCompleted(rs nodeResult) {
-	nodeID := strings.Split(rs.nodeID, Delimiter)[0]
+func (tm *TaskManager) onNodeCompleted(nr nodeResult) {
+	nodeID := strings.Split(nr.nodeID, Delimiter)[0]
 	node, ok := tm.dag.nodes.Get(nodeID)
 	if !ok {
 		return
 	}
-	edges := tm.getConditionalEdges(node, rs.result)
-	hasErrorOrCompleted := rs.result.Error != nil || len(edges) == 0
-	if hasErrorOrCompleted {
-		if index, ok := rs.ctx.Value(ContextIndex).(string); ok {
+	edges := tm.getConditionalEdges(node, nr.result)
+	if nr.result.Error != nil || len(edges) == 0 {
+
+		if index, ok := nr.ctx.Value(ContextIndex).(string); ok {
 			childNode := fmt.Sprintf("%s%s%s", node.ID, Delimiter, index)
-			pn, ok := tm.parentNodes.Get(childNode)
-			if ok {
-				parentState, _ := tm.taskStates.Get(pn)
-				if parentState != nil {
-					pn = strings.Split(pn, Delimiter)[0]
-					tm.handlePrevious(rs.ctx, parentState, rs.result, rs.nodeID, true)
-				}
-			} else {
-				tm.updateTimestamps(&rs.result)
-				tm.resultCh <- rs.result
-				if state, ok := tm.taskStates.Get(rs.nodeID); ok {
-					tm.processFinalResult(state)
+			if parentKey, exists := tm.parentNodes.Get(childNode); exists {
+				if parentState, _ := tm.taskStates.Get(parentKey); parentState != nil {
+					tm.handlePrevious(nr.ctx, parentState, nr.result, nr.nodeID, true)
+					return
 				}
 			}
 		}
+		tm.updateTimestamps(&nr.result)
+		tm.resultCh <- nr.result
+		if state, ok := tm.taskStates.Get(nr.nodeID); ok {
+			tm.processFinalResult(state)
+		}
 		return
 	}
-	tm.handleEdges(rs, edges)
+	tm.handleEdges(nr, edges)
 }
 
 func (tm *TaskManager) getConditionalEdges(node *Node, result mq.Result) []Edge {
@@ -362,12 +377,12 @@ func (tm *TaskManager) getConditionalEdges(node *Node, result mq.Result) []Edge 
 	copy(edges, node.Edges)
 	if result.ConditionStatus != "" {
 		if conditions, ok := tm.dag.conditions[result.Topic]; ok {
-			if targetNodeKey, ok := conditions[result.ConditionStatus]; ok {
-				if targetNode, ok := tm.dag.nodes.Get(targetNodeKey); ok {
+			if targetNodeKey, exists := conditions[result.ConditionStatus]; exists {
+				if targetNode, found := tm.dag.nodes.Get(targetNodeKey); found {
 					edges = append(edges, Edge{From: node, To: targetNode})
 				}
-			} else if targetNodeKey, ok = conditions["default"]; ok {
-				if targetNode, ok := tm.dag.nodes.Get(targetNodeKey); ok {
+			} else if targetNodeKey, exists := conditions["default"]; exists {
+				if targetNode, found := tm.dag.nodes.Get(targetNodeKey); found {
 					edges = append(edges, Edge{From: node, To: targetNode})
 				}
 			}
@@ -383,41 +398,41 @@ func (tm *TaskManager) handleEdges(currentResult nodeResult, edges []Edge) {
 			index = "0"
 		}
 		parentNode := fmt.Sprintf("%s%s%s", edge.From.ID, Delimiter, index)
-		if edge.Type == Simple {
-			if _, ok := tm.iteratorNodes.Get(edge.From.ID); ok {
+
+		switch edge.Type {
+		case Simple:
+			if _, exists := tm.iteratorNodes.Get(edge.From.ID); exists {
 				continue
 			}
-		}
-		if edge.Type == Iterator {
-			var items []json.RawMessage
-			err := json.Unmarshal(currentResult.result.Payload, &items)
-			if err != nil {
-				log.Printf("Error unmarshalling data for node %s: %v\n", edge.To.ID, err)
-				tm.resultQueue <- nodeResult{
-					ctx:    currentResult.ctx,
-					nodeID: edge.To.ID,
-					status: mq.Failed,
-					result: mq.Result{Error: err},
+			fallthrough
+		case Iterator:
+			if edge.Type == Iterator {
+				var items []json.RawMessage
+				if err := json.Unmarshal(currentResult.result.Payload, &items); err != nil {
+					log.Printf("Error unmarshalling data for node %s: %v\n", edge.To.ID, err)
+					tm.enqueueResult(nodeResult{
+						ctx:    currentResult.ctx,
+						nodeID: edge.To.ID,
+						status: mq.Failed,
+						result: mq.Result{Error: err},
+					})
+					return
 				}
-				return
-			}
-			tm.childNodes.Set(parentNode, len(items))
-			for i, item := range items {
-				childNode := fmt.Sprintf("%s%s%d", edge.To.ID, Delimiter, i)
-				ctx := context.WithValue(currentResult.ctx, ContextIndex, fmt.Sprintf("%d", i))
+				tm.childNodes.Set(parentNode, len(items))
+				for i, item := range items {
+					childNode := fmt.Sprintf("%s%s%d", edge.To.ID, Delimiter, i)
+					ctx := context.WithValue(currentResult.ctx, ContextIndex, fmt.Sprintf("%d", i))
+					tm.parentNodes.Set(childNode, parentNode)
+					tm.enqueueTask(ctx, edge.To.ID, tm.taskID, item)
+				}
+			} else {
+				tm.childNodes.Set(parentNode, 1)
+				idx, _ := currentResult.ctx.Value(ContextIndex).(string)
+				childNode := fmt.Sprintf("%s%s%s", edge.To.ID, Delimiter, idx)
+				ctx := context.WithValue(currentResult.ctx, ContextIndex, idx)
 				tm.parentNodes.Set(childNode, parentNode)
-				tm.send(ctx, edge.To.ID, tm.taskID, item)
+				tm.enqueueTask(ctx, edge.To.ID, tm.taskID, currentResult.result.Payload)
 			}
-		} else {
-			tm.childNodes.Set(parentNode, 1)
-			idx, ok := currentResult.ctx.Value(ContextIndex).(string)
-			if !ok {
-				idx = "0"
-			}
-			childNode := fmt.Sprintf("%s%s%s", edge.To.ID, Delimiter, idx)
-			ctx := context.WithValue(currentResult.ctx, ContextIndex, idx)
-			tm.parentNodes.Set(childNode, parentNode)
-			tm.send(ctx, edge.To.ID, tm.taskID, currentResult.result.Payload)
 		}
 	}
 }
@@ -425,18 +440,17 @@ func (tm *TaskManager) handleEdges(currentResult nodeResult, edges []Edge) {
 func (tm *TaskManager) retryDeferredTasks() {
 	const maxRetries = 5
 	backoff := time.Second
-
 	for retries := 0; retries < maxRetries; retries++ {
 		select {
 		case <-tm.stopCh:
-			log.Println("Stopping Deferred task Retrier")
+			log.Println("Stopping Deferred Task Retrier")
 			return
 		case <-time.After(backoff):
-			tm.deferredTasks.ForEach(func(taskID string, task *task) bool {
-				tm.send(task.ctx, task.nodeID, taskID, task.payload)
-				backoff = backoff * 2 // Exponential backoff
+			tm.deferredTasks.ForEach(func(taskID string, tsk *task) bool {
+				tm.enqueueTask(tsk.ctx, tsk.nodeID, taskID, tsk.payload)
 				return true
 			})
+			backoff *= 2
 		}
 	}
 }
@@ -451,4 +465,5 @@ func (tm *TaskManager) processFinalResult(state *TaskState) {
 
 func (tm *TaskManager) Stop() {
 	close(tm.stopCh)
+	tm.wg.Wait()
 }
