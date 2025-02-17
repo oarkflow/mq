@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/oarkflow/mq/logger"
 	"runtime"
 	"time"
 
@@ -128,6 +129,7 @@ type Options struct {
 	cleanTaskOnComplete  bool
 	enableWorkerPool     bool
 	respondPendingResult bool
+	logger               logger.Logger
 }
 
 func (o *Options) SetSyncMode(sync bool) {
@@ -136,6 +138,10 @@ func (o *Options) SetSyncMode(sync bool) {
 
 func (o *Options) NumOfWorkers() int {
 	return o.numOfWorkers
+}
+
+func (o *Options) Logger() logger.Logger {
+	return o.logger
 }
 
 func (o *Options) Storage() TaskStorage {
@@ -156,7 +162,7 @@ func (o *Options) MaxMemoryLoad() int64 {
 
 func defaultOptions() *Options {
 	return &Options{
-		brokerAddr:           ":8080",
+		brokerAddr:           ":8081",
 		maxRetries:           5,
 		respondPendingResult: true,
 		initialDelay:         2 * time.Second,
@@ -166,6 +172,7 @@ func defaultOptions() *Options {
 		numOfWorkers:         runtime.NumCPU(),
 		maxMemoryLoad:        5000000,
 		storage:              NewMemoryTaskStorage(10 * time.Minute),
+		logger:               logger.NewDefaultLogger(),
 	}
 }
 
@@ -183,6 +190,12 @@ func SetupOptions(opts ...Option) *Options {
 func WithNotifyResponse(callback Callback) Option {
 	return func(opts *Options) {
 		opts.notifyResponse = callback
+	}
+}
+
+func WithLogger(log logger.Logger) Option {
+	return func(opts *Options) {
+		opts.logger = log
 	}
 }
 

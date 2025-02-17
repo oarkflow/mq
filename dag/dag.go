@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/oarkflow/mq/logger"
 	"log"
 	"strings"
 	"time"
@@ -53,7 +54,6 @@ type DAG struct {
 	startNode                string
 	name                     string
 	report                   string
-	opts                     []mq.Option
 	hasPageNode              bool
 	paused                   bool
 }
@@ -75,7 +75,6 @@ func NewDAG(name, key string, finalResultCallback func(taskID string, result mq.
 		mq.WithConsumerOnClose(d.onConsumerClose),
 	)
 	d.server = mq.NewBroker(opts...)
-	d.opts = opts
 	options := d.server.Options()
 	d.pool = mq.NewPool(
 		options.NumOfWorkers(),
@@ -230,6 +229,10 @@ func (tm *DAG) getCurrentNode(manager *TaskManager) string {
 	return manager.currentNodePayload.Keys()[0]
 }
 
+func (tm *DAG) Logger() logger.Logger {
+	return tm.server.Options().Logger()
+}
+
 func (tm *DAG) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 	ctx = context.WithValue(ctx, "task_id", task.ID)
 	userContext := form.UserContext(ctx)
@@ -282,11 +285,10 @@ func (tm *DAG) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 	if tm.hasPageNode {
 		return <-resultCh
 	}
-	// Timeout handling
 	select {
 	case result := <-resultCh:
 		return result
-	case <-time.After(30 * time.Second): // Set a timeout duration
+	case <-time.After(30 * time.Second):
 		return mq.Result{
 			Error: fmt.Errorf("timeout waiting for task result"),
 			Ctx:   ctx,
@@ -335,7 +337,7 @@ func (tm *DAG) AddDAGNode(nodeType NodeType, name string, key string, dag *DAG, 
 }
 
 func (tm *DAG) Start(ctx context.Context, addr string) error {
-	// Start the server in a separate goroutine
+
 	go func() {
 		defer mq.RecoverPanic(mq.RecoverTitle)
 		if err := tm.server.Start(ctx); err != nil {
@@ -343,12 +345,11 @@ func (tm *DAG) Start(ctx context.Context, addr string) error {
 		}
 	}()
 
-	// Start the node consumers if not in sync mode
 	if !tm.server.SyncMode() {
 		tm.nodes.ForEach(func(_ string, con *Node) bool {
 			go func(con *Node) {
 				defer mq.RecoverPanic(mq.RecoverTitle)
-				limiter := rate.NewLimiter(rate.Every(1*time.Second), 1) // Retry every second
+				limiter := rate.NewLimiter(rate.Every(1*time.Second), 1)
 				for {
 					err := con.processor.Consume(ctx)
 					if err != nil {
@@ -357,7 +358,7 @@ func (tm *DAG) Start(ctx context.Context, addr string) error {
 						log.Printf("[INFO] - Consumer %s started successfully", con.ID)
 						break
 					}
-					limiter.Wait(ctx) // Wait with rate limiting before retrying
+					limiter.Wait(ctx)
 				}
 			}(con)
 			return true
