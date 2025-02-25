@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/gofiber/fiber/v2"
+
 	"github.com/oarkflow/mq"
 	"github.com/oarkflow/mq/dag"
 
@@ -19,13 +21,18 @@ type Form struct {
 }
 
 func (p *Form) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
+	baseURI := ""
+	if dg, ok := task.GetFlow().(*dag.DAG); ok {
+		baseURI = dg.BaseURI()
+	}
 	bt, err := os.ReadFile("webroot/form.html")
 	if err != nil {
 		return mq.Result{Error: err, Ctx: ctx}
 	}
 	parser := jet.NewWithMemory(jet.WithDelims("{{", "}}"))
 	rs, err := parser.ParseTemplate(string(bt), map[string]any{
-		"task_id": ctx.Value("task_id"),
+		"task_id":  ctx.Value("task_id"),
+		"base_uri": baseURI,
 	})
 	if err != nil {
 		return mq.Result{Error: err, Ctx: ctx}
@@ -85,11 +92,17 @@ type Result struct {
 }
 
 func (p *Result) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
+	baseURI := ""
+	if dg, ok := task.GetFlow().(*dag.DAG); ok {
+		baseURI = dg.BaseURI()
+	}
 	bt, err := os.ReadFile("webroot/result.html")
 	if err != nil {
 		return mq.Result{Error: err, Ctx: ctx}
 	}
-	var data map[string]any
+	data := map[string]any{
+		"base_uri": baseURI,
+	}
 	if task.Payload != nil {
 		if err := json.Unmarshal(task.Payload, &data); err != nil {
 			return mq.Result{Error: err, Ctx: ctx}
@@ -148,7 +161,7 @@ func notify(taskID string, result mq.Result) {
 }
 
 func main() {
-	flow := dag.NewDAG("Sample DAG", "sample-dag", notify)
+	flow := dag.NewDAG("Sample DAG", "sample-dag", notify, mq.WithBrokerURL(":8083"))
 	flow.AddNode(dag.Page, "Form", "Form", &Form{})
 	flow.AddNode(dag.Function, "NodeA", "NodeA", &NodeA{})
 	flow.AddNode(dag.Function, "NodeB", "NodeB", &NodeB{})
@@ -161,5 +174,8 @@ func main() {
 	if flow.Error != nil {
 		panic(flow.Error)
 	}
-	flow.Start(context.Background(), "0.0.0.0:8082")
+	app := fiber.New()
+	flowApp := app.Group("/test")
+	flow.Handlers(flowApp, "/test")
+	app.Listen(":8082")
 }

@@ -4,10 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/oarkflow/mq/logger"
 	"log"
 	"strings"
 	"time"
+
+	"github.com/oarkflow/mq/logger"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/recover"
@@ -56,6 +57,7 @@ type DAG struct {
 	report                   string
 	hasPageNode              bool
 	paused                   bool
+	httpPrefix               string
 }
 
 func NewDAG(name, key string, finalResultCallback func(taskID string, result mq.Result), opts ...mq.Option) *DAG {
@@ -148,7 +150,7 @@ func (tm *DAG) AddNode(nodeType NodeType, name, nodeID string, handler mq.Proces
 	if tm.Error != nil {
 		return tm
 	}
-	con := mq.NewConsumer(nodeID, nodeID, handler.ProcessTask)
+	con := mq.NewConsumer(nodeID, nodeID, handler.ProcessTask, mq.WithBrokerURL(tm.server.Options().BrokerAddr()))
 	n := &Node{
 		Label:     name,
 		ID:        nodeID,
@@ -432,7 +434,7 @@ func (tm *DAG) Process(ctx context.Context, payload []byte) mq.Result {
 	} else {
 		taskID = mq.NewID()
 	}
-	return tm.ProcessTask(ctx, mq.NewTask(taskID, payload, ""))
+	return tm.ProcessTask(ctx, mq.NewTask(taskID, payload, "", mq.WithDAG(tm)))
 }
 
 func (tm *DAG) Validate() error {
@@ -465,7 +467,6 @@ func (tm *DAG) AddDAGNode(nodeType NodeType, name string, key string, dag *DAG, 
 }
 
 func (tm *DAG) Start(ctx context.Context, addr string) error {
-
 	go func() {
 		defer mq.RecoverPanic(mq.RecoverTitle)
 		if err := tm.server.Start(ctx); err != nil {
@@ -496,7 +497,7 @@ func (tm *DAG) Start(ctx context.Context, addr string) error {
 	app.Use(recover.New(recover.Config{
 		EnableStackTrace: true,
 	}))
-	tm.Handlers(app)
+	tm.Handlers(app, "/")
 	return app.Listen(addr)
 }
 
@@ -508,7 +509,7 @@ func (tm *DAG) ScheduleTask(ctx context.Context, payload []byte, opts ...mq.Sche
 	} else {
 		taskID = mq.NewID()
 	}
-	t := mq.NewTask(taskID, payload, "")
+	t := mq.NewTask(taskID, payload, "", mq.WithDAG(tm))
 
 	ctx = context.WithValue(ctx, "task_id", taskID)
 	userContext := form.UserContext(ctx)

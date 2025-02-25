@@ -214,7 +214,7 @@ func (tm *TaskManager) processNode(exec *task) {
 	for {
 		// Tracing start (stubbed)
 		log.Printf("Tracing: Start processing node %s (attempt %d)", exec.nodeID, attempts+1)
-		result = node.processor.ProcessTask(exec.ctx, mq.NewTask(exec.taskID, exec.payload, exec.nodeID))
+		result = node.processor.ProcessTask(exec.ctx, mq.NewTask(exec.taskID, exec.payload, exec.nodeID, mq.WithDAG(tm.dag)))
 		if result.Error != nil {
 			if te, ok := result.Error.(TaskError); ok && te.Recoverable {
 				if attempts < tm.maxRetries {

@@ -14,11 +14,29 @@ type Task struct {
 	Topic       string          `json:"topic"`
 	Status      string          `json:"status"`
 	Payload     json.RawMessage `json:"payload"`
+	dag         any
 }
 
-func NewTask(id string, payload json.RawMessage, nodeKey string) *Task {
+func (t *Task) GetFlow() any {
+	return t.dag
+}
+
+func NewTask(id string, payload json.RawMessage, nodeKey string, opts ...TaskOption) *Task {
 	if id == "" {
 		id = NewID()
 	}
-	return &Task{ID: id, Payload: payload, Topic: nodeKey, CreatedAt: time.Now()}
+	task := &Task{ID: id, Payload: payload, Topic: nodeKey, CreatedAt: time.Now()}
+	for _, opt := range opts {
+		opt(task)
+	}
+	return task
+}
+
+// TaskOption defines a function type for setting options.
+type TaskOption func(*Task)
+
+func WithDAG(dag any) TaskOption {
+	return func(opts *Task) {
+		opts.dag = dag
+	}
 }

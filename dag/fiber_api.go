@@ -112,8 +112,15 @@ func (tm *DAG) fiberTaskStatusHandler(c *fiber.Ctx) error {
 	return c.Type(fiber.MIMEApplicationJSON).JSON(result)
 }
 
+func (tm *DAG) BaseURI() string {
+	return tm.httpPrefix
+}
+
 // Handlers initializes route handlers.
-func (tm *DAG) Handlers(app any) {
+func (tm *DAG) Handlers(app any, prefix string) {
+	if prefix != "" && prefix != "/" {
+		tm.httpPrefix = prefix
+	}
 	switch a := app.(type) {
 	case fiber.Router:
 		a.All("/process", tm.renderFiber)

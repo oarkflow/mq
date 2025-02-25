@@ -4,9 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/oarkflow/mq/logger"
 	"runtime"
 	"time"
+
+	"github.com/oarkflow/mq/logger"
 
 	"github.com/oarkflow/errors"
 
@@ -159,6 +160,10 @@ func (o *Options) QueueSize() int {
 
 func (o *Options) MaxMemoryLoad() int64 {
 	return o.maxMemoryLoad
+}
+
+func (o *Options) BrokerAddr() string {
+	return o.brokerAddr
 }
 
 func defaultOptions() *Options {
