@@ -2,8 +2,9 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
+
+	"github.com/oarkflow/json"
 
 	"github.com/oarkflow/mq"
 	"github.com/oarkflow/mq/dag"

@@ -26,7 +26,7 @@ package tasks
 
 import (
 	"context"
-	"encoding/json"
+	"github.com/oarkflow/json"
 	"fmt"
 	"log"
 
@@ -183,7 +183,7 @@ package main
 
 import (
 	"context"
-	"encoding/json"
+	"github.com/oarkflow/json"
 	"github.com/oarkflow/mq/consts"
 	"github.com/oarkflow/mq/examples/tasks"
 	"io"

@@ -2,13 +2,15 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
+	"log"
+
 	"github.com/oarkflow/jet"
+	"github.com/oarkflow/json"
+
 	"github.com/oarkflow/mq"
 	"github.com/oarkflow/mq/consts"
 	"github.com/oarkflow/mq/dag"
-	"log"
 )
 
 type Data struct {

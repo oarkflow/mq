@@ -2,11 +2,12 @@ package dag
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
 	"time"
+
+	"github.com/oarkflow/json"
 
 	"github.com/oarkflow/mq/logger"
 

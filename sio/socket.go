@@ -2,12 +2,13 @@ package sio
 
 import (
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/oarkflow/json"
 
 	"github.com/oarkflow/mq/internal/bpool"
 	"github.com/oarkflow/mq/storage"

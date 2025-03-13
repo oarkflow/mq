@@ -2,7 +2,8 @@ package mq
 
 import (
 	"context"
-	"encoding/json"
+
+	"github.com/oarkflow/json"
 
 	"github.com/oarkflow/mq/codec"
 )

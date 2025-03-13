@@ -1,7 +1,8 @@
 package dag
 
 import (
-	"encoding/json"
+	"github.com/oarkflow/json"
+
 	"github.com/oarkflow/mq/sio"
 )
 

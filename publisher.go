@@ -2,11 +2,12 @@ package mq
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"net"
 	"time"
+
+	"github.com/oarkflow/json"
 
 	"github.com/oarkflow/mq/codec"
 	"github.com/oarkflow/mq/consts"

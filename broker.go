@@ -3,12 +3,13 @@ package mq
 import (
 	"context"
 	"crypto/tls"
-	"encoding/json"
 	"fmt"
 	"log"
 	"net"
 	"strings"
 	"time"
+
+	"github.com/oarkflow/json"
 
 	"github.com/oarkflow/mq/codec"
 	"github.com/oarkflow/mq/consts"

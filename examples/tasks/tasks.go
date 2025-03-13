@@ -2,10 +2,12 @@ package tasks
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	v2 "github.com/oarkflow/mq/dag"
 	"log"
+
+	"github.com/oarkflow/json"
+
+	v2 "github.com/oarkflow/mq/dag"
 
 	"github.com/oarkflow/mq"
 )

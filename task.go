@@ -1,8 +1,9 @@
 package mq
 
 import (
-	"encoding/json"
 	"time"
+
+	"github.com/oarkflow/json"
 )
 
 type Task struct {

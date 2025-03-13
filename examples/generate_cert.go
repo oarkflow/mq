@@ -11,7 +11,6 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/asn1"
-	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -20,6 +19,8 @@ import (
 	"net"
 	"os"
 	"time"
+
+	"github.com/oarkflow/json"
 )
 
 func main() {

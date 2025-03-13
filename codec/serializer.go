@@ -1,7 +1,7 @@
 package codec
 
 import (
-	"encoding/json"
+	"github.com/oarkflow/json"
 )
 
 type MarshallerFunc func(v any) ([]byte, error)
@@ -18,7 +18,9 @@ func (f UnmarshallerFunc) Unmarshal(data []byte, v any) error {
 
 var defaultMarshaller MarshallerFunc = json.Marshal
 
-var defaultUnmarshaller UnmarshallerFunc = json.Unmarshal
+var defaultUnmarshaller UnmarshallerFunc = func(data []byte, v any) error {
+	return json.Unmarshal(data, v)
+}
 
 func SetMarshaller(marshaller MarshallerFunc) {
 	defaultMarshaller = marshaller
