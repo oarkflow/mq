@@ -19,6 +19,10 @@ import (
 	"github.com/oarkflow/mq"
 )
 
+type Debugger interface {
+	Debug(context.Context, *mq.Task)
+}
+
 type Processor interface {
 	mq.Processor
 	SetConfig(Payload)
@@ -75,6 +79,36 @@ func (e *Operation) Resume(_ context.Context) error {
 
 func (e *Operation) Stop(_ context.Context) error {
 	return nil
+}
+
+func (e *Operation) Debug(ctx context.Context, task *mq.Task) {
+	debug, canDebug := e.Payload.Data["debug"].(bool)
+	if !canDebug || !debug {
+		return
+	}
+	additionalData, _ := json.Marshal(e.Payload.Data)
+	fmt.Println("Operation ID: \n", e.ID)
+	fmt.Println("Operation Key: \n", e.Key)
+	fmt.Println("Operation Type: \n", e.Type)
+	fmt.Println("\t Operation Required Fields: \n", e.RequiredFields)
+	fmt.Println("\t Operation Optional Fields: \n", e.OptionalFields)
+	fmt.Println("\t Operation Generated Fields: \n", e.GeneratedFields)
+	fmt.Println("\t Operation Mapping: \n", e.GetMappedData(ctx, task))
+	fmt.Println("\t Operation Additional Data: \n", string(additionalData))
+}
+
+func (e *Operation) GetMappedData(ctx context.Context, task *mq.Task) map[string]any {
+	var row map[string]any
+	err := json.Unmarshal(task.Payload, &row)
+	if err != nil {
+		return nil
+	}
+	mapped := make(map[string]any)
+	for dest, src := range e.Payload.Mapping {
+		_, val := GetVal(ctx, src, row)
+		mapped[dest] = val
+	}
+	return mapped
 }
 
 func (e *Operation) Close() error {

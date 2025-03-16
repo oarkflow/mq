@@ -22,3 +22,5 @@ go.work
 .idea
 .DS_Store
 *.svg
+.qodo
+.history
