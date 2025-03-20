@@ -14,8 +14,9 @@ import (
 )
 
 type Data struct {
-	Template string            `json:"template"`
-	Mapping  map[string]string `json:"mapping"`
+	Template       string            `json:"template"`
+	Mapping        map[string]string `json:"mapping"`
+	AdditionalData map[string]any    `json:"additional_data"`
 }
 
 type Node struct {
@@ -53,8 +54,13 @@ func CreateDAGFromJSON(config string) (*dag.DAG, error) {
 
 	for _, node := range handler.Nodes {
 		op := &HTMLProcessor{
+			Operation: dag.Operation{
+				Payload: dag.Payload{
+					Mapping: node.Data.Mapping,
+					Data:    node.Data.AdditionalData,
+				},
+			},
 			Template: node.Data.Template,
-			Mapping:  node.Data.Mapping,
 		}
 		nodeMap[node.ID] = op
 		flow.AddNode(dag.Page, node.Name, node.ID, op, node.FirstNode)
@@ -75,7 +81,6 @@ func CreateDAGFromJSON(config string) (*dag.DAG, error) {
 type HTMLProcessor struct {
 	dag.Operation
 	Template string
-	Mapping  map[string]string
 }
 
 func (p *HTMLProcessor) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
@@ -83,8 +88,8 @@ func (p *HTMLProcessor) ProcessTask(ctx context.Context, task *mq.Task) mq.Resul
 	data := map[string]interface{}{
 		"task_id": ctx.Value("task_id"),
 	}
-
-	for key, value := range p.Mapping {
+	p.Debug(ctx, task)
+	for key, value := range p.Payload.Mapping {
 		data[key] = value
 	}
 
@@ -113,6 +118,7 @@ func main() {
       "id": "FormStep1",
       "node": "Page",
       "data": {
+	  	"additional_data": {"debug": true},
         "template": "<html>\n<body>\n<form method=\"post\" action=\"/process?task_id={{task_id}}&next=true\">\n    <label>Name:</label>\n    <input type=\"text\" name=\"name\" required>\n    <label>Age:</label>\n    <input type=\"number\" name=\"age\" required>\n    <button type=\"submit\">Next</button>\n</form>\n</body>\n</html>",
         "mapping": {}
       },
