@@ -11,9 +11,9 @@ import (
 
 	"github.com/oarkflow/json"
 
+	"github.com/oarkflow/json/jsonparser"
 	"github.com/oarkflow/mq/codec"
 	"github.com/oarkflow/mq/consts"
-	"github.com/oarkflow/mq/jsonparser"
 	"github.com/oarkflow/mq/storage"
 	"github.com/oarkflow/mq/storage/memory"
 	"github.com/oarkflow/mq/utils"
