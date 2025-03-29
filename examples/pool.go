@@ -4,15 +4,18 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"os/signal"
+	"syscall"
 	"time"
 
 	v1 "github.com/oarkflow/mq/v1"
 )
 
 func main() {
-	storage := v1.NewInMemoryTaskStorage()
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
 	pool := v1.NewPool(5,
-		v1.WithTaskStorage(storage),
+		v1.WithTaskStorage(v1.NewInMemoryTaskStorage()),
 		v1.WithHandler(func(ctx context.Context, payload *v1.Task) v1.Result {
 			v1.Logger.Info().Str("taskID", payload.ID).Msg("Processing task payload")
 			time.Sleep(500 * time.Millisecond)
@@ -36,16 +39,26 @@ func main() {
 		v1.WithGracefulShutdown(10*time.Second),
 		v1.WithPlugin(&v1.DefaultPlugin{}),
 	)
-	for i := 0; i < 10; i++ {
-		payload := fmt.Sprintf("Payload %d", i)
-		task := &v1.Task{Payload: payload}
-		if err := pool.EnqueueTask(context.Background(), task, rand.Intn(10)); err != nil {
-			v1.Logger.Error().Err(err).Msg("Failed to enqueue task")
+	defer func() {
+		metrics := pool.Metrics()
+		v1.Logger.Info().Msgf("Metrics: %+v", metrics)
+		pool.Stop()
+		v1.Logger.Info().Msgf("Dead Letter Queue has %d tasks", len(v1.DLQ.Task()))
+	}()
+
+	go func() {
+		for i := 0; i < 50; i++ {
+			task := &v1.Task{
+				ID:      "",
+				Payload: fmt.Sprintf("Task Payload %d", i),
+			}
+			if err := pool.EnqueueTask(context.Background(), task, rand.Intn(10)); err != nil {
+				v1.Logger.Error().Err(err).Msg("Failed to enqueue task")
+			}
+			time.Sleep(200 * time.Millisecond)
 		}
-	}
-	time.Sleep(5 * time.Second)
-	metrics := pool.Metrics()
-	v1.Logger.Info().Msgf("Metrics: %+v", metrics)
-	pool.Stop()
-	v1.Logger.Info().Msgf("Dead Letter Queue has %d tasks", len(v1.DLQ.Task()))
+	}()
+
+	<-ctx.Done()
+	v1.Logger.Info().Msg("Received shutdown signal, exiting...")
 }

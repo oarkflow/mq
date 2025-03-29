@@ -21,7 +21,8 @@ var Logger = log.DefaultLogger
 func startSpan(operation string) (context.Context, func()) {
 	startTime := time.Now()
 	Logger.Info().Str("operation", operation).Msg("Span started")
-	return context.Background(), func() {
+	ctx := context.WithValue(context.Background(), "traceID", fmt.Sprintf("%d", startTime.UnixNano()))
+	return ctx, func() {
 		duration := time.Since(startTime)
 		Logger.Info().Str("operation", operation).Msgf("Span ended; duration: %v", duration)
 	}
@@ -34,22 +35,8 @@ var queueTaskPool = sync.Pool{
 	New: func() interface{} { return new(QueueTask) },
 }
 
-func getTask() *Task {
-	return taskPool.Get().(*Task)
-}
-
-func putTask(t *Task) {
-	*t = Task{}
-	taskPool.Put(t)
-}
-
 func getQueueTask() *QueueTask {
 	return queueTaskPool.Get().(*QueueTask)
-}
-
-func putQueueTask(qt *QueueTask) {
-	*qt = QueueTask{}
-	queueTaskPool.Put(qt)
 }
 
 type MetricsRegistry interface {
@@ -195,29 +182,20 @@ type Plugin interface {
 
 type DefaultPlugin struct{}
 
-func (dp *DefaultPlugin) Initialize(config interface{}) error {
-	return nil
-}
-
+func (dp *DefaultPlugin) Initialize(config interface{}) error { return nil }
 func (dp *DefaultPlugin) BeforeTask(task *QueueTask) {
 	Logger.Info().Str("taskID", task.payload.ID).Msg("BeforeTask plugin invoked")
 }
-
 func (dp *DefaultPlugin) AfterTask(task *QueueTask, result Result) {
 	Logger.Info().Str("taskID", task.payload.ID).Msg("AfterTask plugin invoked")
 }
 
-// acquireDistributedLock now simulates a distributed lock attempt.
-// In production, replace this with a call to a distributed lock service.
 func acquireDistributedLock(taskID string) bool {
-	// For example, attempt to get a lock from Redis/etcd.
-	// Return true if lock is acquired; false otherwise.
 	Logger.Info().Str("taskID", taskID).Msg("Acquiring distributed lock (stub)")
 	return true
 }
 
 func releaseDistributedLock(taskID string) {
-	// Release the lock in your distributed lock service.
 	Logger.Info().Str("taskID", taskID).Msg("Releasing distributed lock (stub)")
 }
 
@@ -1092,12 +1070,11 @@ func (wp *Pool) startHealthServer() {
 	}
 	go func() {
 		Logger.Info().Msg("Starting health server on :8080")
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			Logger.Error().Err(err).Msg("Health server failed")
 		}
 	}()
 
-	// Listen for pool shutdown and gracefully stop the server.
 	go func() {
 		<-wp.stop
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -1255,6 +1232,7 @@ func NewID() string {
 }
 
 func SizeOf(payload interface{}) int {
+
 	return 100
 }
 
