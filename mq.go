@@ -7,20 +7,19 @@ import (
 	"log"
 	"net"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/oarkflow/errors"
 	"github.com/oarkflow/json"
 
 	"github.com/oarkflow/mq/codec"
+	"github.com/oarkflow/mq/consts"
 	"github.com/oarkflow/mq/jsonparser"
 	"github.com/oarkflow/mq/logger"
 	"github.com/oarkflow/mq/storage"
 	"github.com/oarkflow/mq/storage/memory"
 	"github.com/oarkflow/mq/utils"
-
-	"github.com/oarkflow/errors"
-
-	"github.com/oarkflow/mq/consts"
 )
 
 type Status string
@@ -645,11 +644,11 @@ func (b *Broker) dispatchTaskToConsumer(ctx context.Context, queue *Queue, task 
 	return consumerFound
 }
 
+// Modified backoffRetry: Removed re‑insertion of the task into queue.tasks.
 func (b *Broker) backoffRetry(queue *Queue, task *QueuedTask, delay time.Duration) time.Duration {
 	backoffDuration := utils.CalculateJitter(delay, b.opts.jitterPercent)
 	log.Printf("Backing off for %v before retrying task for queue %s", backoffDuration, task.Message.Queue)
 	time.Sleep(backoffDuration)
-	queue.tasks <- task
 	delay *= 2
 	if delay > b.opts.maxBackoff {
 		delay = b.opts.maxBackoff
@@ -902,28 +901,34 @@ func (c *Consumer) Consume(ctx context.Context) error {
 		return fmt.Errorf("failed to connect to server for queue %s: %v", c.queue, err)
 	}
 	c.pool.Start(c.opts.numOfWorkers)
-	stopChan := make(chan struct{})
-	go func() {
-		defer close(stopChan) // Signal completion when done
-		for {
-			select {
-			case <-ctx.Done():
-				log.Println("Context canceled, stopping message reading.")
-				return
-			default:
-				if err := c.readMessage(ctx, c.conn); err != nil {
-					log.Println("Error reading message:", err)
-					return // Exit the goroutine on error
+	// Infinite loop to continuously read messages and reconnect if needed.
+	for {
+		select {
+		case <-ctx.Done():
+			log.Println("Context canceled, stopping consumer.")
+			return nil
+		default:
+			if err := c.readMessage(ctx, c.conn); err != nil {
+				log.Printf("Error reading message: %v, attempting reconnection...", err)
+				// Attempt reconnection loop.
+				for {
+					if ctx.Err() != nil {
+						return nil
+					}
+					if rErr := c.attemptConnect(); rErr != nil {
+						log.Printf("Reconnection attempt failed: %v", rErr)
+						time.Sleep(c.opts.initialDelay)
+					} else {
+						break
+					}
+				}
+				if err := c.subscribe(ctx, c.queue); err != nil {
+					log.Printf("Failed to re-subscribe on reconnection: %v", err)
+					time.Sleep(c.opts.initialDelay)
 				}
 			}
 		}
-	}()
-	select {
-	case <-stopChan:
-	case <-ctx.Done():
-		log.Println("Context canceled, performing cleanup.")
 	}
-	return nil
 }
 
 func (c *Consumer) waitForAck(ctx context.Context, conn net.Conn) error {
@@ -969,13 +974,84 @@ func (c *Consumer) Conn() net.Conn {
 }
 
 type Publisher struct {
-	opts *Options
-	id   string
+	opts     *Options
+	id       string
+	conn     net.Conn
+	connLock sync.Mutex
 }
 
 func NewPublisher(id string, opts ...Option) *Publisher {
 	options := SetupOptions(opts...)
-	return &Publisher{id: id, opts: options}
+	return &Publisher{
+		id:   id,
+		opts: options,
+		conn: nil,
+	}
+}
+
+// New method to ensure a persistent connection.
+func (p *Publisher) ensureConnection(ctx context.Context) error {
+	p.connLock.Lock()
+	defer p.connLock.Unlock()
+	if p.conn != nil {
+		return nil
+	}
+	var err error
+	delay := p.opts.initialDelay
+	for i := 0; i < p.opts.maxRetries; i++ {
+		var conn net.Conn
+		conn, err = GetConnection(p.opts.brokerAddr, p.opts.tlsConfig)
+		if err == nil {
+			p.conn = conn
+			return nil
+		}
+		sleepDuration := utils.CalculateJitter(delay, p.opts.jitterPercent)
+		log.Printf("PUBLISHER - ensureConnection failed: %v, attempt %d/%d, retrying in %v...", err, i+1, p.opts.maxRetries, sleepDuration)
+		time.Sleep(sleepDuration)
+		delay *= 2
+		if delay > p.opts.maxBackoff {
+			delay = p.opts.maxBackoff
+		}
+	}
+	return fmt.Errorf("failed to connect to broker after retries: %w", err)
+}
+
+// Modified Publish method that uses the persistent connection.
+func (p *Publisher) Publish(ctx context.Context, task Task, queue string) error {
+	// Ensure connection is established.
+	if err := p.ensureConnection(ctx); err != nil {
+		return err
+	}
+	delay := p.opts.initialDelay
+	for i := 0; i < p.opts.maxRetries; i++ {
+		// Use the persistent connection.
+		p.connLock.Lock()
+		conn := p.conn
+		p.connLock.Unlock()
+		err := p.send(ctx, queue, task, conn, consts.PUBLISH)
+		if err == nil {
+			return nil
+		}
+		log.Printf("PUBLISHER - Failed publishing: %v, attempt %d/%d, retrying...", err, i+1, p.opts.maxRetries)
+		// On error, close and reset the connection.
+		p.connLock.Lock()
+		if p.conn != nil {
+			p.conn.Close()
+			p.conn = nil
+		}
+		p.connLock.Unlock()
+		sleepDuration := utils.CalculateJitter(delay, p.opts.jitterPercent)
+		time.Sleep(sleepDuration)
+		delay *= 2
+		if delay > p.opts.maxBackoff {
+			delay = p.opts.maxBackoff
+		}
+		// Ensure connection is re-established.
+		if err := p.ensureConnection(ctx); err != nil {
+			return err
+		}
+	}
+	return fmt.Errorf("failed to publish after retries")
 }
 
 func (p *Publisher) send(ctx context.Context, queue string, task Task, conn net.Conn, command consts.CMD) error {
@@ -1024,17 +1100,6 @@ func (p *Publisher) waitForResponse(ctx context.Context, conn net.Conn) Result {
 	}
 	err = fmt.Errorf("expected RESPONSE, got: %v", msg.Command)
 	return Result{Error: err}
-}
-
-func (p *Publisher) Publish(ctx context.Context, task Task, queue string) error {
-	conn, err := GetConnection(p.opts.brokerAddr, p.opts.tlsConfig)
-	if err != nil {
-		return fmt.Errorf("failed to connect to broker: %w", err)
-	}
-	defer func() {
-		_ = conn.Close()
-	}()
-	return p.send(ctx, queue, task, conn, consts.PUBLISH)
 }
 
 func (p *Publisher) onClose(_ context.Context, conn net.Conn) error {
