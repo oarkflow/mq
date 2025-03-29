@@ -103,10 +103,3 @@ func WithGracefulShutdown(timeout time.Duration) PoolOption {
 		p.gracefulShutdownTimeout = timeout
 	}
 }
-
-// [Enhancements]
-// - Add WithWarningThresholds(thresholds ThresholdConfig) option to flag high memory or long-running tasks.
-// - Add WithDiagnostics(enabled bool) to toggle detailed diagnostics logging.
-// - Add WithMetricsRegistry(registry MetricsRegistry) to inject a metrics/monitoring system.
-// - Add WithCircuitBreaker(config CircuitBreakerConfig) for pausing task intake on error spikes.
-// - Add WithGracefulShutdown(timeout time.Duration) to configure the shutdown phase.

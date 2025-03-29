@@ -395,12 +395,3 @@ func (wp *Pool) Metrics() Metrics {
 }
 
 func (wp *Pool) Scheduler() *Scheduler { return wp.scheduler }
-
-// [Enhancement Suggestions]
-// - Introduce a graceful shutdown sequence that prevents accepting new tasks.
-// - Integrate a circuit breaker pattern to temporarily pause task processing if errors spike.
-// - Emit events or metrics (with timestamps/retries) for monitoring worker health.
-// - Refine the worker autoscaling or rate-limiting to respond to load changes.
-// - Add proper context propagation (including cancellation and deadlines) across goroutines.
-// - Incorporate centralized error logging and alerting based on failure types.
-// - Consider unit tests and stress tests hooks to simulate production load.
