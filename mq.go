@@ -125,16 +125,13 @@ type RateLimiter struct {
 	C chan struct{}
 }
 
+// Modified RateLimiter: use blocking send to avoid discarding tokens.
 func NewRateLimiter(rate int, burst int) *RateLimiter {
 	rl := &RateLimiter{C: make(chan struct{}, burst)}
 	ticker := time.NewTicker(time.Second / time.Duration(rate))
 	go func() {
 		for range ticker.C {
-			select {
-			case rl.C <- struct{}{}:
-			default:
-				// bucket full; token discarded
-			}
+			rl.C <- struct{}{} // blocking send; tokens queue for deferred task processing
 		}
 	}()
 	return rl

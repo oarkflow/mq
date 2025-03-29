@@ -130,6 +130,8 @@ func defaultOptions() *Options {
 		maxMemoryLoad:        5000000,
 		storage:              NewMemoryTaskStorage(10 * time.Minute),
 		logger:               logger.NewDefaultLogger(),
+		BrokerRateLimiter:    NewRateLimiter(10, 5),
+		ConsumerRateLimiter:  NewRateLimiter(10, 5),
 	}
 }
 
@@ -252,5 +254,29 @@ func WithCallback(val ...func(context.Context, Result) Result) Option {
 func WithJitterPercent(val float64) Option {
 	return func(opts *Options) {
 		opts.jitterPercent = val
+	}
+}
+
+func WithBrokerRateLimiter(rate int, burst int) Option {
+	return func(opts *Options) {
+		opts.BrokerRateLimiter = NewRateLimiter(rate, burst)
+	}
+}
+
+func WithConsumerRateLimiter(rate int, burst int) Option {
+	return func(opts *Options) {
+		opts.ConsumerRateLimiter = NewRateLimiter(rate, burst)
+	}
+}
+
+func DisableBrokerRateLimit() Option {
+	return func(opts *Options) {
+		opts.BrokerRateLimiter = nil
+	}
+}
+
+func DisableConsumerRateLimit() Option {
+	return func(opts *Options) {
+		opts.ConsumerRateLimiter = nil
 	}
 }
