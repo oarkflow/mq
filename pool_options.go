@@ -6,13 +6,14 @@ import (
 
 // New type definitions for enhancements
 type ThresholdConfig struct {
-	HighMemory    int64         // e.g. in bytes
-	LongExecution time.Duration // e.g. warning if task execution exceeds
+	HighMemory    int64
+	LongExecution time.Duration
 }
 
 type MetricsRegistry interface {
 	Register(metricName string, value interface{})
-	// ...other methods as needed...
+	Increment(metricName string)
+	Get(metricName string) interface{}
 }
 
 type CircuitBreakerConfig struct {
@@ -25,7 +26,6 @@ type PoolOption func(*Pool)
 
 func WithTaskQueueSize(size int) PoolOption {
 	return func(p *Pool) {
-		// Initialize the task queue with the specified size
 		p.taskQueue = make(PriorityQueue, 0, size)
 	}
 }
@@ -72,8 +72,6 @@ func WithTaskStorage(storage TaskStorage) PoolOption {
 	}
 }
 
-// New option functions:
-
 func WithWarningThresholds(thresholds ThresholdConfig) PoolOption {
 	return func(p *Pool) {
 		p.thresholds = thresholds
@@ -101,5 +99,11 @@ func WithCircuitBreaker(config CircuitBreakerConfig) PoolOption {
 func WithGracefulShutdown(timeout time.Duration) PoolOption {
 	return func(p *Pool) {
 		p.gracefulShutdownTimeout = timeout
+	}
+}
+
+func WithPlugin(plugin Plugin) PoolOption {
+	return func(p *Pool) {
+		p.plugins = append(p.plugins, plugin)
 	}
 }

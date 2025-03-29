@@ -8,14 +8,16 @@ import (
 	"syscall"
 	"time"
 
-	v1 "github.com/oarkflow/mq/v1"
+	"github.com/oarkflow/json"
+
+	v1 "github.com/oarkflow/mq"
 )
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	pool := v1.NewPool(5,
-		v1.WithTaskStorage(v1.NewInMemoryTaskStorage()),
+		v1.WithTaskStorage(v1.NewMemoryTaskStorage(10*time.Minute)),
 		v1.WithHandler(func(ctx context.Context, payload *v1.Task) v1.Result {
 			v1.Logger.Info().Str("taskID", payload.ID).Msg("Processing task payload")
 			time.Sleep(500 * time.Millisecond)
@@ -43,14 +45,14 @@ func main() {
 		metrics := pool.Metrics()
 		v1.Logger.Info().Msgf("Metrics: %+v", metrics)
 		pool.Stop()
-		v1.Logger.Info().Msgf("Dead Letter Queue has %d tasks", len(v1.DLQ.Task()))
+		v1.Logger.Info().Msgf("Dead Letter Queue has %d tasks", len(pool.DLQ.Task()))
 	}()
 
 	go func() {
 		for i := 0; i < 50; i++ {
 			task := &v1.Task{
 				ID:      "",
-				Payload: fmt.Sprintf("Task Payload %d", i),
+				Payload: json.RawMessage(fmt.Sprintf("Task Payload %d", i)),
 			}
 			if err := pool.EnqueueTask(context.Background(), task, rand.Intn(10)); err != nil {
 				v1.Logger.Error().Err(err).Msg("Failed to enqueue task")

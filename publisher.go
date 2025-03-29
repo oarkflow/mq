@@ -10,6 +10,7 @@ import (
 	"github.com/oarkflow/json"
 
 	"github.com/oarkflow/json/jsonparser"
+
 	"github.com/oarkflow/mq/codec"
 	"github.com/oarkflow/mq/consts"
 )
@@ -77,16 +78,18 @@ func (p *Publisher) Publish(ctx context.Context, task Task, queue string) error 
 	if err != nil {
 		return fmt.Errorf("failed to connect to broker: %w", err)
 	}
-	defer conn.Close()
+	defer func() {
+		_ = conn.Close()
+	}()
 	return p.send(ctx, queue, task, conn, consts.PUBLISH)
 }
 
-func (p *Publisher) onClose(ctx context.Context, conn net.Conn) error {
+func (p *Publisher) onClose(_ context.Context, conn net.Conn) error {
 	fmt.Println("Publisher Connection closed", p.id, conn.RemoteAddr())
 	return nil
 }
 
-func (p *Publisher) onError(ctx context.Context, conn net.Conn, err error) {
+func (p *Publisher) onError(_ context.Context, conn net.Conn, err error) {
 	fmt.Println("Error reading from publisher connection:", err, conn.RemoteAddr())
 }
 
@@ -99,7 +102,9 @@ func (p *Publisher) Request(ctx context.Context, task Task, queue string) Result
 		err = fmt.Errorf("failed to connect to broker: %w", err)
 		return Result{Error: err}
 	}
-	defer conn.Close()
+	defer func() {
+		_ = conn.Close()
+	}()
 	err = p.send(ctx, queue, task, conn, consts.PUBLISH)
 	resultCh := make(chan Result)
 	go func() {

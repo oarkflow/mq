@@ -2,13 +2,18 @@ package mq
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/oarkflow/log"
 )
+
+var Logger = log.DefaultLogger
 
 type ScheduleOptions struct {
 	Handler   Handler
@@ -20,7 +25,7 @@ type ScheduleOptions struct {
 
 type SchedulerOption func(*ScheduleOptions)
 
-// Helper functions to create SchedulerOptions
+// WithSchedulerHandler Helper functions to create SchedulerOptions
 func WithSchedulerHandler(handler Handler) SchedulerOption {
 	return func(opts *ScheduleOptions) {
 		opts.Handler = handler
@@ -177,16 +182,14 @@ func parseCronSpec(cronSpec string) (CronSchedule, error) {
 }
 
 func cronFieldToString(field string, fieldName string) (string, error) {
-	switch field {
-	case "*":
+	if field == "*" {
 		return fmt.Sprintf("every %s", fieldName), nil
-	default:
-		values, err := parseCronValue(field)
-		if err != nil {
-			return "", fmt.Errorf("invalid %s field: %s", fieldName, err.Error())
-		}
-		return fmt.Sprintf("%s %s", strings.Join(values, ", "), fieldName), nil
 	}
+	values, err := parseCronValue(field)
+	if err != nil {
+		return "", fmt.Errorf("invalid %s field: %s", fieldName, err.Error())
+	}
+	return fmt.Sprintf("%s %s", strings.Join(values, ", "), fieldName), nil
 }
 
 func parseCronValue(field string) ([]string, error) {
@@ -223,6 +226,8 @@ type Scheduler struct {
 }
 
 func (s *Scheduler) Start() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	for _, task := range s.tasks {
 		go s.schedule(task)
 	}
@@ -279,46 +284,81 @@ func (s *Scheduler) schedule(task ScheduledTask) {
 	}
 }
 
+func startSpan(operation string) (context.Context, func()) {
+	startTime := time.Now()
+	Logger.Info().Str("operation", operation).Msg("Span started")
+	ctx := context.WithValue(context.Background(), "traceID", fmt.Sprintf("%d", startTime.UnixNano()))
+	return ctx, func() {
+		duration := time.Since(startTime)
+		Logger.Info().Str("operation", operation).Msgf("Span ended; duration: %v", duration)
+	}
+}
+
+func acquireDistributedLock(taskID string) bool {
+	Logger.Info().Str("taskID", taskID).Msg("Acquiring distributed lock (stub)")
+	return true
+}
+
+func releaseDistributedLock(taskID string) {
+	Logger.Info().Str("taskID", taskID).Msg("Releasing distributed lock (stub)")
+}
+
+var taskPool = sync.Pool{
+	New: func() interface{} { return new(Task) },
+}
+var queueTaskPool = sync.Pool{
+	New: func() interface{} { return new(QueueTask) },
+}
+
+func getQueueTask() *QueueTask {
+	return queueTaskPool.Get().(*QueueTask)
+}
+
 // Enhance executeTask with circuit breaker and diagnostics logging support.
 func (s *Scheduler) executeTask(task ScheduledTask) {
-	if !task.config.Overlap && !s.pool.gracefulShutdown {
-		// Prevent overlapping execution if not allowed.
-		// ...existing code...
-	}
 	go func() {
-		// Recover from panic to keep scheduler running.
+		_, cancelSpan := startSpan("executeTask")
+		defer cancelSpan()
 		defer func() {
 			if r := recover(); r != nil {
-				fmt.Printf("Recovered from panic in scheduled task %s: %v\n", task.payload.ID, r)
+				Logger.Error().Str("taskID", task.payload.ID).Msgf("Recovered from panic: %v", r)
 			}
 		}()
 		start := time.Now()
+		for _, plug := range s.pool.plugins {
+			plug.BeforeTask(getQueueTask())
+		}
+		if !acquireDistributedLock(task.payload.ID) {
+			Logger.Warn().Str("taskID", task.payload.ID).Msg("Failed to acquire distributed lock")
+			return
+		}
+		defer releaseDistributedLock(task.payload.ID)
 		result := task.handler(task.ctx, task.payload)
 		execTime := time.Since(start).Milliseconds()
-		// Diagnostics logging if enabled.
 		if s.pool.diagnosticsEnabled {
-			s.pool.logger.Printf("Scheduled task %s executed in %d ms", task.payload.ID, execTime)
+			Logger.Info().Str("taskID", task.payload.ID).Msgf("Executed in %d ms", execTime)
 		}
-		// Circuit breaker check similar to pool.
 		if result.Error != nil && s.pool.circuitBreaker.Enabled {
 			newCount := atomic.AddInt32(&s.pool.circuitBreakerFailureCount, 1)
 			if newCount >= int32(s.pool.circuitBreaker.FailureThreshold) {
 				s.pool.circuitBreakerOpen = true
-				s.pool.logger.Println("Scheduler: circuit breaker opened due to errors")
+				Logger.Warn().Msg("Circuit breaker opened due to errors")
 				go func() {
 					time.Sleep(s.pool.circuitBreaker.ResetTimeout)
 					atomic.StoreInt32(&s.pool.circuitBreakerFailureCount, 0)
 					s.pool.circuitBreakerOpen = false
-					s.pool.logger.Println("Scheduler: circuit breaker reset")
+					Logger.Info().Msg("Circuit breaker reset to closed state")
 				}()
 			}
 		}
-		// Invoke callback if defined.
 		if task.config.Callback != nil {
 			_ = task.config.Callback(task.ctx, result)
 		}
 		task.executionHistory = append(task.executionHistory, ExecutionHistory{Timestamp: time.Now(), Result: result})
-		fmt.Printf("Executed scheduled task: %s\n", task.payload.ID)
+		for _, plug := range s.pool.plugins {
+			plug.AfterTask(getQueueTask(), result)
+		}
+		Logger.Info().Str("taskID", task.payload.ID).Msg("Scheduled task executed")
 	}()
 }
 
@@ -354,7 +394,7 @@ func (task ScheduledTask) getNextRunTime(now time.Time) time.Time {
 func (task ScheduledTask) getNextCronRunTime(now time.Time) time.Time {
 	cronSpecs, err := parseCronSpec(task.schedule.CronSpec)
 	if err != nil {
-		fmt.Println(fmt.Sprintf("Invalid CRON spec format: %s", err.Error()))
+		Logger.Error().Err(err).Msg("Invalid CRON spec")
 		return now
 	}
 	nextRun := now
@@ -367,40 +407,38 @@ func (task ScheduledTask) getNextCronRunTime(now time.Time) time.Time {
 }
 
 func (task ScheduledTask) applyCronField(t time.Time, fieldSpec string, unit string) time.Time {
-	switch fieldSpec {
-	case "*":
-		return t
-	default:
-		value, _ := strconv.Atoi(fieldSpec)
-		switch unit {
-		case "minute":
-			if t.Minute() > value {
-				t = t.Add(time.Hour)
-			}
-			t = time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), value, 0, 0, t.Location())
-		case "hour":
-			if t.Hour() > value {
-				t = t.AddDate(0, 0, 1)
-			}
-			t = time.Date(t.Year(), t.Month(), t.Day(), value, t.Minute(), 0, 0, t.Location())
-		case "day":
-			if t.Day() > value {
-				t = t.AddDate(0, 1, 0)
-			}
-			t = time.Date(t.Year(), t.Month(), value, t.Hour(), t.Minute(), 0, 0, t.Location())
-		case "month":
-			if int(t.Month()) > value {
-				t = t.AddDate(1, 0, 0)
-			}
-			t = time.Date(t.Year(), time.Month(value), t.Day(), t.Hour(), t.Minute(), 0, 0, t.Location())
-		case "weekday":
-			weekday := time.Weekday(value)
-			for t.Weekday() != weekday {
-				t = t.AddDate(0, 0, 1)
-			}
-		}
+	if fieldSpec == "*" {
 		return t
 	}
+	value, _ := strconv.Atoi(fieldSpec)
+	switch unit {
+	case "minute":
+		if t.Minute() > value {
+			t = t.Add(time.Hour)
+		}
+		t = time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), value, 0, 0, t.Location())
+	case "hour":
+		if t.Hour() > value {
+			t = t.AddDate(0, 0, 1)
+		}
+		t = time.Date(t.Year(), t.Month(), t.Day(), value, t.Minute(), 0, 0, t.Location())
+	case "day":
+		if t.Day() > value {
+			t = t.AddDate(0, 1, 0)
+		}
+		t = time.Date(t.Year(), t.Month(), value, t.Hour(), t.Minute(), 0, 0, t.Location())
+	case "month":
+		if int(t.Month()) > value {
+			t = t.AddDate(1, 0, 0)
+		}
+		t = time.Date(t.Year(), time.Month(value), t.Day(), t.Hour(), t.Minute(), 0, 0, t.Location())
+	case "weekday":
+		weekday := time.Weekday(value)
+		for t.Weekday() != weekday {
+			t = t.AddDate(0, 0, 1)
+		}
+	}
+	return t
 }
 
 func nextWeekday(t time.Time, weekday time.Weekday) time.Time {
@@ -410,12 +448,21 @@ func nextWeekday(t time.Time, weekday time.Weekday) time.Time {
 	}
 	return t.AddDate(0, 0, daysUntil)
 }
+func validateTaskInput(task *Task) error {
+	if task.Payload == nil {
+		return errors.New("task payload cannot be nil")
+	}
+	Logger.Info().Str("taskID", task.ID).Msg("Task validated")
+	return nil
+}
 
 func (s *Scheduler) AddTask(ctx context.Context, payload *Task, opts ...SchedulerOption) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
-	// Create a default options instance
+	if err := validateTaskInput(payload); err != nil {
+		Logger.Error().Err(err).Msg("Invalid task input")
+		return
+	}
 	options := defaultSchedulerOptions()
 	for _, opt := range opts {
 		opt(options)
@@ -427,9 +474,7 @@ func (s *Scheduler) AddTask(ctx context.Context, payload *Task, opts ...Schedule
 		options.Callback = s.pool.callback
 	}
 	stop := make(chan struct{})
-
-	// Create a new ScheduledTask using the provided options
-	s.tasks = append(s.tasks, ScheduledTask{
+	newTask := ScheduledTask{
 		ctx:     ctx,
 		handler: options.Handler,
 		payload: payload,
@@ -442,10 +487,9 @@ func (s *Scheduler) AddTask(ctx context.Context, payload *Task, opts ...Schedule
 			Interval:  options.Interval,
 			Recurring: options.Recurring,
 		},
-	})
-
-	// Start scheduling the task
-	go s.schedule(s.tasks[len(s.tasks)-1])
+	}
+	s.tasks = append(s.tasks, newTask)
+	go s.schedule(newTask)
 }
 
 func (s *Scheduler) RemoveTask(payloadID string) {
