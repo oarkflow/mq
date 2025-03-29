@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"math/rand"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -49,6 +50,17 @@ type Pool struct {
 	taskQueueLock          sync.Mutex
 	numOfWorkers           int32
 	paused                 bool
+	logger                 *log.Logger
+	gracefulShutdown       bool
+
+	// New fields for enhancements:
+	thresholds                 ThresholdConfig
+	diagnosticsEnabled         bool
+	metricsRegistry            MetricsRegistry
+	circuitBreaker             CircuitBreakerConfig
+	circuitBreakerOpen         bool
+	circuitBreakerFailureCount int32
+	gracefulShutdownTimeout    time.Duration
 }
 
 func NewPool(numOfWorkers int, opts ...PoolOption) *Pool {
@@ -60,6 +72,7 @@ func NewPool(numOfWorkers int, opts ...PoolOption) *Pool {
 		idleTimeout:     5 * time.Minute,
 		backoffDuration: 2 * time.Second,
 		maxRetries:      3, // Set max retries for failed tasks
+		logger:          log.Default(),
 	}
 	pool.scheduler = NewScheduler(pool)
 	pool.taskAvailableCond = sync.NewCond(&sync.Mutex{})
@@ -147,17 +160,51 @@ func (wp *Pool) handleTask(task *QueueTask) {
 	result := wp.handler(ctx, task.payload)
 	executionTime := time.Since(startTime).Milliseconds()
 	atomic.AddInt64(&wp.metrics.ExecutionTime, executionTime)
+
+	// Warning thresholds check
+	if wp.thresholds.LongExecution > 0 && executionTime > int64(wp.thresholds.LongExecution.Milliseconds()) {
+		wp.logger.Printf("Warning: Task %s exceeded execution time threshold: %d ms", task.payload.ID, executionTime)
+	}
+	if wp.thresholds.HighMemory > 0 && taskSize > wp.thresholds.HighMemory {
+		wp.logger.Printf("Warning: Task %s memory usage %d exceeded threshold", task.payload.ID, taskSize)
+	}
+
 	if result.Error != nil {
 		atomic.AddInt64(&wp.metrics.ErrorCount, 1)
-		log.Printf("Error processing task %s: %v", task.payload.ID, result.Error)
+		wp.logger.Printf("Error processing task %s: %v", task.payload.ID, result.Error)
 		wp.backoffAndStore(task)
+
+		// Circuit breaker check
+		if wp.circuitBreaker.Enabled {
+			newCount := atomic.AddInt32(&wp.circuitBreakerFailureCount, 1)
+			if newCount >= int32(wp.circuitBreaker.FailureThreshold) {
+				wp.circuitBreakerOpen = true
+				wp.logger.Println("Circuit breaker opened due to errors")
+				go func() {
+					time.Sleep(wp.circuitBreaker.ResetTimeout)
+					atomic.StoreInt32(&wp.circuitBreakerFailureCount, 0)
+					wp.circuitBreakerOpen = false
+					wp.logger.Println("Circuit breaker reset")
+				}()
+			}
+		}
 	} else {
 		atomic.AddInt64(&wp.metrics.CompletedTasks, 1)
+		// Reset failure count on success if using circuit breaker
+		if wp.circuitBreaker.Enabled {
+			atomic.StoreInt32(&wp.circuitBreakerFailureCount, 0)
+		}
 	}
+
+	// Diagnostics logging if enabled
+	if wp.diagnosticsEnabled {
+		wp.logger.Printf("Task %s executed in %d ms", task.payload.ID, executionTime)
+	}
+
 	if wp.callback != nil {
 		if err := wp.callback(ctx, result); err != nil {
 			atomic.AddInt64(&wp.metrics.ErrorCount, 1)
-			log.Printf("Error in callback for task %s: %v", task.payload.ID, err)
+			wp.logger.Printf("Error in callback for task %s: %v", task.payload.ID, err)
 		}
 	}
 	_ = wp.taskStorage.DeleteTask(task.payload.ID)
@@ -168,9 +215,14 @@ func (wp *Pool) backoffAndStore(task *QueueTask) {
 	if task.retryCount < wp.maxRetries {
 		task.retryCount++
 		wp.storeInOverflow(task)
-		time.Sleep(wp.backoffDuration)
+		// Exponential backoff with jitter:
+		backoff := wp.backoffDuration * (1 << (task.retryCount - 1))
+		jitter := time.Duration(rand.Int63n(int64(backoff) / 2))
+		sleepDuration := backoff + jitter
+		wp.logger.Printf("Task %s retry %d: sleeping for %s", task.payload.ID, task.retryCount, sleepDuration)
+		time.Sleep(sleepDuration)
 	} else {
-		log.Printf("Task %s failed after maximum retries", task.payload.ID)
+		wp.logger.Printf("Task %s failed after maximum retries", task.payload.ID)
 	}
 }
 
@@ -226,6 +278,11 @@ func (wp *Pool) adjustWorkers(newWorkerCount int) {
 }
 
 func (wp *Pool) EnqueueTask(ctx context.Context, payload *Task, priority int) error {
+	// Check circuit breaker state
+	if wp.circuitBreaker.Enabled && wp.circuitBreakerOpen {
+		return fmt.Errorf("circuit breaker open, task rejected")
+	}
+
 	if payload.ID == "" {
 		payload.ID = NewID()
 	}
@@ -303,9 +360,23 @@ func (wp *Pool) drainOverflowBuffer() {
 }
 
 func (wp *Pool) Stop() {
+	wp.gracefulShutdown = true
+	wp.Pause()
 	close(wp.stop)
-	wp.wg.Wait()
-	wp.taskCompletionNotifier.Wait()
+
+	// Graceful shutdown with timeout support
+	done := make(chan struct{})
+	go func() {
+		wp.wg.Wait()
+		wp.taskCompletionNotifier.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		// All workers finished gracefully.
+	case <-time.After(wp.gracefulShutdownTimeout):
+		wp.logger.Println("Graceful shutdown timeout reached")
+	}
 	if wp.completionCallback != nil {
 		wp.completionCallback()
 	}
@@ -324,3 +395,12 @@ func (wp *Pool) Metrics() Metrics {
 }
 
 func (wp *Pool) Scheduler() *Scheduler { return wp.scheduler }
+
+// [Enhancement Suggestions]
+// - Introduce a graceful shutdown sequence that prevents accepting new tasks.
+// - Integrate a circuit breaker pattern to temporarily pause task processing if errors spike.
+// - Emit events or metrics (with timestamps/retries) for monitoring worker health.
+// - Refine the worker autoscaling or rate-limiting to respond to load changes.
+// - Add proper context propagation (including cancellation and deadlines) across goroutines.
+// - Incorporate centralized error logging and alerting based on failure types.
+// - Consider unit tests and stress tests hooks to simulate production load.

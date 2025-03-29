@@ -4,6 +4,23 @@ import (
 	"time"
 )
 
+// New type definitions for enhancements
+type ThresholdConfig struct {
+	HighMemory    int64         // e.g. in bytes
+	LongExecution time.Duration // e.g. warning if task execution exceeds
+}
+
+type MetricsRegistry interface {
+	Register(metricName string, value interface{})
+	// ...other methods as needed...
+}
+
+type CircuitBreakerConfig struct {
+	Enabled          bool
+	FailureThreshold int
+	ResetTimeout     time.Duration
+}
+
 type PoolOption func(*Pool)
 
 func WithTaskQueueSize(size int) PoolOption {
@@ -54,3 +71,42 @@ func WithTaskStorage(storage TaskStorage) PoolOption {
 		p.taskStorage = storage
 	}
 }
+
+// New option functions:
+
+func WithWarningThresholds(thresholds ThresholdConfig) PoolOption {
+	return func(p *Pool) {
+		p.thresholds = thresholds
+	}
+}
+
+func WithDiagnostics(enabled bool) PoolOption {
+	return func(p *Pool) {
+		p.diagnosticsEnabled = enabled
+	}
+}
+
+func WithMetricsRegistry(registry MetricsRegistry) PoolOption {
+	return func(p *Pool) {
+		p.metricsRegistry = registry
+	}
+}
+
+func WithCircuitBreaker(config CircuitBreakerConfig) PoolOption {
+	return func(p *Pool) {
+		p.circuitBreaker = config
+	}
+}
+
+func WithGracefulShutdown(timeout time.Duration) PoolOption {
+	return func(p *Pool) {
+		p.gracefulShutdownTimeout = timeout
+	}
+}
+
+// [Enhancements]
+// - Add WithWarningThresholds(thresholds ThresholdConfig) option to flag high memory or long-running tasks.
+// - Add WithDiagnostics(enabled bool) to toggle detailed diagnostics logging.
+// - Add WithMetricsRegistry(registry MetricsRegistry) to inject a metrics/monitoring system.
+// - Add WithCircuitBreaker(config CircuitBreakerConfig) for pausing task intake on error spikes.
+// - Add WithGracefulShutdown(timeout time.Duration) to configure the shutdown phase.

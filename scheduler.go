@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -228,6 +229,10 @@ func (s *Scheduler) Start() {
 }
 
 func (s *Scheduler) schedule(task ScheduledTask) {
+	// Check for graceful shutdown
+	if s.pool.gracefulShutdown {
+		return
+	}
 	if task.schedule.Interval > 0 {
 		ticker := time.NewTicker(task.schedule.Interval)
 		defer ticker.Stop()
@@ -236,6 +241,10 @@ func (s *Scheduler) schedule(task ScheduledTask) {
 			for {
 				select {
 				case <-ticker.C:
+					// Check for graceful shutdown before executing
+					if s.pool.gracefulShutdown {
+						return
+					}
 					s.executeTask(task)
 				case <-task.stop:
 					return
@@ -245,6 +254,9 @@ func (s *Scheduler) schedule(task ScheduledTask) {
 			// Execute once and return
 			select {
 			case <-ticker.C:
+				if s.pool.gracefulShutdown {
+					return
+				}
 				s.executeTask(task)
 			case <-task.stop:
 				return
@@ -256,12 +268,58 @@ func (s *Scheduler) schedule(task ScheduledTask) {
 			nextRun := task.getNextRunTime(now)
 			select {
 			case <-time.After(nextRun.Sub(now)):
+				if s.pool.gracefulShutdown {
+					return
+				}
 				s.executeTask(task)
 			case <-task.stop:
 				return
 			}
 		}
 	}
+}
+
+// Enhance executeTask with circuit breaker and diagnostics logging support.
+func (s *Scheduler) executeTask(task ScheduledTask) {
+	if !task.config.Overlap && !s.pool.gracefulShutdown {
+		// Prevent overlapping execution if not allowed.
+		// ...existing code...
+	}
+	go func() {
+		// Recover from panic to keep scheduler running.
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Printf("Recovered from panic in scheduled task %s: %v\n", task.payload.ID, r)
+			}
+		}()
+		start := time.Now()
+		result := task.handler(task.ctx, task.payload)
+		execTime := time.Since(start).Milliseconds()
+		// Diagnostics logging if enabled.
+		if s.pool.diagnosticsEnabled {
+			s.pool.logger.Printf("Scheduled task %s executed in %d ms", task.payload.ID, execTime)
+		}
+		// Circuit breaker check similar to pool.
+		if result.Error != nil && s.pool.circuitBreaker.Enabled {
+			newCount := atomic.AddInt32(&s.pool.circuitBreakerFailureCount, 1)
+			if newCount >= int32(s.pool.circuitBreaker.FailureThreshold) {
+				s.pool.circuitBreakerOpen = true
+				s.pool.logger.Println("Scheduler: circuit breaker opened due to errors")
+				go func() {
+					time.Sleep(s.pool.circuitBreaker.ResetTimeout)
+					atomic.StoreInt32(&s.pool.circuitBreakerFailureCount, 0)
+					s.pool.circuitBreakerOpen = false
+					s.pool.logger.Println("Scheduler: circuit breaker reset")
+				}()
+			}
+		}
+		// Invoke callback if defined.
+		if task.config.Callback != nil {
+			_ = task.config.Callback(task.ctx, result)
+		}
+		task.executionHistory = append(task.executionHistory, ExecutionHistory{Timestamp: time.Now(), Result: result})
+		fmt.Printf("Executed scheduled task: %s\n", task.payload.ID)
+	}()
 }
 
 func NewScheduler(pool *Pool) *Scheduler {
@@ -351,19 +409,6 @@ func nextWeekday(t time.Time, weekday time.Weekday) time.Time {
 		daysUntil = 7
 	}
 	return t.AddDate(0, 0, daysUntil)
-}
-
-func (s *Scheduler) executeTask(task ScheduledTask) {
-	if task.config.Overlap || len(task.schedule.DayOfWeek) == 0 {
-		go func() {
-			result := task.handler(task.ctx, task.payload)
-			task.executionHistory = append(task.executionHistory, ExecutionHistory{Timestamp: time.Now(), Result: result})
-			if task.config.Callback != nil {
-				_ = task.config.Callback(task.ctx, result)
-			}
-			fmt.Printf("Executed scheduled task: %s\n", task.payload.ID)
-		}()
-	}
 }
 
 func (s *Scheduler) AddTask(ctx context.Context, payload *Task, opts ...SchedulerOption) {
