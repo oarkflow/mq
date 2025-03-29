@@ -27,6 +27,31 @@ func startSpan(operation string) (context.Context, func()) {
 	}
 }
 
+var taskPool = sync.Pool{
+	New: func() interface{} { return new(Task) },
+}
+var queueTaskPool = sync.Pool{
+	New: func() interface{} { return new(QueueTask) },
+}
+
+func getTask() *Task {
+	return taskPool.Get().(*Task)
+}
+
+func putTask(t *Task) {
+	*t = Task{}
+	taskPool.Put(t)
+}
+
+func getQueueTask() *QueueTask {
+	return queueTaskPool.Get().(*QueueTask)
+}
+
+func putQueueTask(qt *QueueTask) {
+	*qt = QueueTask{}
+	queueTaskPool.Put(qt)
+}
+
 type MetricsRegistry interface {
 	Register(metricName string, value interface{})
 	Increment(metricName string)
@@ -102,8 +127,9 @@ type DynamicConfig struct {
 }
 
 var config = &DynamicConfig{
-	Timeout:         10 * time.Second,
-	BatchSize:       1,
+	Timeout:   10 * time.Second,
+	BatchSize: 1,
+
 	MaxMemoryLoad:   100 * 1024 * 1024,
 	IdleTimeout:     5 * time.Minute,
 	BackoffDuration: 2 * time.Second,
@@ -177,13 +203,18 @@ func (dp *DefaultPlugin) AfterTask(task *QueueTask, result Result) {
 	logger.Info().Str("taskID", task.payload.ID).Msg("AfterTask plugin invoked")
 }
 
+// acquireDistributedLock now simulates a distributed lock attempt.
+// In production, replace this with a call to a distributed lock service.
 func acquireDistributedLock(taskID string) bool {
-
+	// For example, attempt to get a lock from Redis/etcd.
+	// Return true if lock is acquired; false otherwise.
+	logger.Info().Str("taskID", taskID).Msg("Acquiring distributed lock (stub)")
 	return true
 }
 
 func releaseDistributedLock(taskID string) {
-
+	// Release the lock in your distributed lock service.
+	logger.Info().Str("taskID", taskID).Msg("Releasing distributed lock (stub)")
 }
 
 func validateTaskInput(task *Task) error {
@@ -491,17 +522,15 @@ func (s *Scheduler) executeTask(task ScheduledTask) {
 		}()
 		start := time.Now()
 		for _, plug := range s.pool.plugins {
-			plug.BeforeTask(&QueueTask{payload: task.payload})
+			plug.BeforeTask(getQueueTask())
 		}
 		if !acquireDistributedLock(task.payload.ID) {
 			logger.Warn().Str("taskID", task.payload.ID).Msg("Failed to acquire distributed lock")
 			return
 		}
 		defer releaseDistributedLock(task.payload.ID)
-
 		result := task.handler(task.ctx, task.payload)
 		execTime := time.Since(start).Milliseconds()
-
 		if s.pool.diagnosticsEnabled {
 			logger.Info().Str("taskID", task.payload.ID).Msgf("Executed in %d ms", execTime)
 		}
@@ -523,7 +552,7 @@ func (s *Scheduler) executeTask(task ScheduledTask) {
 		}
 		task.executionHistory = append(task.executionHistory, ExecutionHistory{Timestamp: time.Now(), Result: result})
 		for _, plug := range s.pool.plugins {
-			plug.AfterTask(&QueueTask{payload: task.payload}, result)
+			plug.AfterTask(getQueueTask(), result)
 		}
 		logger.Info().Str("taskID", task.payload.ID).Msg("Scheduled task executed")
 	}()
@@ -910,10 +939,6 @@ func (wp *Pool) adjustWorkers(newWorkerCount int) {
 }
 
 func (wp *Pool) EnqueueTask(ctx context.Context, payload *Task, priority int) error {
-	if atomic.LoadInt64(&wp.metrics.TotalMemoryUsed)+int64(SizeOf(payload)) > wp.maxMemoryLoad {
-		logger.Warn().Str("taskID", payload.ID).Msg("Max memory load reached; rejecting task")
-		return fmt.Errorf("max memory load reached, task rejected")
-	}
 	if wp.circuitBreaker.Enabled && wp.circuitBreakerOpen {
 		return fmt.Errorf("circuit breaker open, task rejected")
 	}
@@ -923,18 +948,17 @@ func (wp *Pool) EnqueueTask(ctx context.Context, payload *Task, priority int) er
 	if payload.ID == "" {
 		payload.ID = NewID()
 	}
-	task := &QueueTask{ctx: ctx, payload: payload, priority: priority}
+	task := getQueueTask()
+	task.ctx = ctx
+	task.payload = payload
+	task.priority = priority
+	task.retryCount = 0
 	logger.Info().Str("taskID", payload.ID).Msg("Enqueuing task")
 	if err := wp.taskStorage.SaveTask(task); err != nil {
 		return err
 	}
 	wp.taskQueueLock.Lock()
 	defer wp.taskQueueLock.Unlock()
-
-	/*if atomic.LoadInt64(&wp.metrics.TotalMemoryUsed)+taskSize > wp.maxMemoryLoad {
-		wp.storeInOverflow(task)
-		return fmt.Errorf("max memory load reached, task stored in overflow buffer")
-	}*/
 	heap.Push(&wp.taskQueue, task)
 	wp.Dispatch(wp.taskAvailableCond.Signal)
 	wp.taskCompletionNotifier.Add(1)
@@ -1049,15 +1073,37 @@ func (wp *Pool) dynamicWorkerScaler() {
 }
 
 func (wp *Pool) startHealthServer() {
-	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		status := "OK"
 		if wp.gracefulShutdown {
 			status = "shutting down"
 		}
-		fmt.Fprintf(w, "status: %s\nworkers: %d\nqueueLength: %d\n", status, atomic.LoadInt32(&wp.numOfWorkers), len(wp.taskQueue))
+		fmt.Fprintf(w, "status: %s\nworkers: %d\nqueueLength: %d\n",
+			status, atomic.LoadInt32(&wp.numOfWorkers), len(wp.taskQueue))
 	})
-	logger.Info().Msg("Starting health server on :8080")
-	http.ListenAndServe(":8080", nil)
+	server := &http.Server{
+		Addr:    ":8080",
+		Handler: mux,
+	}
+	go func() {
+		logger.Info().Msg("Starting health server on :8080")
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.Error().Err(err).Msg("Health server failed")
+		}
+	}()
+
+	// Listen for pool shutdown and gracefully stop the server.
+	go func() {
+		<-wp.stop
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := server.Shutdown(ctx); err != nil {
+			logger.Error().Err(err).Msg("Health server shutdown failed")
+		} else {
+			logger.Info().Msg("Health server shutdown gracefully")
+		}
+	}()
 }
 
 type ThresholdConfig struct {
@@ -1205,7 +1251,6 @@ func NewID() string {
 }
 
 func SizeOf(payload interface{}) int {
-
 	return 100
 }
 
