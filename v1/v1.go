@@ -1,76 +1,139 @@
-package main
+package v1
 
 import (
 	"container/heap"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"math/rand"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/oarkflow/log"
 )
 
-// ---------------------- Logger Setup ----------------------
+var Logger = log.DefaultLogger
 
-var logger = log.New(os.Stdout, "", log.LstdFlags)
+func startSpan(operation string) (context.Context, func()) {
+	startTime := time.Now()
+	Logger.Info().Str("operation", operation).Msg("Span started")
+	return context.Background(), func() {
+		duration := time.Since(startTime)
+		Logger.Info().Str("operation", operation).Msgf("Span ended; duration: %v", duration)
+	}
+}
 
-// ---------------------- Distributed Lock ----------------------
+var taskPool = sync.Pool{
+	New: func() interface{} { return new(Task) },
+}
+var queueTaskPool = sync.Pool{
+	New: func() interface{} { return new(QueueTask) },
+}
 
-// DummyDistributedLock simulates a distributed lock mechanism.
-type DummyDistributedLock struct {
-	locks map[string]struct{}
+func getTask() *Task {
+	return taskPool.Get().(*Task)
+}
+
+func putTask(t *Task) {
+	*t = Task{}
+	taskPool.Put(t)
+}
+
+func getQueueTask() *QueueTask {
+	return queueTaskPool.Get().(*QueueTask)
+}
+
+func putQueueTask(qt *QueueTask) {
+	*qt = QueueTask{}
+	queueTaskPool.Put(qt)
+}
+
+type MetricsRegistry interface {
+	Register(metricName string, value interface{})
+	Increment(metricName string)
+	Get(metricName string) interface{}
+}
+
+type InMemoryMetricsRegistry struct {
+	metrics map[string]int64
+	mu      sync.RWMutex
+}
+
+func NewInMemoryMetricsRegistry() *InMemoryMetricsRegistry {
+	return &InMemoryMetricsRegistry{
+		metrics: make(map[string]int64),
+	}
+}
+
+func (m *InMemoryMetricsRegistry) Register(metricName string, value interface{}) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if v, ok := value.(int64); ok {
+		m.metrics[metricName] = v
+		Logger.Info().Str("metric", metricName).Msgf("Registered metric: %d", v)
+	}
+}
+
+func (m *InMemoryMetricsRegistry) Increment(metricName string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.metrics[metricName]++
+}
+
+func (m *InMemoryMetricsRegistry) Get(metricName string) interface{} {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.metrics[metricName]
+}
+
+type DeadLetterQueue struct {
+	tasks []*QueueTask
 	mu    sync.Mutex
 }
 
-var distLock = &DummyDistributedLock{locks: make(map[string]struct{})}
-
-func acquireDistributedLock(taskID string) bool {
-	distLock.mu.Lock()
-	defer distLock.mu.Unlock()
-	if _, exists := distLock.locks[taskID]; exists {
-		logger.Printf("[WARN] Task %s lock already held", taskID)
-		return false
+func NewDeadLetterQueue() *DeadLetterQueue {
+	return &DeadLetterQueue{
+		tasks: make([]*QueueTask, 0),
 	}
-	distLock.locks[taskID] = struct{}{}
-	logger.Printf("[INFO] Acquired distributed lock for task %s", taskID)
-	return true
 }
 
-func releaseDistributedLock(taskID string) {
-	distLock.mu.Lock()
-	defer distLock.mu.Unlock()
-	delete(distLock.locks, taskID)
-	logger.Printf("[INFO] Released distributed lock for task %s", taskID)
+func (dlq *DeadLetterQueue) Task() []*QueueTask {
+	return dlq.tasks
 }
 
-// ---------------------- Dynamic Configuration ----------------------
+func (dlq *DeadLetterQueue) Add(task *QueueTask) {
+	dlq.mu.Lock()
+	defer dlq.mu.Unlock()
+	dlq.tasks = append(dlq.tasks, task)
+	Logger.Warn().Str("taskID", task.payload.ID).Msg("Task added to Dead Letter Queue")
+}
+
+var DLQ = NewDeadLetterQueue()
 
 type WarningThresholds struct {
-	HighMemory    int64         `json:"high_memory"`
-	LongExecution time.Duration `json:"long_execution"`
+	HighMemory    int64
+	LongExecution time.Duration
 }
 
 type DynamicConfig struct {
-	Timeout          time.Duration     `json:"timeout"`
-	BatchSize        int               `json:"batch_size"`
-	MaxMemoryLoad    int64             `json:"max_memory_load"`
-	IdleTimeout      time.Duration     `json:"idle_timeout"`
-	BackoffDuration  time.Duration     `json:"backoff_duration"`
-	MaxRetries       int               `json:"max_retries"`
-	ReloadInterval   time.Duration     `json:"reload_interval"`
-	WarningThreshold WarningThresholds `json:"warning_threshold"`
+	Timeout          time.Duration
+	BatchSize        int
+	MaxMemoryLoad    int64
+	IdleTimeout      time.Duration
+	BackoffDuration  time.Duration
+	MaxRetries       int
+	ReloadInterval   time.Duration
+	WarningThreshold WarningThresholds
 }
 
-var config = &DynamicConfig{
-	Timeout:         10 * time.Second,
-	BatchSize:       1,
+var Config = &DynamicConfig{
+	Timeout:   10 * time.Second,
+	BatchSize: 1,
+
 	MaxMemoryLoad:   100 * 1024 * 1024,
 	IdleTimeout:     5 * time.Minute,
 	BackoffDuration: 2 * time.Second,
@@ -84,78 +147,45 @@ var config = &DynamicConfig{
 
 func validateDynamicConfig(c *DynamicConfig) error {
 	if c.Timeout <= 0 {
-		return errors.New("timeout must be positive")
+		return errors.New("Timeout must be positive")
 	}
 	if c.BatchSize <= 0 {
-		return errors.New("batch size must be > 0")
+		return errors.New("BatchSize must be > 0")
 	}
 	if c.MaxMemoryLoad <= 0 {
-		return errors.New("max memory load must be > 0")
+		return errors.New("MaxMemoryLoad must be > 0")
 	}
 	return nil
 }
 
-func reloadConfigFromFile(path string) error {
-	file, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-	decoder := json.NewDecoder(file)
-	var newConfig DynamicConfig
-	if err := decoder.Decode(&newConfig); err != nil {
-		return err
-	}
-	if err := validateDynamicConfig(&newConfig); err != nil {
-		return err
-	}
-	*config = newConfig
-	logger.Printf("[INFO] Reloaded configuration from %s", path)
-	return nil
-}
-
-func startConfigReloader(pool *Pool, configPath string) {
+func startConfigReloader(pool *Pool) {
 	go func() {
-		ticker := time.NewTicker(config.ReloadInterval)
+		ticker := time.NewTicker(Config.ReloadInterval)
 		defer ticker.Stop()
 		for {
 			select {
 			case <-ticker.C:
-				if err := reloadConfigFromFile(configPath); err != nil {
-					logger.Printf("[ERROR] Reload config error: %v", err)
+				if err := validateDynamicConfig(Config); err != nil {
+					Logger.Error().Err(err).Msg("Invalid dynamic config, skipping reload")
 					continue
 				}
-				// update pool parameters with new config
-				pool.timeout = config.Timeout
-				pool.batchSize = config.BatchSize
-				pool.maxMemoryLoad = config.MaxMemoryLoad
-				pool.idleTimeout = config.IdleTimeout
-				pool.backoffDuration = config.BackoffDuration
-				pool.maxRetries = config.MaxRetries
+				pool.timeout = Config.Timeout
+				pool.batchSize = Config.BatchSize
+				pool.maxMemoryLoad = Config.MaxMemoryLoad
+				pool.idleTimeout = Config.IdleTimeout
+				pool.backoffDuration = Config.BackoffDuration
+				pool.maxRetries = Config.MaxRetries
 				pool.thresholds = ThresholdConfig{
-					HighMemory:    config.WarningThreshold.HighMemory,
-					LongExecution: config.WarningThreshold.LongExecution,
+					HighMemory:    Config.WarningThreshold.HighMemory,
+					LongExecution: Config.WarningThreshold.LongExecution,
 				}
-				logger.Printf("[INFO] Dynamic configuration reloaded")
+				Logger.Info().Msg("Dynamic configuration reloaded")
 			case <-pool.stop:
 				return
 			}
 		}
 	}()
 }
-
-// ---------------------- Metrics ----------------------
-
-type Metrics struct {
-	TotalTasks      int64
-	CompletedTasks  int64
-	ErrorCount      int64
-	TotalMemoryUsed int64
-	TotalScheduled  int64
-	ExecutionTime   int64
-}
-
-// ---------------------- Plugin Interface ----------------------
 
 type Plugin interface {
 	Initialize(config interface{}) error
@@ -170,22 +200,46 @@ func (dp *DefaultPlugin) Initialize(config interface{}) error {
 }
 
 func (dp *DefaultPlugin) BeforeTask(task *QueueTask) {
-	logger.Printf("[PLUGIN] Before executing task %s", task.payload.ID)
+	Logger.Info().Str("taskID", task.payload.ID).Msg("BeforeTask plugin invoked")
 }
 
 func (dp *DefaultPlugin) AfterTask(task *QueueTask, result Result) {
-	logger.Printf("[PLUGIN] After executing task %s", task.payload.ID)
+	Logger.Info().Str("taskID", task.payload.ID).Msg("AfterTask plugin invoked")
 }
 
-// ---------------------- Scheduler Types ----------------------
+// acquireDistributedLock now simulates a distributed lock attempt.
+// In production, replace this with a call to a distributed lock service.
+func acquireDistributedLock(taskID string) bool {
+	// For example, attempt to get a lock from Redis/etcd.
+	// Return true if lock is acquired; false otherwise.
+	Logger.Info().Str("taskID", taskID).Msg("Acquiring distributed lock (stub)")
+	return true
+}
+
+func releaseDistributedLock(taskID string) {
+	// Release the lock in your distributed lock service.
+	Logger.Info().Str("taskID", taskID).Msg("Releasing distributed lock (stub)")
+}
+
+func validateTaskInput(task *Task) error {
+	if task.Payload == nil {
+		return errors.New("task payload cannot be nil")
+	}
+	Logger.Info().Str("taskID", task.ID).Msg("Task validated")
+	return nil
+}
 
 type Callback func(ctx context.Context, result Result) error
-
-type Handler func(ctx context.Context, payload *Task) Result
-
 type CompletionCallback func()
 
-type SchedulerOption func(*ScheduleOptions)
+type Metrics struct {
+	TotalTasks      int64
+	CompletedTasks  int64
+	ErrorCount      int64
+	TotalMemoryUsed int64
+	TotalScheduled  int64
+	ExecutionTime   int64
+}
 
 type ScheduleOptions struct {
 	Handler   Handler
@@ -194,6 +248,8 @@ type ScheduleOptions struct {
 	Overlap   bool
 	Recurring bool
 }
+
+type SchedulerOption func(*ScheduleOptions)
 
 func WithSchedulerHandler(handler Handler) SchedulerOption {
 	return func(opts *ScheduleOptions) {
@@ -237,11 +293,6 @@ type SchedulerConfig struct {
 	Overlap  bool
 }
 
-type ExecutionHistory struct {
-	Timestamp time.Time
-	Result    Result
-}
-
 type ScheduledTask struct {
 	ctx              context.Context
 	handler          Handler
@@ -275,7 +326,7 @@ func (s *Schedule) ToHumanReadable() string {
 		sb.WriteString(fmt.Sprintf("Recurring every %s\n", s.Interval))
 	}
 	if len(s.DayOfMonth) > 0 {
-		sb.WriteString("Occurs on days of month: ")
+		sb.WriteString("Occurs on the following days of the month: ")
 		for i, day := range s.DayOfMonth {
 			if i > 0 {
 				sb.WriteString(", ")
@@ -285,7 +336,7 @@ func (s *Schedule) ToHumanReadable() string {
 		sb.WriteString("\n")
 	}
 	if len(s.DayOfWeek) > 0 {
-		sb.WriteString("Occurs on days of week: ")
+		sb.WriteString("Occurs on the following days of the week: ")
 		for i, day := range s.DayOfWeek {
 			if i > 0 {
 				sb.WriteString(", ")
@@ -317,8 +368,7 @@ type CronSchedule struct {
 }
 
 func (c CronSchedule) String() string {
-	return fmt.Sprintf("At %s minute(s) past %s, on %s, during %s, every %s",
-		c.Minute, c.Hour, c.DayOfWeek, c.Month, c.DayOfMonth)
+	return fmt.Sprintf("At %s minute(s) past %s, on %s, during %s, every %s", c.Minute, c.Hour, c.DayOfWeek, c.Month, c.DayOfMonth)
 }
 
 func parseCronSpec(cronSpec string) (CronSchedule, error) {
@@ -334,7 +384,7 @@ func parseCronSpec(cronSpec string) (CronSchedule, error) {
 	if err != nil {
 		return CronSchedule{}, err
 	}
-	dayOfMonth, err := cronFieldToString(parts[2], "day of month")
+	dayOfMonth, err := cronFieldToString(parts[2], "day of the month")
 	if err != nil {
 		return CronSchedule{}, err
 	}
@@ -342,7 +392,7 @@ func parseCronSpec(cronSpec string) (CronSchedule, error) {
 	if err != nil {
 		return CronSchedule{}, err
 	}
-	dayOfWeek, err := cronFieldToString(parts[4], "day of week")
+	dayOfWeek, err := cronFieldToString(parts[4], "day of the week")
 	if err != nil {
 		return CronSchedule{}, err
 	}
@@ -393,12 +443,123 @@ func parseCronValue(field string) ([]string, error) {
 	return values, nil
 }
 
-func nextWeekday(t time.Time, weekday time.Weekday) time.Time {
-	daysUntil := (int(weekday) - int(t.Weekday()) + 7) % 7
-	if daysUntil == 0 {
-		daysUntil = 7
+type ExecutionHistory struct {
+	Timestamp time.Time
+	Result    Result
+}
+
+type Handler func(ctx context.Context, payload *Task) Result
+
+type Scheduler struct {
+	pool  *Pool
+	tasks []ScheduledTask
+	mu    sync.Mutex
+}
+
+func NewScheduler(pool *Pool) *Scheduler {
+	return &Scheduler{pool: pool}
+}
+
+func (s *Scheduler) Start() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, task := range s.tasks {
+		go s.schedule(task)
 	}
-	return t.AddDate(0, 0, daysUntil)
+}
+
+func (s *Scheduler) schedule(task ScheduledTask) {
+	if s.pool.gracefulShutdown {
+		return
+	}
+	if task.schedule.Interval > 0 {
+		ticker := time.NewTicker(task.schedule.Interval)
+		defer ticker.Stop()
+		if task.schedule.Recurring {
+			for {
+				select {
+				case <-ticker.C:
+					if s.pool.gracefulShutdown {
+						return
+					}
+					s.executeTask(task)
+				case <-task.stop:
+					return
+				}
+			}
+		} else {
+			select {
+			case <-ticker.C:
+				if s.pool.gracefulShutdown {
+					return
+				}
+				s.executeTask(task)
+			case <-task.stop:
+				return
+			}
+		}
+	} else if task.schedule.Recurring {
+		for {
+			now := time.Now()
+			nextRun := task.getNextRunTime(now)
+			select {
+			case <-time.After(nextRun.Sub(now)):
+				if s.pool.gracefulShutdown {
+					return
+				}
+				s.executeTask(task)
+			case <-task.stop:
+				return
+			}
+		}
+	}
+}
+
+func (s *Scheduler) executeTask(task ScheduledTask) {
+	go func() {
+		_, cancelSpan := startSpan("executeTask")
+		defer cancelSpan()
+		defer func() {
+			if r := recover(); r != nil {
+				Logger.Error().Str("taskID", task.payload.ID).Msgf("Recovered from panic: %v", r)
+			}
+		}()
+		start := time.Now()
+		for _, plug := range s.pool.plugins {
+			plug.BeforeTask(getQueueTask())
+		}
+		if !acquireDistributedLock(task.payload.ID) {
+			Logger.Warn().Str("taskID", task.payload.ID).Msg("Failed to acquire distributed lock")
+			return
+		}
+		defer releaseDistributedLock(task.payload.ID)
+		result := task.handler(task.ctx, task.payload)
+		execTime := time.Since(start).Milliseconds()
+		if s.pool.diagnosticsEnabled {
+			Logger.Info().Str("taskID", task.payload.ID).Msgf("Executed in %d ms", execTime)
+		}
+		if result.Error != nil && s.pool.circuitBreaker.Enabled {
+			newCount := atomic.AddInt32(&s.pool.circuitBreakerFailureCount, 1)
+			if newCount >= int32(s.pool.circuitBreaker.FailureThreshold) {
+				s.pool.circuitBreakerOpen = true
+				Logger.Warn().Msg("Circuit breaker opened due to errors")
+				go func() {
+					time.Sleep(s.pool.circuitBreaker.ResetTimeout)
+					atomic.StoreInt32(&s.pool.circuitBreakerFailureCount, 0)
+					s.pool.circuitBreakerOpen = false
+					Logger.Info().Msg("Circuit breaker reset to closed state")
+				}()
+			}
+		}
+		if task.config.Callback != nil {
+			_ = task.config.Callback(task.ctx, result)
+		}
+		task.executionHistory = append(task.executionHistory, ExecutionHistory{Timestamp: time.Now(), Result: result})
+		for _, plug := range s.pool.plugins {
+			plug.AfterTask(getQueueTask(), result)
+		}
+		Logger.Info().Str("taskID", task.payload.ID).Msg("Scheduled task executed")
+	}()
 }
 
 func (task ScheduledTask) getNextRunTime(now time.Time) time.Time {
@@ -429,7 +590,7 @@ func (task ScheduledTask) getNextRunTime(now time.Time) time.Time {
 func (task ScheduledTask) getNextCronRunTime(now time.Time) time.Time {
 	cronSpecs, err := parseCronSpec(task.schedule.CronSpec)
 	if err != nil {
-		logger.Printf("[ERROR] Invalid CRON spec: %v", err)
+		Logger.Error().Err(err).Msg("Invalid CRON spec")
 		return now
 	}
 	nextRun := now
@@ -442,13 +603,10 @@ func (task ScheduledTask) getNextCronRunTime(now time.Time) time.Time {
 }
 
 func (task ScheduledTask) applyCronField(t time.Time, fieldSpec string, unit string) time.Time {
-	if strings.HasPrefix(fieldSpec, "every") {
+	if fieldSpec == "*" {
 		return t
 	}
-	value, err := strconv.Atoi(strings.TrimSpace(strings.Split(fieldSpec, " ")[0]))
-	if err != nil {
-		return t
-	}
+	value, _ := strconv.Atoi(fieldSpec)
 	switch unit {
 	case "minute":
 		if t.Minute() > value {
@@ -479,140 +637,61 @@ func (task ScheduledTask) applyCronField(t time.Time, fieldSpec string, unit str
 	return t
 }
 
-// ---------------------- Task Types and Priority Queue ----------------------
-
-type Task struct {
-	ID      string
-	Payload interface{}
-}
-
-type Result struct {
-	Error error
-}
-
-type QueueTask struct {
-	ctx        context.Context
-	payload    *Task
-	priority   int
-	retryCount int
-	index      int
-}
-
-type PriorityQueue []*QueueTask
-
-func (pq PriorityQueue) Len() int { return len(pq) }
-func (pq PriorityQueue) Less(i, j int) bool {
-	// Higher priority first
-	return pq[i].priority > pq[j].priority
-}
-func (pq PriorityQueue) Swap(i, j int) {
-	pq[i], pq[j] = pq[j], pq[i]
-	pq[i].index = i
-	pq[j].index = j
-}
-func (pq *PriorityQueue) Push(x interface{}) {
-	n := len(*pq)
-	task := x.(*QueueTask)
-	task.index = n
-	*pq = append(*pq, task)
-}
-func (pq *PriorityQueue) Pop() interface{} {
-	old := *pq
-	n := len(old)
-	task := old[n-1]
-	task.index = -1
-	*pq = old[0 : n-1]
-	return task
-}
-
-func NewID() string {
-	return fmt.Sprintf("%d", time.Now().UnixNano())
-}
-
-func SizeOf(payload interface{}) int {
-	// Simplified: in production, compute proper memory usage.
-	return 100
-}
-
-// ---------------------- Task Storage ----------------------
-
-// InMemoryTaskStorage simulates persistent storage. In production, replace with a real DB or persistent store.
-type TaskStorage interface {
-	SaveTask(task *QueueTask) error
-	FetchNextTask() (*QueueTask, error)
-	DeleteTask(taskID string) error
-	GetAllTasks() ([]*QueueTask, error)
-}
-
-type InMemoryTaskStorage struct {
-	tasks map[string]*QueueTask
-	mu    sync.RWMutex
-}
-
-func NewInMemoryTaskStorage() *InMemoryTaskStorage {
-	return &InMemoryTaskStorage{
-		tasks: make(map[string]*QueueTask),
+func nextWeekday(t time.Time, weekday time.Weekday) time.Time {
+	daysUntil := (int(weekday) - int(t.Weekday()) + 7) % 7
+	if daysUntil == 0 {
+		daysUntil = 7
 	}
+	return t.AddDate(0, 0, daysUntil)
 }
 
-func (s *InMemoryTaskStorage) SaveTask(task *QueueTask) error {
+func (s *Scheduler) AddTask(ctx context.Context, payload *Task, opts ...SchedulerOption) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.tasks[task.payload.ID] = task
-	return nil
+	if err := validateTaskInput(payload); err != nil {
+		Logger.Error().Err(err).Msg("Invalid task input")
+		return
+	}
+	options := defaultSchedulerOptions()
+	for _, opt := range opts {
+		opt(options)
+	}
+	if options.Handler == nil {
+		options.Handler = s.pool.handler
+	}
+	if options.Callback == nil {
+		options.Callback = s.pool.callback
+	}
+	stop := make(chan struct{})
+	newTask := ScheduledTask{
+		ctx:     ctx,
+		handler: options.Handler,
+		payload: payload,
+		stop:    stop,
+		config: SchedulerConfig{
+			Callback: options.Callback,
+			Overlap:  options.Overlap,
+		},
+		schedule: &Schedule{
+			Interval:  options.Interval,
+			Recurring: options.Recurring,
+		},
+	}
+	s.tasks = append(s.tasks, newTask)
+	go s.schedule(newTask)
 }
 
-func (s *InMemoryTaskStorage) FetchNextTask() (*QueueTask, error) {
+func (s *Scheduler) RemoveTask(payloadID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for id, task := range s.tasks {
-		delete(s.tasks, id)
-		return task, nil
+	for i, task := range s.tasks {
+		if task.payload.ID == payloadID {
+			close(task.stop)
+			s.tasks = append(s.tasks[:i], s.tasks[i+1:]...)
+			break
+		}
 	}
-	return nil, errors.New("no tasks available")
 }
-
-func (s *InMemoryTaskStorage) DeleteTask(taskID string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	delete(s.tasks, taskID)
-	return nil
-}
-
-func (s *InMemoryTaskStorage) GetAllTasks() ([]*QueueTask, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	tasks := make([]*QueueTask, 0, len(s.tasks))
-	for _, task := range s.tasks {
-		tasks = append(tasks, task)
-	}
-	return tasks, nil
-}
-
-// ---------------------- Circuit Breaker ----------------------
-
-type CircuitBreakerConfig struct {
-	Enabled          bool
-	FailureThreshold int
-	ResetTimeout     time.Duration
-}
-
-type CircuitBreakerState int
-
-const (
-	Closed CircuitBreakerState = iota
-	Open
-	HalfOpen
-)
-
-// ---------------------- Pool ----------------------
-
-type ThresholdConfig struct {
-	HighMemory    int64
-	LongExecution time.Duration
-}
-
-type PoolOption func(*Pool)
 
 type Pool struct {
 	taskStorage                TaskStorage
@@ -639,12 +718,13 @@ type Pool struct {
 	taskQueueLock              sync.Mutex
 	numOfWorkers               int32
 	paused                     bool
+	logger                     log.Logger
 	gracefulShutdown           bool
 	thresholds                 ThresholdConfig
 	diagnosticsEnabled         bool
 	metricsRegistry            MetricsRegistry
 	circuitBreaker             CircuitBreakerConfig
-	circuitBreakerOpen         int32 // use 0/1 flag for open state
+	circuitBreakerOpen         bool
 	circuitBreakerFailureCount int32
 	gracefulShutdownTimeout    time.Duration
 	plugins                    []Plugin
@@ -654,43 +734,42 @@ func NewPool(numOfWorkers int, opts ...PoolOption) *Pool {
 	pool := &Pool{
 		stop:                    make(chan struct{}),
 		taskNotify:              make(chan struct{}, numOfWorkers),
-		batchSize:               config.BatchSize,
-		timeout:                 config.Timeout,
-		idleTimeout:             config.IdleTimeout,
-		backoffDuration:         config.BackoffDuration,
-		maxRetries:              config.MaxRetries,
+		batchSize:               Config.BatchSize,
+		timeout:                 Config.Timeout,
+		idleTimeout:             Config.IdleTimeout,
+		backoffDuration:         Config.BackoffDuration,
+		maxRetries:              Config.MaxRetries,
+		logger:                  Logger,
+		metricsRegistry:         NewInMemoryMetricsRegistry(),
 		diagnosticsEnabled:      true,
 		gracefulShutdownTimeout: 10 * time.Second,
-		metricsRegistry:         NewInMemoryMetricsRegistry(),
-		taskStorage:             NewInMemoryTaskStorage(),
 	}
 	pool.scheduler = NewScheduler(pool)
 	pool.taskAvailableCond = sync.NewCond(&sync.Mutex{})
 	for _, opt := range opts {
 		opt(pool)
 	}
-	// initialize task queue
-	pool.taskQueue = make(PriorityQueue, 0, 10)
+	if pool.taskQueue == nil {
+		pool.taskQueue = make(PriorityQueue, 0, 10)
+	}
 	heap.Init(&pool.taskQueue)
 	pool.scheduler.Start()
 	pool.Start(numOfWorkers)
-	// start dynamic config reloader (assumes config file "config.json" exists)
-	startConfigReloader(pool, "config.json")
+	startConfigReloader(pool)
 	go pool.dynamicWorkerScaler()
 	go pool.startHealthServer()
 	return pool
 }
 
 func (wp *Pool) Start(numWorkers int) {
-	// load any stored tasks into the in-memory queue
-	if storedTasks, err := wp.taskStorage.GetAllTasks(); err == nil {
+	storedTasks, err := wp.taskStorage.GetAllTasks()
+	if err == nil {
 		wp.taskQueueLock.Lock()
 		for _, task := range storedTasks {
 			heap.Push(&wp.taskQueue, task)
 		}
 		wp.taskQueueLock.Unlock()
 	}
-	// start workers
 	for i := 0; i < numWorkers; i++ {
 		wp.wg.Add(1)
 		go wp.worker()
@@ -704,13 +783,9 @@ func (wp *Pool) Start(numWorkers int) {
 func (wp *Pool) worker() {
 	defer wp.wg.Done()
 	for {
-		// wait for task availability
-		wp.taskAvailableCond.L.Lock()
-		for len(wp.taskQueue) == 0 && !wp.paused && !wp.gracefulShutdown {
-			wp.taskAvailableCond.Wait()
+		for len(wp.taskQueue) == 0 && !wp.paused {
+			wp.Dispatch(wp.taskAvailableCond.Wait)
 		}
-		wp.taskAvailableCond.L.Unlock()
-
 		select {
 		case <-wp.stop:
 			return
@@ -746,7 +821,7 @@ func (wp *Pool) processNextBatch() {
 
 func (wp *Pool) handleTask(task *QueueTask) {
 	if err := validateTaskInput(task.payload); err != nil {
-		logger.Printf("[ERROR] Task %s validation failed: %v", task.payload.ID, err)
+		Logger.Error().Str("taskID", task.payload.ID).Msgf("Validation failed: %v", err)
 		return
 	}
 	ctx, cancel := context.WithTimeout(task.ctx, wp.timeout)
@@ -754,42 +829,30 @@ func (wp *Pool) handleTask(task *QueueTask) {
 	taskSize := int64(SizeOf(task.payload))
 	atomic.AddInt64(&wp.metrics.TotalMemoryUsed, taskSize)
 	atomic.AddInt64(&wp.metrics.TotalTasks, 1)
-	start := time.Now()
-	// plugin hook before task execution
-	for _, plug := range wp.plugins {
-		plug.BeforeTask(task)
-	}
-	// acquire distributed lock
-	if !acquireDistributedLock(task.payload.ID) {
-		logger.Printf("[WARN] Failed to acquire lock for task %s", task.payload.ID)
-		return
-	}
-	defer releaseDistributedLock(task.payload.ID)
-	// execute task handler
+	startTime := time.Now()
 	result := wp.handler(ctx, task.payload)
-	execTime := time.Since(start).Milliseconds()
-	atomic.AddInt64(&wp.metrics.ExecutionTime, execTime)
-	if wp.thresholds.LongExecution > 0 && execTime > int64(wp.thresholds.LongExecution.Milliseconds()) {
-		logger.Printf("[WARN] Task %s exceeded execution time threshold: %d ms", task.payload.ID, execTime)
+	executionTime := time.Since(startTime).Milliseconds()
+	atomic.AddInt64(&wp.metrics.ExecutionTime, executionTime)
+	if wp.thresholds.LongExecution > 0 && executionTime > int64(wp.thresholds.LongExecution.Milliseconds()) {
+		Logger.Warn().Str("taskID", task.payload.ID).Msgf("Exceeded execution time threshold: %d ms", executionTime)
 	}
 	if wp.thresholds.HighMemory > 0 && taskSize > wp.thresholds.HighMemory {
-		logger.Printf("[WARN] Task %s memory usage %d exceeded threshold", task.payload.ID, taskSize)
+		Logger.Warn().Str("taskID", task.payload.ID).Msgf("Memory usage %d exceeded threshold", taskSize)
 	}
-	// circuit breaker handling
 	if result.Error != nil {
 		atomic.AddInt64(&wp.metrics.ErrorCount, 1)
-		logger.Printf("[ERROR] Error processing task %s: %v", task.payload.ID, result.Error)
+		Logger.Error().Str("taskID", task.payload.ID).Msgf("Error processing task: %v", result.Error)
 		wp.backoffAndStore(task)
 		if wp.circuitBreaker.Enabled {
 			newCount := atomic.AddInt32(&wp.circuitBreakerFailureCount, 1)
 			if newCount >= int32(wp.circuitBreaker.FailureThreshold) {
-				atomic.StoreInt32(&wp.circuitBreakerOpen, 1)
-				logger.Printf("[WARN] Circuit breaker opened due to errors")
+				wp.circuitBreakerOpen = true
+				Logger.Warn().Msg("Circuit breaker opened due to errors")
 				go func() {
 					time.Sleep(wp.circuitBreaker.ResetTimeout)
 					atomic.StoreInt32(&wp.circuitBreakerFailureCount, 0)
-					atomic.StoreInt32(&wp.circuitBreakerOpen, 0)
-					logger.Printf("[INFO] Circuit breaker reset to closed state")
+					wp.circuitBreakerOpen = false
+					Logger.Info().Msg("Circuit breaker reset to closed state")
 				}()
 			}
 		}
@@ -799,20 +862,18 @@ func (wp *Pool) handleTask(task *QueueTask) {
 			atomic.StoreInt32(&wp.circuitBreakerFailureCount, 0)
 		}
 	}
-	// plugin hook after task execution
-	for _, plug := range wp.plugins {
-		plug.AfterTask(task, result)
+	if wp.diagnosticsEnabled {
+		Logger.Info().Str("taskID", task.payload.ID).Msgf("Task executed in %d ms", executionTime)
 	}
-	logger.Printf("[INFO] Task %s executed in %d ms", task.payload.ID, execTime)
 	if wp.callback != nil {
 		if err := wp.callback(ctx, result); err != nil {
 			atomic.AddInt64(&wp.metrics.ErrorCount, 1)
-			logger.Printf("[ERROR] Callback error for task %s: %v", task.payload.ID, err)
+			Logger.Error().Str("taskID", task.payload.ID).Msgf("Callback error: %v", err)
 		}
 	}
 	_ = wp.taskStorage.DeleteTask(task.payload.ID)
 	atomic.AddInt64(&wp.metrics.TotalMemoryUsed, -taskSize)
-	wp.metricsRegistry.Register("task_execution_time", execTime)
+	wp.metricsRegistry.Register("task_execution_time", executionTime)
 }
 
 func (wp *Pool) backoffAndStore(task *QueueTask) {
@@ -822,11 +883,11 @@ func (wp *Pool) backoffAndStore(task *QueueTask) {
 		backoff := wp.backoffDuration * (1 << (task.retryCount - 1))
 		jitter := time.Duration(rand.Int63n(int64(backoff) / 2))
 		sleepDuration := backoff + jitter
-		logger.Printf("[INFO] Task %s retry %d: sleeping for %s", task.payload.ID, task.retryCount, sleepDuration)
+		Logger.Info().Str("taskID", task.payload.ID).Msgf("Retry %d: sleeping for %s", task.retryCount, sleepDuration)
 		time.Sleep(sleepDuration)
 	} else {
-		logger.Printf("[ERROR] Task %s failed after maximum retries", task.payload.ID)
-		// In production, add the task to a Dead Letter Queue
+		Logger.Error().Str("taskID", task.payload.ID).Msg("Task failed after maximum retries")
+		DLQ.Add(task)
 	}
 }
 
@@ -882,7 +943,7 @@ func (wp *Pool) adjustWorkers(newWorkerCount int) {
 }
 
 func (wp *Pool) EnqueueTask(ctx context.Context, payload *Task, priority int) error {
-	if wp.circuitBreaker.Enabled && atomic.LoadInt32(&wp.circuitBreakerOpen) == 1 {
+	if wp.circuitBreaker.Enabled && wp.circuitBreakerOpen {
 		return fmt.Errorf("circuit breaker open, task rejected")
 	}
 	if err := validateTaskInput(payload); err != nil {
@@ -891,18 +952,18 @@ func (wp *Pool) EnqueueTask(ctx context.Context, payload *Task, priority int) er
 	if payload.ID == "" {
 		payload.ID = NewID()
 	}
-	task := &QueueTask{
-		ctx:      ctx,
-		payload:  payload,
-		priority: priority,
-	}
-	logger.Printf("[INFO] Enqueuing task %s", payload.ID)
+	task := getQueueTask()
+	task.ctx = ctx
+	task.payload = payload
+	task.priority = priority
+	task.retryCount = 0
+	Logger.Info().Str("taskID", payload.ID).Msg("Enqueuing task")
 	if err := wp.taskStorage.SaveTask(task); err != nil {
 		return err
 	}
 	wp.taskQueueLock.Lock()
+	defer wp.taskQueueLock.Unlock()
 	heap.Push(&wp.taskQueue, task)
-	wp.taskQueueLock.Unlock()
 	wp.Dispatch(wp.taskAvailableCond.Signal)
 	wp.taskCompletionNotifier.Add(1)
 	return nil
@@ -917,6 +978,10 @@ func (wp *Pool) Dispatch(event func()) {
 func (wp *Pool) Pause() {
 	wp.paused = true
 	wp.Dispatch(wp.taskAvailableCond.Broadcast)
+}
+
+func (wp *Pool) SetBatchSize(size int) {
+	wp.batchSize = size
 }
 
 func (wp *Pool) Resume() {
@@ -972,7 +1037,7 @@ func (wp *Pool) Stop() {
 	select {
 	case <-done:
 	case <-time.After(wp.gracefulShutdownTimeout):
-		logger.Printf("[WARN] Graceful shutdown timeout reached")
+		Logger.Warn().Msg("Graceful shutdown timeout reached")
 	}
 	if wp.completionCallback != nil {
 		wp.completionCallback()
@@ -1003,7 +1068,7 @@ func (wp *Pool) dynamicWorkerScaler() {
 			queueLen := len(wp.taskQueue)
 			wp.taskQueueLock.Unlock()
 			newWorkers := queueLen/5 + 1
-			logger.Printf("[INFO] Auto-scaling: queue length %d, adjusting workers to %d", queueLen, newWorkers)
+			Logger.Info().Msgf("Auto-scaling: queue length %d, adjusting workers to %d", queueLen, newWorkers)
 			wp.AdjustWorkerCount(newWorkers)
 		case <-wp.stop:
 			return
@@ -1018,181 +1083,45 @@ func (wp *Pool) startHealthServer() {
 		if wp.gracefulShutdown {
 			status = "shutting down"
 		}
-		fmt.Fprintf(w, "status: %s\nworkers: %d\nqueueLength: %d\n", status, atomic.LoadInt32(&wp.numOfWorkers), len(wp.taskQueue))
+		fmt.Fprintf(w, "status: %s\nworkers: %d\nqueueLength: %d\n",
+			status, atomic.LoadInt32(&wp.numOfWorkers), len(wp.taskQueue))
 	})
 	server := &http.Server{
 		Addr:    ":8080",
 		Handler: mux,
 	}
-
 	go func() {
-		logger.Printf("[INFO] Starting health server on :8080")
+		Logger.Info().Msg("Starting health server on :8080")
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.Printf("[ERROR] Health server error: %v", err)
+			Logger.Error().Err(err).Msg("Health server failed")
 		}
 	}()
 
+	// Listen for pool shutdown and gracefully stop the server.
 	go func() {
 		<-wp.stop
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := server.Shutdown(ctx); err != nil {
-			logger.Printf("[ERROR] Health server shutdown failed: %v", err)
+			Logger.Error().Err(err).Msg("Health server shutdown failed")
 		} else {
-			logger.Printf("[INFO] Health server shutdown gracefully")
+			Logger.Info().Msg("Health server shutdown gracefully")
 		}
 	}()
 }
 
-// ---------------------- Metrics Registry ----------------------
-
-type MetricsRegistry interface {
-	Register(metricName string, value interface{})
-	Increment(metricName string)
-	Get(metricName string) interface{}
+type ThresholdConfig struct {
+	HighMemory    int64
+	LongExecution time.Duration
 }
 
-type InMemoryMetricsRegistry struct {
-	metrics map[string]int64
-	mu      sync.RWMutex
+type CircuitBreakerConfig struct {
+	Enabled          bool
+	FailureThreshold int
+	ResetTimeout     time.Duration
 }
 
-func NewInMemoryMetricsRegistry() *InMemoryMetricsRegistry {
-	return &InMemoryMetricsRegistry{
-		metrics: make(map[string]int64),
-	}
-}
-
-func (m *InMemoryMetricsRegistry) Register(metricName string, value interface{}) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if v, ok := value.(int64); ok {
-		m.metrics[metricName] = v
-		logger.Printf("[METRICS] Registered %s: %d", metricName, v)
-	}
-}
-
-func (m *InMemoryMetricsRegistry) Increment(metricName string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.metrics[metricName]++
-}
-
-func (m *InMemoryMetricsRegistry) Get(metricName string) interface{} {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.metrics[metricName]
-}
-
-// ---------------------- Scheduler ----------------------
-
-type Scheduler struct {
-	pool  *Pool
-	tasks []ScheduledTask
-	mu    sync.Mutex
-}
-
-func NewScheduler(pool *Pool) *Scheduler {
-	return &Scheduler{pool: pool}
-}
-
-func (s *Scheduler) Start() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, task := range s.tasks {
-		go s.schedule(task)
-	}
-}
-
-func (s *Scheduler) schedule(task ScheduledTask) {
-	if s.pool.gracefulShutdown {
-		return
-	}
-	// Use interval scheduling if defined
-	if task.schedule.Interval > 0 {
-		ticker := time.NewTicker(task.schedule.Interval)
-		defer ticker.Stop()
-		if task.schedule.Recurring {
-			for {
-				select {
-				case <-ticker.C:
-					if s.pool.gracefulShutdown {
-						return
-					}
-					s.executeTask(task)
-				case <-task.stop:
-					return
-				}
-			}
-		} else {
-			select {
-			case <-ticker.C:
-				if s.pool.gracefulShutdown {
-					return
-				}
-				s.executeTask(task)
-			case <-task.stop:
-				return
-			}
-		}
-	} else if task.schedule.Recurring {
-		for {
-			now := time.Now()
-			nextRun := task.getNextRunTime(now)
-			select {
-			case <-time.After(nextRun.Sub(now)):
-				if s.pool.gracefulShutdown {
-					return
-				}
-				s.executeTask(task)
-			case <-task.stop:
-				return
-			}
-		}
-	}
-}
-
-func (s *Scheduler) executeTask(task ScheduledTask) {
-	go func() {
-		start := time.Now()
-		// Plugin hook: before task execution
-		for _, plug := range s.pool.plugins {
-			plug.BeforeTask(getQueueTaskClone(task.payload))
-		}
-		if !acquireDistributedLock(task.payload.ID) {
-			logger.Printf("[WARN] Scheduler failed to acquire lock for task %s", task.payload.ID)
-			return
-		}
-		defer releaseDistributedLock(task.payload.ID)
-		result := task.handler(task.ctx, task.payload)
-		execTime := time.Since(start).Milliseconds()
-		logger.Printf("[INFO] Scheduled task %s executed in %d ms", task.payload.ID, execTime)
-		if task.config.Callback != nil {
-			_ = task.config.Callback(task.ctx, result)
-		}
-		task.executionHistory = append(task.executionHistory, ExecutionHistory{Timestamp: time.Now(), Result: result})
-		// Plugin hook: after task execution
-		for _, plug := range s.pool.plugins {
-			plug.AfterTask(getQueueTaskClone(task.payload), result)
-		}
-	}()
-}
-
-func getQueueTaskClone(payload *Task) *QueueTask {
-	return &QueueTask{payload: payload}
-}
-
-// ---------------------- Task Validation ----------------------
-
-func validateTaskInput(task *Task) error {
-	if task.Payload == nil {
-		return errors.New("task payload cannot be nil")
-	}
-	logger.Printf("[INFO] Task %s validated", task.ID)
-	return nil
-}
-
-// ---------------------- Pool Options ----------------------
+type PoolOption func(*Pool)
 
 func WithTaskQueueSize(size int) PoolOption {
 	return func(p *Pool) {
@@ -1278,63 +1207,105 @@ func WithPlugin(plugin Plugin) PoolOption {
 	}
 }
 
-// ---------------------- Main ----------------------
+type Task struct {
+	ID      string
+	Payload interface{}
+}
 
-func main() {
-	// Sample handler that simulates work.
-	handler := func(ctx context.Context, task *Task) Result {
-		logger.Printf("[HANDLER] Processing task %s with payload: %v", task.ID, task.Payload)
-		// Simulate processing time
-		time.Sleep(500 * time.Millisecond)
-		// Simulate random error
-		if rand.Intn(10) < 2 {
-			return Result{Error: errors.New("simulated processing error")}
-		}
-		return Result{}
+type Result struct {
+	Error error
+}
+
+type QueueTask struct {
+	ctx        context.Context
+	payload    *Task
+	priority   int
+	retryCount int
+	index      int
+}
+
+type PriorityQueue []*QueueTask
+
+func (pq PriorityQueue) Len() int { return len(pq) }
+func (pq PriorityQueue) Less(i, j int) bool {
+	return pq[i].priority > pq[j].priority
+}
+func (pq PriorityQueue) Swap(i, j int) {
+	pq[i], pq[j] = pq[j], pq[i]
+	pq[i].index = i
+	pq[j].index = j
+}
+func (pq *PriorityQueue) Push(x interface{}) {
+	n := len(*pq)
+	task := x.(*QueueTask)
+	task.index = n
+	*pq = append(*pq, task)
+}
+func (pq *PriorityQueue) Pop() interface{} {
+	old := *pq
+	n := len(old)
+	task := old[n-1]
+	task.index = -1
+	*pq = old[0 : n-1]
+	return task
+}
+
+func NewID() string {
+	return fmt.Sprintf("%d", time.Now().UnixNano())
+}
+
+func SizeOf(payload interface{}) int {
+	return 100
+}
+
+type TaskStorage interface {
+	SaveTask(task *QueueTask) error
+	FetchNextTask() (*QueueTask, error)
+	DeleteTask(taskID string) error
+	GetAllTasks() ([]*QueueTask, error)
+}
+
+type InMemoryTaskStorage struct {
+	tasks map[string]*QueueTask
+	mu    sync.RWMutex
+}
+
+func NewInMemoryTaskStorage() *InMemoryTaskStorage {
+	return &InMemoryTaskStorage{
+		tasks: make(map[string]*QueueTask),
 	}
+}
 
-	// Sample callback after task processing.
-	callback := func(ctx context.Context, result Result) error {
-		if result.Error != nil {
-			logger.Printf("[CALLBACK] Task completed with error: %v", result.Error)
-		} else {
-			logger.Printf("[CALLBACK] Task completed successfully")
-		}
-		return nil
+func (s *InMemoryTaskStorage) SaveTask(task *QueueTask) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.tasks[task.payload.ID] = task
+	return nil
+}
+
+func (s *InMemoryTaskStorage) FetchNextTask() (*QueueTask, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for id, task := range s.tasks {
+		delete(s.tasks, id)
+		return task, nil
 	}
+	return nil, errors.New("no tasks")
+}
 
-	// Create pool with default options and a default plugin.
-	pool := NewPool(3,
-		WithHandler(handler),
-		WithPoolCallback(callback),
-		WithCircuitBreaker(CircuitBreakerConfig{
-			Enabled:          true,
-			FailureThreshold: 3,
-			ResetTimeout:     10 * time.Second,
-		}),
-		WithPlugin(&DefaultPlugin{}),
-	)
+func (s *InMemoryTaskStorage) DeleteTask(taskID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.tasks, taskID)
+	return nil
+}
 
-	// Enqueue some sample tasks.
-	for i := 0; i < 10; i++ {
-		payload := fmt.Sprintf("data-%d", i)
-		task := &Task{
-			ID:      "", // will be set by EnqueueTask
-			Payload: payload,
-		}
-		if err := pool.EnqueueTask(context.Background(), task, rand.Intn(10)); err != nil {
-			logger.Printf("[ERROR] Failed to enqueue task: %v", err)
-		}
+func (s *InMemoryTaskStorage) GetAllTasks() ([]*QueueTask, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	tasks := make([]*QueueTask, 0, len(s.tasks))
+	for _, task := range s.tasks {
+		tasks = append(tasks, task)
 	}
-
-	// Let the system run for a while.
-	time.Sleep(15 * time.Second)
-
-	// Print some metrics.
-	metrics := pool.Metrics()
-	logger.Printf("[METRICS] %+v", metrics)
-
-	// Stop the pool gracefully.
-	pool.Stop()
-	logger.Printf("[INFO] Pool shutdown complete")
+	return tasks, nil
 }
