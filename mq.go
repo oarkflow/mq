@@ -120,6 +120,30 @@ type TLSConfig struct {
 	UseTLS   bool
 }
 
+// NEW: RateLimiter implementation
+type RateLimiter struct {
+	C chan struct{}
+}
+
+func NewRateLimiter(rate int, burst int) *RateLimiter {
+	rl := &RateLimiter{C: make(chan struct{}, burst)}
+	ticker := time.NewTicker(time.Second / time.Duration(rate))
+	go func() {
+		for range ticker.C {
+			select {
+			case rl.C <- struct{}{}:
+			default:
+				// bucket full; token discarded
+			}
+		}
+	}()
+	return rl
+}
+
+func (rl *RateLimiter) Wait() {
+	<-rl.C
+}
+
 type Options struct {
 	storage              TaskStorage
 	consumerOnSubscribe  func(ctx context.Context, topic, consumerName string)
@@ -140,6 +164,8 @@ type Options struct {
 	enableWorkerPool     bool
 	respondPendingResult bool
 	logger               logger.Logger
+	BrokerRateLimiter    *RateLimiter // new field for broker rate limiting
+	ConsumerRateLimiter  *RateLimiter // new field for consumer rate limiting
 }
 
 func (o *Options) SetSyncMode(sync bool) {
@@ -229,6 +255,7 @@ func (b *Broker) Options() *Options {
 func (b *Broker) OnClose(ctx context.Context, conn net.Conn) error {
 	consumerID, ok := GetConsumerID(ctx)
 	if ok && consumerID != "" {
+		log.Printf("Broker: Consumer connection closed: %s, address: %s", consumerID, conn.RemoteAddr())
 		if con, exists := b.consumers.Get(consumerID); exists {
 			con.conn.Close()
 			b.consumers.Del(consumerID)
@@ -245,6 +272,7 @@ func (b *Broker) OnClose(ctx context.Context, conn net.Conn) error {
 	} else {
 		b.consumers.ForEach(func(consumerID string, con *consumer) bool {
 			if utils.ConnectionsEqual(conn, con.conn) {
+				log.Printf("Broker: Consumer connection closed: %s, address: %s", consumerID, conn.RemoteAddr())
 				con.conn.Close()
 				b.consumers.Del(consumerID)
 				b.queues.ForEach(func(_ string, queue *Queue) bool {
@@ -260,13 +288,16 @@ func (b *Broker) OnClose(ctx context.Context, conn net.Conn) error {
 			return true
 		})
 	}
+
 	publisherID, ok := GetPublisherID(ctx)
 	if ok && publisherID != "" {
+		log.Printf("Broker: Publisher connection closed: %s, address: %s", publisherID, conn.RemoteAddr())
 		if con, exists := b.publishers.Get(publisherID); exists {
 			con.conn.Close()
 			b.publishers.Del(publisherID)
 		}
 	}
+	log.Printf("BROKER - Connection closed: address %s", conn.RemoteAddr())
 	return nil
 }
 
@@ -328,6 +359,15 @@ func (b *Broker) OnConsumerStop(ctx context.Context, _ *codec.Message) {
 		if con, exists := b.consumers.Get(consumerID); exists {
 			con.state = consts.ConsumerStateStopped
 			log.Printf("BROKER - CONSUMER ~> Stopped %s", consumerID)
+			if b.opts.notifyResponse != nil {
+				result := Result{
+					Status: "STOPPED",
+					Topic:  "", // adjust if queue name is available
+					TaskID: consumerID,
+					Ctx:    ctx,
+				}
+				_ = b.opts.notifyResponse(ctx, result)
+			}
 		}
 	}
 }
@@ -595,6 +635,9 @@ func (b *Broker) readMessage(ctx context.Context, c net.Conn) error {
 func (b *Broker) dispatchWorker(ctx context.Context, queue *Queue) {
 	delay := b.opts.initialDelay
 	for task := range queue.tasks {
+		if b.opts.BrokerRateLimiter != nil {
+			b.opts.BrokerRateLimiter.Wait()
+		}
 		success := false
 		for !success && task.RetryCount <= b.opts.maxRetries {
 			if b.dispatchTaskToConsumer(ctx, queue, task) {
@@ -640,6 +683,15 @@ func (b *Broker) dispatchTaskToConsumer(ctx context.Context, queue *Queue, task 
 	}
 	if !consumerFound {
 		log.Printf("No available consumers for queue %s, retrying...", queue.name)
+		if b.opts.notifyResponse != nil {
+			result := Result{
+				Status: "NO_CONSUMER",
+				Topic:  queue.name,
+				TaskID: "",
+				Ctx:    ctx,
+			}
+			_ = b.opts.notifyResponse(ctx, result)
+		}
 	}
 	return consumerFound
 }
@@ -713,7 +765,9 @@ func (c *Consumer) receive(ctx context.Context, conn net.Conn) (*codec.Message, 
 
 func (c *Consumer) Close() error {
 	c.pool.Stop()
-	return c.conn.Close()
+	err := c.conn.Close()
+	log.Printf("CONSUMER - Connection closed for consumer: %s", c.id)
+	return err
 }
 
 func (c *Consumer) GetKey() string {
@@ -908,6 +962,9 @@ func (c *Consumer) Consume(ctx context.Context) error {
 			log.Println("Context canceled, stopping consumer.")
 			return nil
 		default:
+			if c.opts.ConsumerRateLimiter != nil {
+				c.opts.ConsumerRateLimiter.Wait()
+			}
 			if err := c.readMessage(ctx, c.conn); err != nil {
 				log.Printf("Error reading message: %v, attempting reconnection...", err)
 				// Attempt reconnection loop.
