@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"net/http"
 	"strconv"
 	"strings"
 	"sync"
@@ -15,34 +16,64 @@ import (
 	"github.com/oarkflow/log"
 )
 
-func getLogger() log.Logger {
-	logger := log.DefaultLogger
-	return logger
+// ======================================================
+// Logging & Distributed Tracing (simulated)
+
+var logger = log.DefaultLogger // Using phuslu/log’s default logger (JSON formatted)
+
+// startSpan simulates starting a tracing span.
+func startSpan(operation string) (context.Context, func()) {
+	startTime := time.Now()
+	logger.Info().Str("operation", operation).Msg("Span started")
+	return context.Background(), func() {
+		duration := time.Since(startTime)
+		logger.Info().Str("operation", operation).Msgf("Span ended; duration: %v", duration)
+	}
 }
 
-var logger = getLogger()
+// ======================================================
+// Metrics Registry
 
 type MetricsRegistry interface {
 	Register(metricName string, value interface{})
+	Increment(metricName string)
+	Get(metricName string) interface{}
 }
 
 type InMemoryMetricsRegistry struct {
-	metrics map[string]interface{}
+	metrics map[string]int64
 	mu      sync.RWMutex
 }
 
 func NewInMemoryMetricsRegistry() *InMemoryMetricsRegistry {
 	return &InMemoryMetricsRegistry{
-		metrics: make(map[string]interface{}),
+		metrics: make(map[string]int64),
 	}
 }
 
 func (m *InMemoryMetricsRegistry) Register(metricName string, value interface{}) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.metrics[metricName] = value
-	logger.Info().Str("metric", metricName).Msgf("Registered new metric: %v", value)
+	if v, ok := value.(int64); ok {
+		m.metrics[metricName] = v
+		logger.Info().Str("metric", metricName).Msgf("Registered metric: %d", v)
+	}
 }
+
+func (m *InMemoryMetricsRegistry) Increment(metricName string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.metrics[metricName]++
+}
+
+func (m *InMemoryMetricsRegistry) Get(metricName string) interface{} {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.metrics[metricName]
+}
+
+// ======================================================
+// Dead Letter Queue (Persistent In-Memory)
 
 type DeadLetterQueue struct {
 	tasks []*QueueTask
@@ -64,6 +95,14 @@ func (dlq *DeadLetterQueue) Add(task *QueueTask) {
 
 var dlq = NewDeadLetterQueue()
 
+// ======================================================
+// Dynamic Configuration
+
+type WarningThresholds struct {
+	HighMemory    int64
+	LongExecution time.Duration
+}
+
 type DynamicConfig struct {
 	Timeout          time.Duration
 	BatchSize        int
@@ -75,23 +114,31 @@ type DynamicConfig struct {
 	WarningThreshold WarningThresholds
 }
 
-type WarningThresholds struct {
-	HighMemory    int64
-	LongExecution time.Duration
-}
-
 var config = &DynamicConfig{
 	Timeout:         10 * time.Second,
 	BatchSize:       1,
-	MaxMemoryLoad:   1024 * 1024 * 10,
+	MaxMemoryLoad:   10 * 1024 * 1024, // 10 MB
 	IdleTimeout:     5 * time.Minute,
 	BackoffDuration: 2 * time.Second,
 	MaxRetries:      3,
 	ReloadInterval:  30 * time.Second,
 	WarningThreshold: WarningThresholds{
-		HighMemory:    1024 * 1024,
+		HighMemory:    1 * 1024 * 1024, // 10 MB
 		LongExecution: 2 * time.Second,
 	},
+}
+
+func validateDynamicConfig(c *DynamicConfig) error {
+	if c.Timeout <= 0 {
+		return errors.New("Timeout must be positive")
+	}
+	if c.BatchSize <= 0 {
+		return errors.New("BatchSize must be > 0")
+	}
+	if c.MaxMemoryLoad <= 0 {
+		return errors.New("MaxMemoryLoad must be > 0")
+	}
+	return nil
 }
 
 func startConfigReloader(pool *Pool) {
@@ -101,7 +148,10 @@ func startConfigReloader(pool *Pool) {
 		for {
 			select {
 			case <-ticker.C:
-
+				if err := validateDynamicConfig(config); err != nil {
+					logger.Error().Err(err).Msg("Invalid dynamic config, skipping reload")
+					continue
+				}
 				pool.timeout = config.Timeout
 				pool.batchSize = config.BatchSize
 				pool.maxMemoryLoad = config.MaxMemoryLoad
@@ -119,6 +169,9 @@ func startConfigReloader(pool *Pool) {
 		}
 	}()
 }
+
+// ======================================================
+// Plugin Architecture
 
 type Plugin interface {
 	Initialize(config interface{}) error
@@ -140,21 +193,32 @@ func (dp *DefaultPlugin) AfterTask(task *QueueTask, result Result) {
 	logger.Info().Str("taskID", task.payload.ID).Msg("AfterTask plugin invoked")
 }
 
-func acquireDistributedLock(taskID string) bool {
+// ======================================================
+// Distributed Coordination (Simulated)
 
+func acquireDistributedLock(taskID string) bool {
+	// For simulation, always succeed.
 	return true
 }
 
 func releaseDistributedLock(taskID string) {
-
+	// Release lock simulation.
 }
+
+// ======================================================
+// Input Validation and Auditing
 
 func validateTaskInput(task *Task) error {
 	if task.Payload == nil {
 		return errors.New("task payload cannot be nil")
 	}
+	// Additional sanitization can be added here.
+	logger.Info().Str("taskID", task.ID).Msg("Task validated")
 	return nil
 }
+
+// ======================================================
+// Core Types and Scheduler Implementation
 
 type Callback func(ctx context.Context, result Result) error
 type CompletionCallback func()
@@ -399,6 +463,7 @@ func (s *Scheduler) schedule(task ScheduledTask) {
 	if s.pool.gracefulShutdown {
 		return
 	}
+	// If an interval is defined, use a ticker
 	if task.schedule.Interval > 0 {
 		ticker := time.NewTicker(task.schedule.Interval)
 		defer ticker.Stop()
@@ -443,27 +508,30 @@ func (s *Scheduler) schedule(task ScheduledTask) {
 }
 
 func (s *Scheduler) executeTask(task ScheduledTask) {
-	if !task.config.Overlap && s.pool.gracefulShutdown == false {
-
-	}
+	// If overlapping is not allowed, add logic here (omitted for brevity)
 	go func() {
+		_, cancelSpan := startSpan("executeTask")
+		defer cancelSpan()
+
 		defer func() {
 			if r := recover(); r != nil {
 				logger.Error().Str("taskID", task.payload.ID).Msgf("Recovered from panic: %v", r)
 			}
 		}()
 		start := time.Now()
+
 		for _, plug := range s.pool.plugins {
 			plug.BeforeTask(&QueueTask{payload: task.payload})
 		}
-
 		if !acquireDistributedLock(task.payload.ID) {
 			logger.Warn().Str("taskID", task.payload.ID).Msg("Failed to acquire distributed lock")
 			return
 		}
 		defer releaseDistributedLock(task.payload.ID)
+
 		result := task.handler(task.ctx, task.payload)
 		execTime := time.Since(start).Milliseconds()
+
 		if s.pool.diagnosticsEnabled {
 			logger.Info().Str("taskID", task.payload.ID).Msgf("Executed in %d ms", execTime)
 		}
@@ -471,12 +539,13 @@ func (s *Scheduler) executeTask(task ScheduledTask) {
 			newCount := atomic.AddInt32(&s.pool.circuitBreakerFailureCount, 1)
 			if newCount >= int32(s.pool.circuitBreaker.FailureThreshold) {
 				s.pool.circuitBreakerOpen = true
-				logger.Warn().Msg("Scheduler circuit breaker opened due to errors")
+				logger.Warn().Msg("Circuit breaker opened due to errors")
+				// Enter half-open state after reset timeout (simulate half-open by testing one task)
 				go func() {
 					time.Sleep(s.pool.circuitBreaker.ResetTimeout)
 					atomic.StoreInt32(&s.pool.circuitBreakerFailureCount, 0)
 					s.pool.circuitBreakerOpen = false
-					logger.Info().Msg("Scheduler circuit breaker reset")
+					logger.Info().Msg("Circuit breaker reset to closed state")
 				}()
 			}
 		}
@@ -622,6 +691,9 @@ func (s *Scheduler) RemoveTask(payloadID string) {
 	}
 }
 
+// ======================================================
+// Worker Pool Implementation
+
 type Pool struct {
 	taskStorage                TaskStorage
 	scheduler                  *Scheduler
@@ -685,6 +757,8 @@ func NewPool(numOfWorkers int, opts ...PoolOption) *Pool {
 	pool.scheduler.Start()
 	pool.Start(numOfWorkers)
 	startConfigReloader(pool)
+	go pool.dynamicWorkerScaler() // Start auto-scaling based on queue length.
+	go pool.startHealthServer()   // Start a health-check HTTP endpoint.
 	return pool
 }
 
@@ -730,6 +804,7 @@ func (wp *Pool) processNextBatch() {
 		task := heap.Pop(&wp.taskQueue).(*QueueTask)
 		tasks = append(tasks, task)
 	}
+	// If no tasks in queue, try fetching from persistent store.
 	if len(tasks) == 0 && !wp.paused {
 		for len(tasks) < wp.batchSize {
 			task, err := wp.taskStorage.FetchNextTask()
@@ -778,11 +853,12 @@ func (wp *Pool) handleTask(task *QueueTask) {
 			if newCount >= int32(wp.circuitBreaker.FailureThreshold) {
 				wp.circuitBreakerOpen = true
 				logger.Warn().Msg("Circuit breaker opened due to errors")
+				// Simulate half-open testing after reset timeout.
 				go func() {
 					time.Sleep(wp.circuitBreaker.ResetTimeout)
 					atomic.StoreInt32(&wp.circuitBreakerFailureCount, 0)
 					wp.circuitBreakerOpen = false
-					logger.Info().Msg("Circuit breaker reset")
+					logger.Info().Msg("Circuit breaker reset to closed state")
 				}()
 			}
 		}
@@ -875,26 +951,34 @@ func (wp *Pool) adjustWorkers(newWorkerCount int) {
 }
 
 func (wp *Pool) EnqueueTask(ctx context.Context, payload *Task, priority int) error {
+	// Reject task if system is overloaded.
+	/*if atomic.LoadInt64(&wp.metrics.TotalMemoryUsed)+int64(SizeOf(payload)) > wp.maxMemoryLoad {
+		logger.Warn().Str("taskID", payload.ID).Msg("Max memory load reached; rejecting task")
+		return fmt.Errorf("max memory load reached, task rejected")
+	}*/
 	if wp.circuitBreaker.Enabled && wp.circuitBreakerOpen {
 		return fmt.Errorf("circuit breaker open, task rejected")
 	}
 	if err := validateTaskInput(payload); err != nil {
 		return fmt.Errorf("invalid task input: %w", err)
 	}
+	// Generate a unique ID if not provided.
 	if payload.ID == "" {
 		payload.ID = NewID()
 	}
 	task := &QueueTask{ctx: ctx, payload: payload, priority: priority}
+	// Audit logging: record task enqueuing.
+	logger.Info().Str("taskID", payload.ID).Msg("Enqueuing task")
 	if err := wp.taskStorage.SaveTask(task); err != nil {
 		return err
 	}
 	wp.taskQueueLock.Lock()
 	defer wp.taskQueueLock.Unlock()
-	taskSize := int64(SizeOf(payload))
-	if atomic.LoadInt64(&wp.metrics.TotalMemoryUsed)+taskSize > wp.maxMemoryLoad && wp.maxMemoryLoad > 0 {
+	// taskSize := int64(SizeOf(payload))
+	/*if atomic.LoadInt64(&wp.metrics.TotalMemoryUsed)+taskSize > wp.maxMemoryLoad {
 		wp.storeInOverflow(task)
 		return fmt.Errorf("max memory load reached, task stored in overflow buffer")
-	}
+	}*/
 	heap.Push(&wp.taskQueue, task)
 	wp.Dispatch(wp.taskAvailableCond.Signal)
 	wp.taskCompletionNotifier.Add(1)
@@ -989,6 +1073,42 @@ func (wp *Pool) Metrics() Metrics {
 }
 
 func (wp *Pool) Scheduler() *Scheduler { return wp.scheduler }
+
+// dynamicWorkerScaler dynamically adjusts worker count based on the queue length.
+func (wp *Pool) dynamicWorkerScaler() {
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			wp.taskQueueLock.Lock()
+			queueLen := len(wp.taskQueue)
+			wp.taskQueueLock.Unlock()
+			// For every 5 pending tasks, add one worker.
+			newWorkers := queueLen/5 + 1
+			logger.Info().Msgf("Auto-scaling: queue length %d, adjusting workers to %d", queueLen, newWorkers)
+			wp.AdjustWorkerCount(newWorkers)
+		case <-wp.stop:
+			return
+		}
+	}
+}
+
+// startHealthServer starts an HTTP endpoint for health checks.
+func (wp *Pool) startHealthServer() {
+	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		status := "OK"
+		if wp.gracefulShutdown {
+			status = "shutting down"
+		}
+		fmt.Fprintf(w, "status: %s\nworkers: %d\nqueueLength: %d\n", status, atomic.LoadInt32(&wp.numOfWorkers), len(wp.taskQueue))
+	})
+	logger.Info().Msg("Starting health server on :8080")
+	http.ListenAndServe(":8080", nil)
+}
+
+// ======================================================
+// Option Functions
 
 type ThresholdConfig struct {
 	HighMemory    int64
@@ -1087,6 +1207,9 @@ func WithPlugin(plugin Plugin) PoolOption {
 	}
 }
 
+// ======================================================
+// Additional Types for Tasks and Queue
+
 type Task struct {
 	ID      string
 	Payload interface{}
@@ -1135,8 +1258,12 @@ func NewID() string {
 }
 
 func SizeOf(payload interface{}) int {
+	// For demonstration purposes, assume 100 bytes per payload.
 	return 100
 }
+
+// ======================================================
+// Task Storage (Persistent In-Memory)
 
 type TaskStorage interface {
 	SaveTask(task *QueueTask) error
@@ -1190,12 +1317,19 @@ func (s *InMemoryTaskStorage) GetAllTasks() ([]*QueueTask, error) {
 	return tasks, nil
 }
 
+// ======================================================
+// Main: Demonstration of Usage
+
 func main() {
+	// Create an in-memory task storage.
 	storage := NewInMemoryTaskStorage()
+
+	// Create a pool with 5 workers and register a default plugin.
 	pool := NewPool(5,
 		WithTaskStorage(storage),
 		WithHandler(func(ctx context.Context, payload *Task) Result {
 			logger.Info().Str("taskID", payload.ID).Msg("Processing task payload")
+			// Simulate some work.
 			time.Sleep(500 * time.Millisecond)
 			return Result{}
 		}),
@@ -1217,6 +1351,8 @@ func main() {
 		WithGracefulShutdown(10*time.Second),
 		WithPlugin(&DefaultPlugin{}),
 	)
+
+	// Enqueue 10 tasks.
 	for i := 0; i < 10; i++ {
 		payload := fmt.Sprintf("Payload %d", i)
 		task := &Task{Payload: payload}
@@ -1224,9 +1360,17 @@ func main() {
 			logger.Error().Err(err).Msg("Failed to enqueue task")
 		}
 	}
+
+	// Let the system process tasks.
 	time.Sleep(5 * time.Second)
+
+	// Print metrics.
 	metrics := pool.Metrics()
 	logger.Info().Msgf("Metrics: %+v", metrics)
+
+	// Shutdown the pool gracefully.
 	pool.Stop()
+
+	// Log number of tasks in the Dead Letter Queue.
 	logger.Info().Msgf("Dead Letter Queue has %d tasks", len(dlq.tasks))
 }
