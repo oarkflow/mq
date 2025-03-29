@@ -318,11 +318,7 @@ func (s *Scheduler) executeTask(task ScheduledTask) {
 	go func() {
 		_, cancelSpan := startSpan("executeTask")
 		defer cancelSpan()
-		defer func() {
-			if r := recover(); r != nil {
-				Logger.Error().Str("taskID", task.payload.ID).Msgf("Recovered from panic: %v", r)
-			}
-		}()
+		defer RecoverPanic(RecoverTitle)
 		start := time.Now()
 		for _, plug := range s.pool.plugins {
 			plug.BeforeTask(getQueueTask())
