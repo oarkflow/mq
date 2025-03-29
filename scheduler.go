@@ -2,7 +2,6 @@ package mq
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -448,21 +447,10 @@ func nextWeekday(t time.Time, weekday time.Weekday) time.Time {
 	}
 	return t.AddDate(0, 0, daysUntil)
 }
-func validateTaskInput(task *Task) error {
-	if task.Payload == nil {
-		return errors.New("task payload cannot be nil")
-	}
-	Logger.Info().Str("taskID", task.ID).Msg("Task validated")
-	return nil
-}
 
 func (s *Scheduler) AddTask(ctx context.Context, payload *Task, opts ...SchedulerOption) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := validateTaskInput(payload); err != nil {
-		Logger.Error().Err(err).Msg("Invalid task input")
-		return
-	}
 	options := defaultSchedulerOptions()
 	for _, opt := range opts {
 		opt(options)

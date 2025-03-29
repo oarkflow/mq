@@ -54,6 +54,12 @@ func WithBatchSize(batchSize int) PoolOption {
 	}
 }
 
+func WithHealthServicePort(port int) PoolOption {
+	return func(p *Pool) {
+		p.port = port
+	}
+}
+
 func WithHandler(handler Handler) PoolOption {
 	return func(p *Pool) {
 		p.handler = handler

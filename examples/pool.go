@@ -45,7 +45,7 @@ func main() {
 		metrics := pool.Metrics()
 		v1.Logger.Info().Msgf("Metrics: %+v", metrics)
 		pool.Stop()
-		v1.Logger.Info().Msgf("Dead Letter Queue has %d tasks", len(pool.DLQ.Task()))
+		v1.Logger.Info().Msgf("Dead Letter Queue has %d tasks", len(pool.DLQ().Tasks()))
 	}()
 
 	go func() {
