@@ -321,6 +321,8 @@ func (b *Broker) OnMessage(ctx context.Context, msg *codec.Message, conn net.Con
 		b.OnConsumerResume(ctx, msg)
 	case consts.CONSUMER_STOPPED:
 		b.OnConsumerStop(ctx, msg)
+	case consts.CONSUMER_UPDATED:
+		b.OnConsumerUpdated(ctx, msg)
 	default:
 		log.Printf("BROKER - UNKNOWN_COMMAND ~> %s on %s", msg.Command, msg.Queue)
 	}
@@ -370,6 +372,22 @@ func (b *Broker) OnConsumerStop(ctx context.Context, _ *codec.Message) {
 				}
 				_ = b.opts.notifyResponse(ctx, result)
 			}
+		}
+	}
+}
+
+func (b *Broker) OnConsumerUpdated(ctx context.Context, msg *codec.Message) {
+	consumerID, _ := GetConsumerID(ctx)
+	if consumerID != "" {
+		log.Printf("BROKER - CONSUMER ~> Updated %s", consumerID)
+		if b.opts.notifyResponse != nil {
+			result := Result{
+				Status:  "CONSUMER UPDATED",
+				TaskID:  consumerID,
+				Ctx:     ctx,
+				Payload: msg.Payload,
+			}
+			_ = b.opts.notifyResponse(ctx, result)
 		}
 	}
 }
@@ -582,7 +600,10 @@ func (b *Broker) RemoveConsumer(consumerID string, queues ...string) {
 	})
 }
 
-func (b *Broker) handleConsumer(ctx context.Context, cmd consts.CMD, state consts.ConsumerState, consumerID string, payload []byte, queues ...string) {
+func (b *Broker) handleConsumer(
+	ctx context.Context, cmd consts.CMD, state consts.ConsumerState,
+	consumerID string, payload []byte, queues ...string,
+) {
 	fn := func(queue *Queue) {
 		con, ok := queue.consumers.Get(consumerID)
 		if ok {
@@ -605,6 +626,38 @@ func (b *Broker) handleConsumer(ctx context.Context, cmd consts.CMD, state const
 		fn(queue)
 		return true
 	})
+}
+
+func (b *Broker) UpdateConsumer(ctx context.Context, consumerID string, config DynamicConfig, queues ...string) error {
+	var err error
+	payload, _ := json.Marshal(config)
+	fn := func(queue *Queue) error {
+		con, ok := queue.consumers.Get(consumerID)
+		if ok {
+			ack := codec.NewMessage(consts.CONSUMER_UPDATE, payload, queue.name, map[string]string{consts.ConsumerKey: consumerID})
+			return b.send(ctx, con.conn, ack)
+		}
+		return nil
+	}
+	if len(queues) > 0 {
+		for _, queueName := range queues {
+			if queue, ok := b.queues.Get(queueName); ok {
+				err = fn(queue)
+				if err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}
+	b.queues.ForEach(func(queueName string, queue *Queue) bool {
+		err = fn(queue)
+		if err != nil {
+			return false
+		}
+		return true
+	})
+	return nil
 }
 
 func (b *Broker) PauseConsumer(ctx context.Context, consumerID string, queues ...string) {

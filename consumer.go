@@ -118,6 +118,12 @@ func (c *Consumer) OnMessage(ctx context.Context, msg *codec.Message, conn net.C
 			log.Printf("Unable to stop consumer: %v", err)
 		}
 		return err
+	case consts.CONSUMER_UPDATE:
+		err := c.Update(ctx, msg.Payload)
+		if err != nil {
+			log.Printf("Unable to update consumer: %v", err)
+		}
+		return err
 	default:
 		log.Printf("CONSUMER - UNKNOWN_COMMAND ~> %s on %s", msg.Command, msg.Queue)
 	}
@@ -295,6 +301,21 @@ func (c *Consumer) Pause(ctx context.Context) error {
 	return c.operate(ctx, consts.CONSUMER_PAUSED, c.pool.Pause)
 }
 
+func (c *Consumer) Update(ctx context.Context, payload []byte) error {
+	var newConfig DynamicConfig
+	if err := json.Unmarshal(payload, &newConfig); err != nil {
+		log.Printf("Invalid payload for CONSUMER_UPDATE: %v", err)
+		return err
+	}
+	if c.pool != nil {
+		if err := c.pool.UpdateConfig(&newConfig); err != nil {
+			log.Printf("Failed to update pool config: %v", err)
+			return err
+		}
+	}
+	return c.sendOpsMessage(ctx, consts.CONSUMER_UPDATED)
+}
+
 func (c *Consumer) Resume(ctx context.Context) error {
 	return c.operate(ctx, consts.CONSUMER_RESUMED, c.pool.Resume)
 }
@@ -304,10 +325,10 @@ func (c *Consumer) Stop(ctx context.Context) error {
 }
 
 func (c *Consumer) operate(ctx context.Context, cmd consts.CMD, poolOperation func()) error {
+	poolOperation()
 	if err := c.sendOpsMessage(ctx, cmd); err != nil {
 		return err
 	}
-	poolOperation()
 	return nil
 }
 

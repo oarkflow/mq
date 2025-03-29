@@ -22,10 +22,12 @@ const (
 	CONSUMER_PAUSE
 	CONSUMER_RESUME
 	CONSUMER_STOP
+	CONSUMER_UPDATE
 
 	CONSUMER_PAUSED
 	CONSUMER_RESUMED
 	CONSUMER_STOPPED
+	CONSUMER_UPDATED
 )
 
 type ConsumerState byte
@@ -62,6 +64,8 @@ func (c CMD) String() string {
 		return "CONSUMER_PAUSE"
 	case CONSUMER_RESUME:
 		return "CONSUMER_RESUME"
+	case CONSUMER_UPDATE:
+		return "CONSUMER_UPDATE"
 	case CONSUMER_STOP:
 		return "CONSUMER_STOP"
 	case CONSUMER_PAUSED:
@@ -70,6 +74,8 @@ func (c CMD) String() string {
 		return "CONSUMER_RESUMED"
 	case CONSUMER_STOPPED:
 		return "CONSUMER_STOPPED"
+	case CONSUMER_UPDATED:
+		return "CONSUMER_UPDATED"
 	case RESPONSE:
 		return "RESPONSE"
 	default:

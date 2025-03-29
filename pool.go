@@ -112,6 +112,7 @@ type DynamicConfig struct {
 	MaxRetries       int
 	ReloadInterval   time.Duration
 	WarningThreshold WarningThresholds
+	NumberOfWorkers  int // <-- new field for worker count
 }
 
 var Config = &DynamicConfig{
@@ -126,6 +127,7 @@ var Config = &DynamicConfig{
 		HighMemory:    1 * 1024 * 1024,
 		LongExecution: 2 * time.Second,
 	},
+	NumberOfWorkers: 5, // <-- default worker count
 }
 
 type Pool struct {
@@ -590,4 +592,28 @@ func (wp *Pool) startHealthServer() {
 			wp.logger.Info().Msg("Health server shutdown gracefully")
 		}
 	}()
+}
+
+// New method to update pool configuration via POOL_UPDATE command.
+func (wp *Pool) UpdateConfig(newConfig *DynamicConfig) error {
+	if err := validateDynamicConfig(newConfig); err != nil {
+		return err
+	}
+	wp.timeout = newConfig.Timeout
+	wp.batchSize = newConfig.BatchSize
+	wp.maxMemoryLoad = newConfig.MaxMemoryLoad
+	wp.idleTimeout = newConfig.IdleTimeout
+	wp.backoffDuration = newConfig.BackoffDuration
+	wp.maxRetries = newConfig.MaxRetries
+	wp.thresholds = ThresholdConfig{
+		HighMemory:    newConfig.WarningThreshold.HighMemory,
+		LongExecution: newConfig.WarningThreshold.LongExecution,
+	}
+	newWorkerCount := newConfig.NumberOfWorkers
+	currentWorkers := int(atomic.LoadInt32(&wp.numOfWorkers))
+	if newWorkerCount != currentWorkers && newWorkerCount > 0 {
+		wp.adjustWorkers(newWorkerCount)
+	}
+	wp.logger.Info().Msg("Pool configuration updated via POOL_UPDATE")
+	return nil
 }
