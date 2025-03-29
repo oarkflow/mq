@@ -280,3 +280,12 @@ func DisableConsumerRateLimit() Option {
 		opts.ConsumerRateLimiter = nil
 	}
 }
+
+// TaskOption defines a function type for setting options.
+type TaskOption func(*Task)
+
+func WithDAG(dag any) TaskOption {
+	return func(opts *Task) {
+		opts.dag = dag
+	}
+}
