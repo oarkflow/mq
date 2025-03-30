@@ -2,9 +2,10 @@ package dag
 
 import (
 	"context"
+	"log"
+
 	"github.com/oarkflow/mq"
 	"github.com/oarkflow/mq/consts"
-	"log"
 )
 
 func (tm *DAG) Consume(ctx context.Context) error {
@@ -16,7 +17,7 @@ func (tm *DAG) Consume(ctx context.Context) error {
 }
 
 func (tm *DAG) AssignTopic(topic string) {
-	tm.consumer = mq.NewConsumer(topic, topic, tm.ProcessTask, mq.WithRespondPendingResult(false), mq.WithBrokerURL(tm.server.URL()))
+	tm.consumer = mq.NewConsumer(topic, topic, tm.ProcessTask, mq.WithRespondPendingResult(false), mq.WithBrokerURL(tm.server.URL()), mq.WithHTTPApi(tm.server.Options().HTTPApi()))
 	tm.consumerTopic = topic
 }
 

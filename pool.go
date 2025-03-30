@@ -6,34 +6,40 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
-	"net/http"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/oarkflow/mq/utils"
-
 	"github.com/oarkflow/log"
+
+	"github.com/oarkflow/mq/utils"
 )
 
+// Callback is called when a task processing is completed.
 type Callback func(ctx context.Context, result Result) error
+
+// CompletionCallback is called when the pool completes a graceful shutdown.
 type CompletionCallback func()
 
+// Metrics holds cumulative pool metrics.
 type Metrics struct {
-	TotalTasks      int64
-	CompletedTasks  int64
-	ErrorCount      int64
-	TotalMemoryUsed int64
-	TotalScheduled  int64
-	ExecutionTime   int64
+	TotalTasks           int64 // total number of tasks processed
+	CompletedTasks       int64 // number of successfully processed tasks
+	ErrorCount           int64 // number of tasks that resulted in error
+	TotalMemoryUsed      int64 // current memory used (in bytes) by tasks in flight
+	TotalScheduled       int64 // number of tasks scheduled
+	ExecutionTime        int64 // cumulative execution time in milliseconds
+	CumulativeMemoryUsed int64 // cumulative memory used (sum of all task sizes) in bytes
 }
 
+// Plugin is used to inject custom behavior before or after task processing.
 type Plugin interface {
 	Initialize(config interface{}) error
 	BeforeTask(task *QueueTask)
 	AfterTask(task *QueueTask, result Result)
 }
 
+// DefaultPlugin is a no-op implementation of Plugin.
 type DefaultPlugin struct{}
 
 func (dp *DefaultPlugin) Initialize(config interface{}) error { return nil }
@@ -44,6 +50,7 @@ func (dp *DefaultPlugin) AfterTask(task *QueueTask, result Result) {
 	Logger.Info().Str("taskID", task.payload.ID).Msg("AfterTask plugin invoked")
 }
 
+// DeadLetterQueue stores tasks that have permanently failed.
 type DeadLetterQueue struct {
 	tasks []*QueueTask
 	mu    sync.Mutex
@@ -66,6 +73,7 @@ func (dlq *DeadLetterQueue) Add(task *QueueTask) {
 	Logger.Warn().Str("taskID", task.payload.ID).Msg("Task added to Dead Letter Queue")
 }
 
+// InMemoryMetricsRegistry stores metrics in memory.
 type InMemoryMetricsRegistry struct {
 	metrics map[string]int64
 	mu      sync.RWMutex
@@ -98,11 +106,13 @@ func (m *InMemoryMetricsRegistry) Get(metricName string) interface{} {
 	return m.metrics[metricName]
 }
 
+// WarningThresholds defines thresholds for warnings.
 type WarningThresholds struct {
-	HighMemory    int64
-	LongExecution time.Duration
+	HighMemory    int64         // in bytes
+	LongExecution time.Duration // threshold duration
 }
 
+// DynamicConfig holds runtime configuration values.
 type DynamicConfig struct {
 	Timeout          time.Duration
 	BatchSize        int
@@ -112,7 +122,7 @@ type DynamicConfig struct {
 	MaxRetries       int
 	ReloadInterval   time.Duration
 	WarningThreshold WarningThresholds
-	NumberOfWorkers  int // <-- new field for worker count
+	NumberOfWorkers  int // new field for worker count
 }
 
 var Config = &DynamicConfig{
@@ -124,12 +134,13 @@ var Config = &DynamicConfig{
 	MaxRetries:      3,
 	ReloadInterval:  30 * time.Second,
 	WarningThreshold: WarningThresholds{
-		HighMemory:    1 * 1024 * 1024,
+		HighMemory:    1 * 1024 * 1024, // 1 MB
 		LongExecution: 2 * time.Second,
 	},
-	NumberOfWorkers: 5, // <-- default worker count
+	NumberOfWorkers: 5, // default worker count
 }
 
+// Pool represents the worker pool processing tasks.
 type Pool struct {
 	taskStorage                TaskStorage
 	scheduler                  *Scheduler
@@ -166,9 +177,9 @@ type Pool struct {
 	circuitBreakerFailureCount int32
 	gracefulShutdownTimeout    time.Duration
 	plugins                    []Plugin
-	port                       int
 }
 
+// NewPool creates and starts a new pool with the given number of workers.
 func NewPool(numOfWorkers int, opts ...PoolOption) *Pool {
 	pool := &Pool{
 		stop:                    make(chan struct{}),
@@ -179,7 +190,6 @@ func NewPool(numOfWorkers int, opts ...PoolOption) *Pool {
 		backoffDuration:         Config.BackoffDuration,
 		maxRetries:              Config.MaxRetries,
 		logger:                  Logger,
-		port:                    1234,
 		dlq:                     NewDeadLetterQueue(),
 		metricsRegistry:         NewInMemoryMetricsRegistry(),
 		diagnosticsEnabled:      true,
@@ -198,7 +208,6 @@ func NewPool(numOfWorkers int, opts ...PoolOption) *Pool {
 	pool.Start(numOfWorkers)
 	startConfigReloader(pool)
 	go pool.dynamicWorkerScaler()
-	go pool.startHealthServer()
 	return pool
 }
 
@@ -350,15 +359,21 @@ func (wp *Pool) processNextBatch() {
 func (wp *Pool) handleTask(task *QueueTask) {
 	ctx, cancel := context.WithTimeout(task.ctx, wp.timeout)
 	defer cancel()
+
+	// Measure memory usage for the task.
 	taskSize := int64(utils.SizeOf(task.payload))
+	// Increase current memory usage.
 	atomic.AddInt64(&wp.metrics.TotalMemoryUsed, taskSize)
+	// Increase cumulative memory usage.
+	atomic.AddInt64(&wp.metrics.CumulativeMemoryUsed, taskSize)
 	atomic.AddInt64(&wp.metrics.TotalTasks, 1)
 	startTime := time.Now()
 	result := wp.handler(ctx, task.payload)
-	executionTime := time.Since(startTime).Milliseconds()
-	atomic.AddInt64(&wp.metrics.ExecutionTime, executionTime)
-	if wp.thresholds.LongExecution > 0 && executionTime > wp.thresholds.LongExecution.Milliseconds() {
-		wp.logger.Warn().Str("taskID", task.payload.ID).Msgf("Exceeded execution time threshold: %d ms", executionTime)
+	execMs := time.Since(startTime).Milliseconds()
+	atomic.AddInt64(&wp.metrics.ExecutionTime, execMs)
+
+	if wp.thresholds.LongExecution > 0 && execMs > wp.thresholds.LongExecution.Milliseconds() {
+		wp.logger.Warn().Str("taskID", task.payload.ID).Msgf("Exceeded execution time threshold: %d ms", execMs)
 	}
 	if wp.thresholds.HighMemory > 0 && taskSize > wp.thresholds.HighMemory {
 		wp.logger.Warn().Str("taskID", task.payload.ID).Msgf("Memory usage %d exceeded threshold", taskSize)
@@ -383,15 +398,14 @@ func (wp *Pool) handleTask(task *QueueTask) {
 		}
 	} else {
 		atomic.AddInt64(&wp.metrics.CompletedTasks, 1)
-		// Reset failure count on success if using circuit breaker
+		// Reset failure count on success if using circuit breaker.
 		if wp.circuitBreaker.Enabled {
 			atomic.StoreInt32(&wp.circuitBreakerFailureCount, 0)
 		}
 	}
 
-	// Diagnostics logging if enabled
 	if wp.diagnosticsEnabled {
-		wp.logger.Info().Str("taskID", task.payload.ID).Msgf("Task executed in %d ms", executionTime)
+		wp.logger.Info().Str("taskID", task.payload.ID).Msgf("Task executed in %d ms", execMs)
 	}
 	if wp.callback != nil {
 		if err := wp.callback(ctx, result); err != nil {
@@ -400,8 +414,9 @@ func (wp *Pool) handleTask(task *QueueTask) {
 		}
 	}
 	_ = wp.taskStorage.DeleteTask(task.payload.ID)
+	// Reduce current memory usage.
 	atomic.AddInt64(&wp.metrics.TotalMemoryUsed, -taskSize)
-	wp.metricsRegistry.Register("task_execution_time", executionTime)
+	wp.metricsRegistry.Register("task_execution_time", execMs)
 }
 
 func (wp *Pool) backoffAndStore(task *QueueTask) {
@@ -582,6 +597,38 @@ func (wp *Pool) Metrics() Metrics {
 	return wp.metrics
 }
 
+// FormattedMetrics is a helper struct to present human-readable metrics.
+type FormattedMetrics struct {
+	TotalTasks           int64  `json:"total_tasks"`
+	CompletedTasks       int64  `json:"completed_tasks"`
+	ErrorCount           int64  `json:"error_count"`
+	CurrentMemoryUsed    string `json:"current_memory_used"`
+	CumulativeMemoryUsed string `json:"cumulative_memory_used"`
+	TotalScheduled       int64  `json:"total_scheduled"`
+	CumulativeExecution  string `json:"cumulative_execution"`
+	AverageExecution     string `json:"average_execution"`
+}
+
+// FormattedMetrics returns a formatted version of the pool metrics.
+func (wp *Pool) FormattedMetrics() FormattedMetrics {
+	// Update TotalScheduled from the scheduler.
+	wp.metrics.TotalScheduled = int64(len(wp.scheduler.tasks))
+	var avgExec time.Duration
+	if wp.metrics.CompletedTasks > 0 {
+		avgExec = time.Duration(wp.metrics.ExecutionTime/wp.metrics.CompletedTasks) * time.Millisecond
+	}
+	return FormattedMetrics{
+		TotalTasks:           wp.metrics.TotalTasks,
+		CompletedTasks:       wp.metrics.CompletedTasks,
+		ErrorCount:           wp.metrics.ErrorCount,
+		CurrentMemoryUsed:    utils.FormatBytes(wp.metrics.TotalMemoryUsed),
+		CumulativeMemoryUsed: utils.FormatBytes(wp.metrics.CumulativeMemoryUsed),
+		TotalScheduled:       wp.metrics.TotalScheduled,
+		CumulativeExecution:  (time.Duration(wp.metrics.ExecutionTime) * time.Millisecond).String(),
+		AverageExecution:     avgExec.String(),
+	}
+}
+
 func (wp *Pool) Scheduler() *Scheduler { return wp.scheduler }
 
 func (wp *Pool) dynamicWorkerScaler() {
@@ -602,40 +649,7 @@ func (wp *Pool) dynamicWorkerScaler() {
 	}
 }
 
-func (wp *Pool) startHealthServer() {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		status := "OK"
-		if wp.gracefulShutdown {
-			status = "shutting down"
-		}
-		_, _ = fmt.Fprintf(w, "status: %s\nworkers: %d\nqueueLength: %d\n",
-			status, atomic.LoadInt32(&wp.numOfWorkers), len(wp.taskQueue))
-	})
-	server := &http.Server{
-		Addr:    ":8080",
-		Handler: mux,
-	}
-	go func() {
-		wp.logger.Info().Msg("Starting health server on :8080")
-		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			wp.logger.Error().Err(err).Msg("Health server failed")
-		}
-	}()
-
-	go func() {
-		<-wp.stop
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := server.Shutdown(ctx); err != nil {
-			wp.logger.Error().Err(err).Msg("Health server shutdown failed")
-		} else {
-			wp.logger.Info().Msg("Health server shutdown gracefully")
-		}
-	}()
-}
-
-// New method to update pool configuration via POOL_UPDATE command.
+// UpdateConfig updates pool configuration via a POOL_UPDATE command.
 func (wp *Pool) UpdateConfig(newConfig *DynamicConfig) error {
 	if err := validateDynamicConfig(newConfig); err != nil {
 		return err

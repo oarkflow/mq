@@ -2,10 +2,12 @@ package mq
 
 import (
 	"context"
+	"fmt"
 	"runtime"
 	"time"
 
 	"github.com/oarkflow/mq/logger"
+	"github.com/oarkflow/mq/utils"
 )
 
 type ThresholdConfig struct {
@@ -54,12 +56,6 @@ func WithMaxMemoryLoad(maxMemoryLoad int64) PoolOption {
 func WithBatchSize(batchSize int) PoolOption {
 	return func(p *Pool) {
 		p.batchSize = batchSize
-	}
-}
-
-func WithHealthServicePort(port int) PoolOption {
-	return func(p *Pool) {
-		p.port = port
 	}
 }
 
@@ -117,9 +113,22 @@ func WithPlugin(plugin Plugin) PoolOption {
 	}
 }
 
+var BrokerAddr string
+
+func init() {
+	if BrokerAddr == "" {
+		port, err := utils.GetRandomPort()
+		if err != nil {
+			BrokerAddr = ":8081"
+		} else {
+			BrokerAddr = fmt.Sprintf(":%d", port)
+		}
+	}
+}
+
 func defaultOptions() *Options {
 	return &Options{
-		brokerAddr:           ":8081",
+		brokerAddr:           BrokerAddr,
 		maxRetries:           5,
 		respondPendingResult: true,
 		initialDelay:         2 * time.Second,
@@ -130,8 +139,6 @@ func defaultOptions() *Options {
 		maxMemoryLoad:        5000000,
 		storage:              NewMemoryTaskStorage(10 * time.Minute),
 		logger:               logger.NewDefaultLogger(),
-		BrokerRateLimiter:    NewRateLimiter(10, 5),
-		ConsumerRateLimiter:  NewRateLimiter(10, 5),
 	}
 }
 
@@ -191,6 +198,13 @@ func WithTLS(enableTLS bool, certPath, keyPath string) Option {
 		o.tlsConfig.UseTLS = enableTLS
 		o.tlsConfig.CertPath = certPath
 		o.tlsConfig.KeyPath = keyPath
+	}
+}
+
+// WithHTTPApi - Option to enable/disable TLS
+func WithHTTPApi(flag bool) Option {
+	return func(o *Options) {
+		o.enableHTTPApi = flag
 	}
 }
 

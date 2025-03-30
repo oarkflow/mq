@@ -162,7 +162,7 @@ func notify(taskID string, result mq.Result) {
 }
 
 func main() {
-	flow := dag.NewDAG("Sample DAG", "sample-dag", notify, mq.WithBrokerURL(":8083"))
+	flow := dag.NewDAG("Sample DAG", "sample-dag", notify, mq.WithBrokerURL(":8083"), mq.WithHTTPApi(true))
 	flow.AddNode(dag.Page, "Form", "Form", &Form{})
 	flow.AddNode(dag.Function, "NodeA", "NodeA", &NodeA{})
 	flow.AddNode(dag.Function, "NodeB", "NodeB", &NodeB{})

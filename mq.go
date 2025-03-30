@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/oarkflow/errors"
@@ -120,25 +121,75 @@ type TLSConfig struct {
 	UseTLS   bool
 }
 
-// NEW: RateLimiter implementation
+// RateLimiter implementation
 type RateLimiter struct {
-	C chan struct{}
+	mu     sync.Mutex
+	C      chan struct{}
+	ticker *time.Ticker
+	rate   int
+	burst  int
+	stop   chan struct{}
 }
 
-// Modified RateLimiter: use blocking send to avoid discarding tokens.
+// NewRateLimiter creates a new RateLimiter with the specified rate and burst.
 func NewRateLimiter(rate int, burst int) *RateLimiter {
-	rl := &RateLimiter{C: make(chan struct{}, burst)}
-	ticker := time.NewTicker(time.Second / time.Duration(rate))
-	go func() {
-		for range ticker.C {
-			rl.C <- struct{}{} // blocking send; tokens queue for deferred task processing
-		}
-	}()
+	rl := &RateLimiter{
+		C:     make(chan struct{}, burst),
+		rate:  rate,
+		burst: burst,
+		stop:  make(chan struct{}),
+	}
+	rl.ticker = time.NewTicker(time.Second / time.Duration(rate))
+	go rl.run()
 	return rl
 }
 
+// run is the internal goroutine that periodically sends tokens.
+func (rl *RateLimiter) run() {
+	for {
+		select {
+		case <-rl.ticker.C:
+			// Blocking send to ensure token accumulation doesn't discard tokens.
+			rl.mu.Lock()
+			// Try sending token, but don't block if channel is full.
+			select {
+			case rl.C <- struct{}{}:
+			default:
+			}
+			rl.mu.Unlock()
+		case <-rl.stop:
+			return
+		}
+	}
+}
+
+// Wait blocks until a token is available.
 func (rl *RateLimiter) Wait() {
 	<-rl.C
+}
+
+// Update allows dynamic adjustment of rate and burst at runtime.
+// It immediately applies the new settings.
+func (rl *RateLimiter) Update(newRate, newBurst int) {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	// Stop the old ticker.
+	rl.ticker.Stop()
+	// Replace the channel with a new one of the new burst capacity.
+	rl.C = make(chan struct{}, newBurst)
+	// Update internal state.
+	rl.rate = newRate
+	rl.burst = newBurst
+	// Start a new ticker with the updated rate.
+	rl.ticker = time.NewTicker(time.Second / time.Duration(newRate))
+	// The run goroutine will pick up tokens from the new ticker and use the new channel.
+}
+
+// Stop terminates the rate limiter's internal goroutine.
+func (rl *RateLimiter) Stop() {
+	close(rl.stop)
+	rl.ticker.Stop()
 }
 
 type Options struct {
@@ -147,6 +198,7 @@ type Options struct {
 	consumerOnClose      func(ctx context.Context, topic, consumerName string)
 	notifyResponse       func(context.Context, Result) error
 	brokerAddr           string
+	enableHTTPApi        bool
 	tlsConfig            TLSConfig
 	callback             []func(context.Context, Result) Result
 	queueSize            int
@@ -195,6 +247,10 @@ func (o *Options) MaxMemoryLoad() int64 {
 
 func (o *Options) BrokerAddr() string {
 	return o.brokerAddr
+}
+
+func (o *Options) HTTPApi() bool {
+	return o.enableHTTPApi
 }
 
 func HeadersWithConsumerID(ctx context.Context, id string) map[string]string {
