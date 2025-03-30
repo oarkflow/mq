@@ -8,6 +8,12 @@ import (
 
 func (tm *DAG) GetNextNodes(key string) ([]*Node, error) {
 	key = strings.Split(key, Delimiter)[0]
+	// use cache if available
+	if tm.nextNodesCache != nil {
+		if next, ok := tm.nextNodesCache[key]; ok {
+			return next, nil
+		}
+	}
 	node, exists := tm.nodes.Get(key)
 	if !exists {
 		return nil, fmt.Errorf("Node with key %s does not exist while getting next node", key)
@@ -28,6 +34,12 @@ func (tm *DAG) GetNextNodes(key string) ([]*Node, error) {
 
 func (tm *DAG) GetPreviousNodes(key string) ([]*Node, error) {
 	key = strings.Split(key, Delimiter)[0]
+	// use cache if available
+	if tm.prevNodesCache != nil {
+		if prev, ok := tm.prevNodesCache[key]; ok {
+			return prev, nil
+		}
+	}
 	var predecessors []*Node
 	tm.nodes.ForEach(func(_ string, node *Node) bool {
 		for _, target := range node.Edges {

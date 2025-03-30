@@ -7,18 +7,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/oarkflow/json"
-
-	"github.com/oarkflow/mq/logger"
-
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/recover"
 	"github.com/oarkflow/form"
+	"github.com/oarkflow/json"
 	"golang.org/x/time/rate"
 
-	"github.com/oarkflow/mq/sio"
-
 	"github.com/oarkflow/mq"
+	"github.com/oarkflow/mq/logger"
+	"github.com/oarkflow/mq/sio"
 	"github.com/oarkflow/mq/storage"
 	"github.com/oarkflow/mq/storage/memory"
 )
@@ -59,6 +56,8 @@ type DAG struct {
 	hasPageNode              bool
 	paused                   bool
 	httpPrefix               string
+	nextNodesCache           map[string][]*Node
+	prevNodesCache           map[string][]*Node
 }
 
 func NewDAG(name, key string, finalResultCallback func(taskID string, result mq.Result), opts ...mq.Option) *DAG {
@@ -445,7 +444,59 @@ func (tm *DAG) Validate() error {
 		return err
 	}
 	tm.report = report
+
+	// Build caches for next and previous nodes
+	tm.nextNodesCache = make(map[string][]*Node)
+	tm.prevNodesCache = make(map[string][]*Node)
+	tm.nodes.ForEach(func(key string, node *Node) bool {
+		var next []*Node
+		for _, edge := range node.Edges {
+			next = append(next, edge.To)
+		}
+		if conds, exists := tm.conditions[node.ID]; exists {
+			for _, targetKey := range conds {
+				if targetNode, ok := tm.nodes.Get(targetKey); ok {
+					next = append(next, targetNode)
+				}
+			}
+		}
+		tm.nextNodesCache[node.ID] = next
+		return true
+	})
+	tm.nodes.ForEach(func(key string, _ *Node) bool {
+		var prev []*Node
+		tm.nodes.ForEach(func(_ string, n *Node) bool {
+			for _, edge := range n.Edges {
+				if edge.To.ID == key {
+					prev = append(prev, n)
+				}
+			}
+			if conds, exists := tm.conditions[n.ID]; exists {
+				for _, targetKey := range conds {
+					if targetKey == key {
+						prev = append(prev, n)
+					}
+				}
+			}
+			return true
+		})
+		tm.prevNodesCache[key] = prev
+		return true
+	})
 	return nil
+}
+
+// New method to reset the DAG state.
+func (tm *DAG) Reset() {
+	// Stop all task managers.
+	tm.taskManager.ForEach(func(k string, manager *TaskManager) bool {
+		manager.Stop()
+		return true
+	})
+	// Clear caches.
+	tm.nextNodesCache = nil
+	tm.prevNodesCache = nil
+	tm.Logger().Info("DAG has been reset")
 }
 
 func (tm *DAG) GetReport() string {

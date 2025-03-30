@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"math/rand" // ...new import for jitter...
+
 	"github.com/oarkflow/json"
 
 	"github.com/oarkflow/mq"
@@ -221,8 +223,16 @@ func (tm *TaskManager) processNode(exec *task) {
 				if attempts < tm.maxRetries {
 					attempts++
 					backoff := tm.baseBackoff * time.Duration(1<<attempts)
+					// add jitter to avoid thundering herd
+					jitter := time.Duration(rand.Int63n(int64(tm.baseBackoff)))
+					backoff += jitter
 					log.Printf("Recoverable error on node %s, retrying in %s: %v", exec.nodeID, backoff, result.Error)
-					time.Sleep(backoff)
+					select {
+					case <-time.After(backoff):
+					case <-exec.ctx.Done():
+						log.Printf("Context cancelled for node %s", exec.nodeID)
+						return
+					}
 					continue
 				} else if tm.recoveryHandler != nil {
 					if err := tm.recoveryHandler(exec.ctx, result); err == nil {
@@ -452,47 +462,62 @@ func (tm *TaskManager) getConditionalEdges(node *Node, result mq.Result) []Edge 
 }
 
 func (tm *TaskManager) handleEdges(currentResult nodeResult, edges []Edge) {
-	for _, edge := range edges {
-		index, ok := currentResult.ctx.Value(ContextIndex).(string)
-		if !ok {
-			index = "0"
+	if len(edges) > 1 {
+		var wg sync.WaitGroup
+		for _, edge := range edges {
+			wg.Add(1)
+			go func(edge Edge) {
+				defer wg.Done()
+				tm.processSingleEdge(currentResult, edge)
+			}(edge)
 		}
-		parentNode := fmt.Sprintf("%s%s%s", edge.From.ID, Delimiter, index)
+		wg.Wait()
+	} else {
+		for _, edge := range edges {
+			tm.processSingleEdge(currentResult, edge)
+		}
+	}
+}
 
-		switch edge.Type {
-		case Simple:
-			if _, exists := tm.iteratorNodes.Get(edge.From.ID); exists {
-				continue
+func (tm *TaskManager) processSingleEdge(currentResult nodeResult, edge Edge) {
+	index, ok := currentResult.ctx.Value(ContextIndex).(string)
+	if !ok {
+		index = "0"
+	}
+	parentNode := fmt.Sprintf("%s%s%s", edge.From.ID, Delimiter, index)
+	switch edge.Type {
+	case Simple:
+		if _, exists := tm.iteratorNodes.Get(edge.From.ID); exists {
+			return
+		}
+		fallthrough
+	case Iterator:
+		if edge.Type == Iterator {
+			var items []json.RawMessage
+			if err := json.Unmarshal(currentResult.result.Payload, &items); err != nil {
+				log.Printf("Error unmarshalling payload for node %s: %v", edge.To.ID, err)
+				tm.enqueueResult(nodeResult{
+					ctx:    currentResult.ctx,
+					nodeID: edge.To.ID,
+					status: mq.Failed,
+					result: mq.Result{Error: err},
+				})
+				return
 			}
-			fallthrough
-		case Iterator:
-			if edge.Type == Iterator {
-				var items []json.RawMessage
-				if err := json.Unmarshal(currentResult.result.Payload, &items); err != nil {
-					log.Printf("Error unmarshalling payload for node %s: %v", edge.To.ID, err)
-					tm.enqueueResult(nodeResult{
-						ctx:    currentResult.ctx,
-						nodeID: edge.To.ID,
-						status: mq.Failed,
-						result: mq.Result{Error: err},
-					})
-					return
-				}
-				tm.childNodes.Set(parentNode, len(items))
-				for i, item := range items {
-					childNode := fmt.Sprintf("%s%s%d", edge.To.ID, Delimiter, i)
-					ctx := context.WithValue(currentResult.ctx, ContextIndex, fmt.Sprintf("%d", i))
-					tm.parentNodes.Set(childNode, parentNode)
-					tm.enqueueTask(ctx, edge.To.ID, tm.taskID, item)
-				}
-			} else {
-				tm.childNodes.Set(parentNode, 1)
-				idx, _ := currentResult.ctx.Value(ContextIndex).(string)
-				childNode := fmt.Sprintf("%s%s%s", edge.To.ID, Delimiter, idx)
-				ctx := context.WithValue(currentResult.ctx, ContextIndex, idx)
+			tm.childNodes.Set(parentNode, len(items))
+			for i, item := range items {
+				childNode := fmt.Sprintf("%s%s%d", edge.To.ID, Delimiter, i)
+				ctx := context.WithValue(currentResult.ctx, ContextIndex, fmt.Sprintf("%d", i))
 				tm.parentNodes.Set(childNode, parentNode)
-				tm.enqueueTask(ctx, edge.To.ID, tm.taskID, currentResult.result.Payload)
+				tm.enqueueTask(ctx, edge.To.ID, tm.taskID, item)
 			}
+		} else {
+			tm.childNodes.Set(parentNode, 1)
+			idx, _ := currentResult.ctx.Value(ContextIndex).(string)
+			childNode := fmt.Sprintf("%s%s%s", edge.To.ID, Delimiter, idx)
+			ctx := context.WithValue(currentResult.ctx, ContextIndex, idx)
+			tm.parentNodes.Set(childNode, parentNode)
+			tm.enqueueTask(ctx, edge.To.ID, tm.taskID, currentResult.result.Payload)
 		}
 	}
 }
@@ -518,6 +543,8 @@ func (tm *TaskManager) retryDeferredTasks() {
 func (tm *TaskManager) processFinalResult(state *TaskState) {
 	state.Status = mq.Completed
 	state.targetResults.Clear()
+	// update metrics using the task start time for duration calculation
+	tm.dag.updateTaskMetrics(tm.taskID, state.Result, time.Since(tm.createdAt))
 	if tm.dag.finalResult != nil {
 		tm.dag.finalResult(tm.taskID, state.Result)
 	}
