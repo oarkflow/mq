@@ -222,21 +222,62 @@ func startConfigReloader(pool *Pool) {
 		for {
 			select {
 			case <-ticker.C:
+				reloadConfig := false
 				if err := validateDynamicConfig(Config); err != nil {
 					Logger.Error().Err(err).Msg("Invalid dynamic config, skipping reload")
 					continue
 				}
-				pool.timeout = Config.Timeout
-				pool.batchSize = Config.BatchSize
-				pool.maxMemoryLoad = Config.MaxMemoryLoad
-				pool.idleTimeout = Config.IdleTimeout
-				pool.backoffDuration = Config.BackoffDuration
-				pool.maxRetries = Config.MaxRetries
-				pool.thresholds = ThresholdConfig{
-					HighMemory:    Config.WarningThreshold.HighMemory,
-					LongExecution: Config.WarningThreshold.LongExecution,
+
+				if pool.timeout != Config.Timeout {
+					reloadConfig = true
+					Logger.Info().Msgf("Updating Timeout: %v -> %v", pool.timeout, Config.Timeout)
+					pool.timeout = Config.Timeout
 				}
-				Logger.Info().Msg("Dynamic configuration reloaded")
+
+				if pool.batchSize != Config.BatchSize {
+					reloadConfig = true
+					Logger.Info().Msgf("Updating BatchSize: %v -> %v", pool.batchSize, Config.BatchSize)
+					pool.batchSize = Config.BatchSize
+				}
+
+				if pool.maxMemoryLoad != Config.MaxMemoryLoad {
+					reloadConfig = true
+					Logger.Info().Msgf("Updating MaxMemoryLoad: %v -> %v", pool.maxMemoryLoad, Config.MaxMemoryLoad)
+					pool.maxMemoryLoad = Config.MaxMemoryLoad
+				}
+
+				if pool.idleTimeout != Config.IdleTimeout {
+					reloadConfig = true
+					Logger.Info().Msgf("Updating IdleTimeout: %v -> %v", pool.idleTimeout, Config.IdleTimeout)
+					pool.idleTimeout = Config.IdleTimeout
+				}
+
+				if pool.backoffDuration != Config.BackoffDuration {
+					reloadConfig = true
+					Logger.Info().Msgf("Updating BackoffDuration: %v -> %v", pool.backoffDuration, Config.BackoffDuration)
+					pool.backoffDuration = Config.BackoffDuration
+				}
+
+				if pool.maxRetries != Config.MaxRetries {
+					reloadConfig = true
+					Logger.Info().Msgf("Updating MaxRetries: %v -> %v", pool.maxRetries, Config.MaxRetries)
+					pool.maxRetries = Config.MaxRetries
+				}
+
+				if pool.thresholds.HighMemory != Config.WarningThreshold.HighMemory {
+					reloadConfig = true
+					Logger.Info().Msgf("Updating HighMemory Threshold: %v -> %v", pool.thresholds.HighMemory, Config.WarningThreshold.HighMemory)
+					pool.thresholds.HighMemory = Config.WarningThreshold.HighMemory
+				}
+
+				if pool.thresholds.LongExecution != Config.WarningThreshold.LongExecution {
+					reloadConfig = true
+					Logger.Info().Msgf("Updating LongExecution Threshold: %v -> %v", pool.thresholds.LongExecution, Config.WarningThreshold.LongExecution)
+					pool.thresholds.LongExecution = Config.WarningThreshold.LongExecution
+				}
+				if reloadConfig {
+					Logger.Info().Msg("Dynamic configuration reloaded")
+				}
 			case <-pool.stop:
 				return
 			}
