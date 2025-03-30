@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -20,6 +21,16 @@ import (
 	"github.com/oarkflow/mq/storage/memory"
 )
 
+// New task metrics type.
+type TaskMetrics struct {
+	mu         sync.Mutex
+	NotStarted int
+	Queued     int
+	Cancelled  int
+	Completed  int
+	Failed     int
+}
+
 type Node struct {
 	processor mq.Processor
 	Label     string
@@ -27,6 +38,12 @@ type Node struct {
 	Edges     []Edge
 	NodeType  NodeType
 	isReady   bool
+	Timeout   time.Duration // ...new field for node-level timeout...
+}
+
+// SetTimeout allows setting a maximum processing duration for the node.
+func (n *Node) SetTimeout(d time.Duration) {
+	n.Timeout = d
 }
 
 type Edge struct {
@@ -58,6 +75,20 @@ type DAG struct {
 	httpPrefix               string
 	nextNodesCache           map[string][]*Node
 	prevNodesCache           map[string][]*Node
+	// New hook fields:
+	PreProcessHook  func(ctx context.Context, node *Node, taskID string, payload json.RawMessage) context.Context
+	PostProcessHook func(ctx context.Context, node *Node, taskID string, result mq.Result)
+	metrics         *TaskMetrics // <-- new field for task metrics
+}
+
+// SetPreProcessHook configures a function to be called before each node is processed.
+func (tm *DAG) SetPreProcessHook(hook func(ctx context.Context, node *Node, taskID string, payload json.RawMessage) context.Context) {
+	tm.PreProcessHook = hook
+}
+
+// SetPostProcessHook configures a function to be called after each node is processed.
+func (tm *DAG) SetPostProcessHook(hook func(ctx context.Context, node *Node, taskID string, result mq.Result)) {
+	tm.PostProcessHook = hook
 }
 
 func NewDAG(name, key string, finalResultCallback func(taskID string, result mq.Result), opts ...mq.Option) *DAG {
@@ -70,6 +101,7 @@ func NewDAG(name, key string, finalResultCallback func(taskID string, result mq.
 		iteratorNodes: memory.New[string, []Edge](),
 		conditions:    make(map[string]map[string]string),
 		finalResult:   finalResultCallback,
+		metrics:       &TaskMetrics{}, // <-- initialize metrics
 	}
 	opts = append(opts,
 		mq.WithCallback(d.onTaskCallback),
@@ -88,6 +120,33 @@ func NewDAG(name, key string, finalResultCallback func(taskID string, result mq.
 	)
 	d.pool.Start(d.server.Options().NumOfWorkers())
 	return d
+}
+
+// New method to update task metrics.
+func (d *DAG) updateTaskMetrics(taskID string, result mq.Result, duration time.Duration) {
+	d.metrics.mu.Lock()
+	defer d.metrics.mu.Unlock()
+	switch result.Status {
+	case mq.Completed:
+		d.metrics.Completed++
+	case mq.Failed:
+		d.metrics.Failed++
+	case mq.Cancelled:
+		d.metrics.Cancelled++
+	}
+	d.Logger().Info("Updating task metrics",
+		logger.Field{Key: "taskID", Value: taskID},
+		logger.Field{Key: "lastExecuted", Value: time.Now()},
+		logger.Field{Key: "duration", Value: duration},
+		logger.Field{Key: "success", Value: result.Status},
+	)
+}
+
+// Getter for task metrics.
+func (d *DAG) GetTaskMetrics() TaskMetrics {
+	d.metrics.mu.Lock()
+	defer d.metrics.mu.Unlock()
+	return *d.metrics
 }
 
 func (tm *DAG) SetKey(key string) {
@@ -499,6 +558,20 @@ func (tm *DAG) Reset() {
 	tm.Logger().Info("DAG has been reset")
 }
 
+// New method to cancel a running task.
+func (tm *DAG) CancelTask(taskID string) error {
+	manager, ok := tm.taskManager.Get(taskID)
+	if !ok {
+		return fmt.Errorf("task %s not found", taskID)
+	}
+	// Stop the task manager to cancel the task.
+	manager.Stop()
+	tm.metrics.mu.Lock()
+	tm.metrics.Cancelled++ // <-- update cancelled metric
+	tm.metrics.mu.Unlock()
+	return nil
+}
+
 func (tm *DAG) GetReport() string {
 	return tm.report
 }
@@ -608,6 +681,12 @@ func (tm *DAG) ScheduleTask(ctx context.Context, payload []byte, opts ...mq.Sche
 	t.Topic = firstNode
 	ctx = context.WithValue(ctx, ContextIndex, "0")
 
+	// Update metrics for a new task.
+	tm.metrics.mu.Lock()
+	tm.metrics.NotStarted++
+	tm.metrics.Queued++
+	tm.metrics.mu.Unlock()
+
 	headers, ok := mq.GetHeaders(ctx)
 	ctxx := context.Background()
 	if ok {
@@ -615,4 +694,26 @@ func (tm *DAG) ScheduleTask(ctx context.Context, payload []byte, opts ...mq.Sche
 	}
 	tm.pool.Scheduler().AddTask(ctxx, t, opts...)
 	return mq.Result{CreatedAt: t.CreatedAt, TaskID: t.ID, Topic: t.Topic, Status: mq.Pending}
+}
+
+// GetStatus returns a summary of the DAG including node and task counts.
+func (tm *DAG) GetStatus() map[string]interface{} {
+	status := make(map[string]interface{})
+	// Count nodes
+	nodeCount := 0
+	tm.nodes.ForEach(func(_ string, _ *Node) bool {
+		nodeCount++
+		return true
+	})
+	status["nodes_count"] = nodeCount
+
+	// Count tasks (if available, using taskManager's ForEach)
+	taskCount := 0
+	tm.taskManager.ForEach(func(_ string, _ *TaskManager) bool {
+		taskCount++
+		return true
+	})
+	status["task_count"] = taskCount
+
+	return status
 }

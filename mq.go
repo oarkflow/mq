@@ -28,6 +28,7 @@ const (
 	Processing Status = "Processing"
 	Completed  Status = "Completed"
 	Failed     Status = "Failed"
+	Cancelled  Status = "Cancelled"
 )
 
 type Result struct {

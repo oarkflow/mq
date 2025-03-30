@@ -11,7 +11,6 @@ import (
 	"math/rand" // ...new import for jitter...
 
 	"github.com/oarkflow/json"
-
 	"github.com/oarkflow/mq"
 	"github.com/oarkflow/mq/logger"
 	"github.com/oarkflow/mq/storage"
@@ -200,6 +199,16 @@ func (tm *TaskManager) processNode(exec *task) {
 		tm.dag.Logger().Error("Node not found", logger.Field{Key: "nodeID", Value: pureNodeID})
 		return
 	}
+	// Wrap context with timeout if node.Timeout is configured.
+	if node.Timeout > 0 {
+		var cancel context.CancelFunc
+		exec.ctx, cancel = context.WithTimeout(exec.ctx, node.Timeout)
+		defer cancel()
+	}
+	// Invoke PreProcessHook if available.
+	if tm.dag.PreProcessHook != nil {
+		exec.ctx = tm.dag.PreProcessHook(exec.ctx, node, exec.taskID, exec.payload)
+	}
 	state, _ := tm.taskStates.Get(exec.nodeID)
 	if state == nil {
 		tm.dag.Logger().Warn("State not found; creating new state", logger.Field{Key: "nodeID", Value: exec.nodeID})
@@ -246,6 +255,11 @@ func (tm *TaskManager) processNode(exec *task) {
 	}
 	log.Printf("Tracing: End processing node %s", exec.nodeID)
 	nodeLatency := time.Since(startTime)
+
+	// Invoke PostProcessHook if available.
+	if tm.dag.PostProcessHook != nil {
+		tm.dag.PostProcessHook(exec.ctx, node, exec.taskID, result)
+	}
 
 	if result.Error != nil {
 		result.Status = mq.Failed

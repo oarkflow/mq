@@ -15,6 +15,7 @@ import (
 	"github.com/oarkflow/mq/sio"
 
 	"github.com/oarkflow/json/jsonparser"
+
 	"github.com/oarkflow/mq/consts"
 )
 
@@ -125,6 +126,35 @@ func (tm *DAG) taskStatusHandler(w http.ResponseWriter, r *http.Request) {
 	})
 	w.Header().Set(consts.ContentType, consts.TypeJson)
 	json.NewEncoder(w).Encode(result)
+}
+
+// New API endpoint to fetch metrics.
+func (tm *DAG) metricsHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set(consts.ContentType, consts.TypeJson)
+	json.NewEncoder(w).Encode(tm.metrics)
+}
+
+// New API endpoint to cancel a running task.
+func (tm *DAG) cancelTaskHandler(w http.ResponseWriter, r *http.Request) {
+	taskID := r.URL.Query().Get("taskID")
+	if taskID == "" {
+		http.Error(w, `{"message": "taskID is missing"}`, http.StatusBadRequest)
+		return
+	}
+	err := tm.CancelTask(taskID)
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"message": "%s"}`, err.Error()), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set(consts.ContentType, consts.TypeJson)
+	w.Write([]byte(`{"message": "task cancelled successfully"}`))
+}
+
+// New API endpoint to fetch full DAG status.
+func (tm *DAG) statusHandler(w http.ResponseWriter, r *http.Request) {
+	status := tm.GetStatus()
+	w.Header().Set(consts.ContentType, consts.TypeJson)
+	json.NewEncoder(w).Encode(status)
 }
 
 func (tm *DAG) SetupWS() *sio.Server {

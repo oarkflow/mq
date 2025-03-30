@@ -6,11 +6,11 @@ import (
 	"net/http"
 	"os"
 	"strings"
-
+	
 	"github.com/gofiber/fiber/v2"
 	"github.com/oarkflow/form"
 	"github.com/oarkflow/json/jsonparser"
-
+	
 	"github.com/oarkflow/mq"
 	"github.com/oarkflow/mq/consts"
 )
@@ -36,7 +36,7 @@ func (tm *DAG) renderFiber(c *fiber.Ctx) error {
 	accept := c.Get("Accept")
 	userCtx := form.UserContext(ctx)
 	ctx = context.WithValue(ctx, "method", c.Method())
-
+	
 	if c.Method() == fiber.MethodGet && userCtx.Get("task_id") != "" {
 		manager, ok := tm.taskManager.Get(userCtx.Get("task_id"))
 		if !ok || manager == nil {
@@ -46,17 +46,17 @@ func (tm *DAG) renderFiber(c *fiber.Ctx) error {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"message": "task not found"})
 		}
 	}
-
+	
 	result := tm.Process(ctx, data)
 	if result.Error != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"message": result.Error.Error()})
 	}
-
+	
 	contentType := consts.TypeJson
 	if ct, ok := result.Ctx.Value(consts.ContentType).(string); ok {
 		contentType = ct
 	}
-
+	
 	switch contentType {
 	case consts.TypeHtml:
 		htmlContent, err := jsonparser.GetString(result.Payload, "html_content")
@@ -80,12 +80,12 @@ func (tm *DAG) fiberTaskStatusHandler(c *fiber.Ctx) error {
 	if taskID == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"message": "taskID is missing"})
 	}
-
+	
 	manager, ok := tm.taskManager.Get(taskID)
 	if !ok {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"message": "Invalid TaskID"})
 	}
-
+	
 	result := make(map[string]TaskState)
 	manager.taskStates.ForEach(func(key string, value *TaskState) bool {
 		key = strings.Split(key, Delimiter)[0]
@@ -131,17 +131,32 @@ func (tm *DAG) Handlers(app any, prefix string) {
 		a.Get("/", func(c *fiber.Ctx) error {
 			image := fmt.Sprintf("%s.svg", mq.NewID())
 			defer os.Remove(image)
-
+			
 			if err := tm.SaveSVG(image); err != nil {
 				return c.Status(fiber.StatusBadRequest).SendString("Failed to read request body")
 			}
-
+			
 			svgBytes, err := os.ReadFile(image)
 			if err != nil {
 				return c.Status(fiber.StatusInternalServerError).SendString("Could not read SVG file")
 			}
 			c.Set(fiber.HeaderContentType, "image/svg+xml")
 			return c.Send(svgBytes)
+		})
+		// <<< NEW FIBER API ENDPOINTS >>>
+		a.Get("/metrics", func(c *fiber.Ctx) error {
+			return c.JSON(tm.metrics)
+		})
+		a.Get("/cancel", func(c *fiber.Ctx) error {
+			taskID := c.Query("taskID")
+			if taskID == "" {
+				return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"message": "taskID is missing"})
+			}
+			err := tm.CancelTask(taskID)
+			if err != nil {
+				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"message": err.Error()})
+			}
+			return c.JSON(fiber.Map{"message": "task cancelled successfully"})
 		})
 	default:
 		http.Handle("/notify", tm.SetupWS())
@@ -152,6 +167,9 @@ func (tm *DAG) Handlers(app any, prefix string) {
 			w.Header().Set("Content-Type", "text/plain")
 			fmt.Fprintln(w, tm.ExportDOT())
 		})
+		// <<< NEW NET/HTTP API ENDPOINTS >>>
+		http.HandleFunc("/metrics", tm.metricsHandler)
+		http.HandleFunc("/cancel", tm.cancelTaskHandler)
 		http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 			image := fmt.Sprintf("%s.svg", mq.NewID())
 			err := tm.SaveSVG(image)
