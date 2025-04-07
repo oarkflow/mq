@@ -236,52 +236,42 @@ func startConfigReloader(pool *Pool) {
 					Logger.Error().Err(err).Msg("Invalid dynamic config, skipping reload")
 					continue
 				}
-
 				if pool.timeout != Config.Timeout {
 					reloadConfig = true
-					Logger.Info().Msgf("Updating Timeout: %v -> %v", pool.timeout, Config.Timeout)
 					pool.timeout = Config.Timeout
 				}
-
 				if pool.batchSize != Config.BatchSize {
 					reloadConfig = true
-					Logger.Info().Msgf("Updating BatchSize: %v -> %v", pool.batchSize, Config.BatchSize)
 					pool.batchSize = Config.BatchSize
 				}
 
 				if pool.maxMemoryLoad != Config.MaxMemoryLoad {
 					reloadConfig = true
-					Logger.Info().Msgf("Updating MaxMemoryLoad: %v -> %v", pool.maxMemoryLoad, Config.MaxMemoryLoad)
 					pool.maxMemoryLoad = Config.MaxMemoryLoad
 				}
 
 				if pool.idleTimeout != Config.IdleTimeout {
 					reloadConfig = true
-					Logger.Info().Msgf("Updating IdleTimeout: %v -> %v", pool.idleTimeout, Config.IdleTimeout)
 					pool.idleTimeout = Config.IdleTimeout
 				}
 
 				if pool.backoffDuration != Config.BackoffDuration {
 					reloadConfig = true
-					Logger.Info().Msgf("Updating BackoffDuration: %v -> %v", pool.backoffDuration, Config.BackoffDuration)
 					pool.backoffDuration = Config.BackoffDuration
 				}
 
 				if pool.maxRetries != Config.MaxRetries {
 					reloadConfig = true
-					Logger.Info().Msgf("Updating MaxRetries: %v -> %v", pool.maxRetries, Config.MaxRetries)
 					pool.maxRetries = Config.MaxRetries
 				}
 
 				if pool.thresholds.HighMemory != Config.WarningThreshold.HighMemory {
 					reloadConfig = true
-					Logger.Info().Msgf("Updating HighMemory Threshold: %v -> %v", pool.thresholds.HighMemory, Config.WarningThreshold.HighMemory)
 					pool.thresholds.HighMemory = Config.WarningThreshold.HighMemory
 				}
 
 				if pool.thresholds.LongExecution != Config.WarningThreshold.LongExecution {
 					reloadConfig = true
-					Logger.Info().Msgf("Updating LongExecution Threshold: %v -> %v", pool.thresholds.LongExecution, Config.WarningThreshold.LongExecution)
 					pool.thresholds.LongExecution = Config.WarningThreshold.LongExecution
 				}
 				if reloadConfig {
@@ -641,7 +631,6 @@ func (wp *Pool) dynamicWorkerScaler() {
 			queueLen := len(wp.taskQueue)
 			wp.taskQueueLock.Unlock()
 			newWorkers := queueLen/5 + 1
-			wp.logger.Info().Msgf("Auto-scaling: queue length %d, adjusting workers to %d", queueLen, newWorkers)
 			wp.AdjustWorkerCount(newWorkers)
 		case <-wp.stop:
 			return
