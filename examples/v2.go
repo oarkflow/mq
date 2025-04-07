@@ -172,6 +172,13 @@ func main() {
 	flow.AddEdge(dag.Simple, "NodeA", "NodeA", "NodeB")
 	flow.AddEdge(dag.Simple, "NodeB", "NodeB", "NodeC")
 	flow.AddEdge(dag.Simple, "NodeC", "NodeC", "Result")
+	dag.AddHandler("Form", func(s string) mq.Processor {
+		opt := dag.Operation{
+			Tags: []string{"built-in", "form"},
+		}
+		return &Form{Operation: opt}
+	})
+	fmt.Println(dag.AvailableHandlers())
 	if flow.Error != nil {
 		panic(flow.Error)
 	}
