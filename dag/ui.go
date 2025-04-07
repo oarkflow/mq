@@ -139,69 +139,66 @@ func (tm *DAG) saveImage(fileName string, arg string) error {
 	return nil
 }
 
+// Refactored ExportDOT for a modern, enterprise look.
 func (tm *DAG) ExportDOT(direction ...Direction) string {
 	rankDir := TB
 	if len(direction) > 0 && direction[0] != "" {
 		rankDir = direction[0]
 	}
 	var sb strings.Builder
+	// Graph properties with a clean background and smooth layout
 	sb.WriteString(fmt.Sprintf(`digraph "%s" {`, tm.name))
 	sb.WriteString("\n")
-	sb.WriteString(fmt.Sprintf(`  label="%s";`, tm.name))
+	sb.WriteString(`  graph [layout=dot, splines=polyline, overlap=false, bgcolor="#FAFAFA", fontname="Helvetica", fontsize=12];`)
 	sb.WriteString("\n")
-	sb.WriteString(`  labelloc="t"; fontsize=22; fontname="Helvetica";`)
+	// Nodes get a sophisticated gradient fill, drop shadow effect simulated via penwidth and color, and rounded borders.
+	sb.WriteString(`  node [shape=box, style="filled,rounded", gradientangle=135, fontname="Helvetica", fontsize=10, penwidth=2, color="#2C3E50", fillcolor="#FFFFFF"];`)
 	sb.WriteString("\n")
-	sb.WriteString(`  node [shape=box, fontname="Helvetica", fillcolor="#B3CDE0", fontcolor="#2C3E50", fontsize=10, margin="0.25,0.15", style="rounded,filled"];`)
-	sb.WriteString("\n")
-	sb.WriteString(`  edge [fontname="Helvetica", fontsize=10, arrowsize=0.8];`)
+	// Edges with smooth curves and subtle colors.
+	sb.WriteString(`  edge [fontname="Helvetica", fontsize=9, color="#7F8C8D", arrowsize=0.8, style=solid];`)
 	sb.WriteString("\n")
 	sb.WriteString(fmt.Sprintf(`  rankdir=%s;`, rankDir))
 	sb.WriteString("\n")
+	// Render nodes with advanced styling
 	sortedNodes := tm.TopologicalSort()
 	for _, nodeKey := range sortedNodes {
 		node, _ := tm.nodes.Get(nodeKey)
-		renderNode(&sb, node, `  `)
+		renderNode(&sb, node, "  ")
 	}
+	// Render normal edges with enhanced styling.
 	for _, nodeKey := range sortedNodes {
 		node, _ := tm.nodes.Get(nodeKey)
-		renderEdges(&sb, node, `  `)
+		renderEdges(&sb, node, "  ")
 	}
+	// Render subgraphs for sub-DAGs with a distinct dashed border.
 	for _, nodeKey := range sortedNodes {
 		node, _ := tm.nodes.Get(nodeKey)
 		if node.processor != nil {
 			if subDAG, ok := isDAGNode(node); ok && subDAG.consumerTopic != "" {
-				sb.WriteString(fmt.Sprintf(`  subgraph "cluster_%s" {`, subDAG.name))
-				sb.WriteString("\n")
-				sb.WriteString(fmt.Sprintf(`    label=" (%s)";`, subDAG.name))
-				sb.WriteString("\n")
-				sb.WriteString(`    labelloc="b"; labeljust="c"; fontsize=16;`)
-				sb.WriteString("\n")
-				sb.WriteString(`    margin=50;`)
-				sb.WriteString(`    style="filled,bold"; color="gray90";`)
-				sb.WriteString("\n")
+				sb.WriteString(fmt.Sprintf("  subgraph cluster_%s {\n", subDAG.name))
+				sb.WriteString(fmt.Sprintf("    label = \"Sub-DAG: %s\";\n", subDAG.name))
+				sb.WriteString("    style = dashed;\n")
+				sb.WriteString("    color = \"#A6ACAF\";\n")
 				for _, subNodeKey := range subDAG.TopologicalSort() {
 					subNode, _ := subDAG.nodes.Get(subNodeKey)
-					renderNode(&sb, subNode, `    `, subDAG.name+"_")
+					renderNode(&sb, subNode, "    ", subDAG.name+"_")
 				}
 				for _, subNodeKey := range subDAG.TopologicalSort() {
 					subNode, _ := subDAG.nodes.Get(subNodeKey)
-					renderEdges(&sb, subNode, `    `, subDAG.name+"_")
+					renderEdges(&sb, subNode, "    ", subDAG.name+"_")
 				}
 				sb.WriteString("  }\n")
 				if startNodeKey := subDAG.TopologicalSort()[0]; startNodeKey != "" {
-					sb.WriteString(fmt.Sprintf(
-						`  "%s" -> "%s%s" [label="  Connect to %s", color="#93CCEA"];`,
-						nodeKey, subDAG.name+"_", startNodeKey, startNodeKey))
-					sb.WriteString("\n")
+					sb.WriteString(fmt.Sprintf("  \"%s\" -> \"%s%s\" [label=\"Subconnect\", color=\"#16A085\", style=bold, fontsize=10];\n", nodeKey, subDAG.name+"_", startNodeKey))
 				}
 			}
 		}
 	}
+	// Render conditional edges with dotted style.
 	for fromNodeKey, conditions := range tm.conditions {
 		for when, then := range conditions {
 			if toNode, ok := tm.nodes.Get(then); ok {
-				sb.WriteString(fmt.Sprintf(`  "%s" -> "%s" [label="  %s", color="purple", style=dotted, fontsize=10, arrowsize=0.6];`, fromNodeKey, toNode.ID, when))
-				sb.WriteString("\n")
+				sb.WriteString(fmt.Sprintf("  \"%s\" -> \"%s\" [label=\"%s\", color=\"#8E44AD\", style=dotted, fontsize=9, arrowsize=0.6];\n", fromNodeKey, toNode.ID, when))
 			}
 		}
 	}
@@ -209,54 +206,45 @@ func (tm *DAG) ExportDOT(direction ...Direction) string {
 	return sb.String()
 }
 
+// Enhanced renderNode with a modern professional style.
 func renderNode(sb *strings.Builder, node *Node, indent string, prefix ...string) {
 	prefixedID := fmt.Sprintf("%s%s", strings.Join(prefix, ""), node.ID)
 	labelSuffix := ""
-	nodeColor := "lightgray"
-
-	// Modify graphical representation based on node type
+	nodeFill := "#F0F3F4" // Default light tone
 	switch node.NodeType {
 	case Function:
-		nodeColor = "#D4EDDA" // Light green background for Function
-		labelSuffix = " ƒ(x)" // Function symbol (ƒ) as a graphical representation
-
+		nodeFill = "#D4EFDF" // soft green
+		labelSuffix = " ƒ(x)"
 	case Page:
-		nodeColor = "#f0d2d1" // Light red background for Page
-		labelSuffix = " 📄"    // Page symbol (📄) as a graphical representation
+		nodeFill = "#FADBD8" // soft red
+		labelSuffix = " 📄"
+	default:
+		nodeFill = "#F0F3F4"
 	}
-
-	// Add separator between label and labelSuffix
-	separator := " " // Define your separator here (can be changed to anything)
-	label := fmt.Sprintf("%s%s", node.Label, separator)
-
-	// Write the formatted node representation with a separator between label and labelSuffix
-	sb.WriteString(fmt.Sprintf(
-		`%s"%s" [label="%s%s", fontcolor="#2C3E50", fillcolor="%s", style="rounded,filled", id="node_%s"];`,
-		indent, prefixedID, label, labelSuffix, nodeColor, prefixedID))
-	sb.WriteString("\n")
+	// Apply gradient simulation and enhanced border styling.
+	sb.WriteString(fmt.Sprintf("%s\"%s\" [label=\"%s%s\", fontcolor=\"#2C3E50\", fillcolor=\"%s\", style=\"filled,rounded\", penwidth=2, gradientangle=135];\n",
+		indent, prefixedID, node.Label, labelSuffix, nodeFill))
 }
 
+// Refined renderEdges with modern aesthetics.
 func renderEdges(sb *strings.Builder, node *Node, indent string, prefix ...string) {
 	prefixedID := fmt.Sprintf("%s%s", strings.Join(prefix, ""), node.ID)
 	for _, edge := range node.Edges {
 		edgeStyle := "solid"
-		edgeColor := "#023020"
+		edgeColor := "#7F8C8D"
 		labelSuffix := ""
 		switch edge.Type {
 		case Iterator:
 			edgeStyle = "dashed"
-			edgeColor = "#839fff"
+			edgeColor = "#5DADE2"
 			labelSuffix = " [Iter]"
 		case Simple:
 			edgeStyle = "solid"
-			edgeColor = "#023020"
-			labelSuffix = ""
+			edgeColor = "#7F8C8D"
 		}
 		toPrefixedID := fmt.Sprintf("%s%s", strings.Join(prefix, ""), edge.To.ID)
-		sb.WriteString(fmt.Sprintf(
-			`%s"%s" -> "%s" [label=" %s%s", color="%s", style="%s"];`,
+		sb.WriteString(fmt.Sprintf("%s\"%s\" -> \"%s\" [label=\"%s%s\", color=\"%s\", style=\"%s\", penwidth=1];\n",
 			indent, prefixedID, toPrefixedID, edge.Label, labelSuffix, edgeColor, edgeStyle))
-		sb.WriteString("\n")
 	}
 }
 

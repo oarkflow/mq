@@ -26,6 +26,8 @@ type Debugger interface {
 type Processor interface {
 	mq.Processor
 	SetConfig(Payload)
+	SetTags(tag ...string)
+	GetTags() []string
 }
 
 type Condition interface {
@@ -63,6 +65,15 @@ type Operation struct {
 	OptionalFields  []string `json:"optional_fields"`
 	GeneratedFields []string `json:"generated_fields"`
 	Type            NodeType `json:"type"`
+	Tags            []string `json:"tags"`
+}
+
+func (e *Operation) SetTags(tag ...string) {
+	e.Tags = append(e.Tags, tag...)
+}
+
+func (e *Operation) GetTags() []string {
+	return e.Tags
 }
 
 func (e *Operation) Consume(_ context.Context) error {
