@@ -231,51 +231,33 @@ func startConfigReloader(pool *Pool) {
 		for {
 			select {
 			case <-ticker.C:
-				reloadConfig := false
 				if err := validateDynamicConfig(Config); err != nil {
 					Logger.Error().Err(err).Msg("Invalid dynamic config, skipping reload")
 					continue
 				}
 				if pool.timeout != Config.Timeout {
-					reloadConfig = true
 					pool.timeout = Config.Timeout
 				}
 				if pool.batchSize != Config.BatchSize {
-					reloadConfig = true
 					pool.batchSize = Config.BatchSize
 				}
-
 				if pool.maxMemoryLoad != Config.MaxMemoryLoad {
-					reloadConfig = true
 					pool.maxMemoryLoad = Config.MaxMemoryLoad
 				}
-
 				if pool.idleTimeout != Config.IdleTimeout {
-					reloadConfig = true
 					pool.idleTimeout = Config.IdleTimeout
 				}
-
 				if pool.backoffDuration != Config.BackoffDuration {
-					reloadConfig = true
 					pool.backoffDuration = Config.BackoffDuration
 				}
-
 				if pool.maxRetries != Config.MaxRetries {
-					reloadConfig = true
 					pool.maxRetries = Config.MaxRetries
 				}
-
 				if pool.thresholds.HighMemory != Config.WarningThreshold.HighMemory {
-					reloadConfig = true
 					pool.thresholds.HighMemory = Config.WarningThreshold.HighMemory
 				}
-
 				if pool.thresholds.LongExecution != Config.WarningThreshold.LongExecution {
-					reloadConfig = true
 					pool.thresholds.LongExecution = Config.WarningThreshold.LongExecution
-				}
-				if reloadConfig {
-					Logger.Info().Msg("Dynamic configuration reloaded")
 				}
 			case <-pool.stop:
 				return
