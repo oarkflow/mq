@@ -2,6 +2,7 @@ package dag
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -62,6 +63,7 @@ type DAG struct {
 	consumer                 *mq.Consumer
 	finalResult              func(taskID string, result mq.Result)
 	pool                     *mq.Pool
+	scheduler                *mq.Scheduler
 	Notifier                 *sio.Server
 	server                   *mq.Broker
 	reportNodeResultCallback func(mq.Result)
@@ -118,6 +120,7 @@ func NewDAG(name, key string, finalResultCallback func(taskID string, result mq.
 		mq.WithPoolCallback(callback),
 		mq.WithTaskStorage(options.Storage()),
 	)
+	d.scheduler = mq.NewScheduler(d.pool)
 	d.pool.Start(d.server.Options().NumOfWorkers())
 	return d
 }
@@ -627,6 +630,9 @@ func (tm *DAG) Start(ctx context.Context, addr string) error {
 }
 
 func (tm *DAG) ScheduleTask(ctx context.Context, payload []byte, opts ...mq.SchedulerOption) mq.Result {
+	if tm.scheduler == nil {
+		return mq.Result{Error: errors.New("scheduler not defined"), Ctx: ctx}
+	}
 	var taskID string
 	userCtx := form.UserContext(ctx)
 	if val := userCtx.Get("task_id"); val != "" {
@@ -692,7 +698,7 @@ func (tm *DAG) ScheduleTask(ctx context.Context, payload []byte, opts ...mq.Sche
 	if ok {
 		ctxx = mq.SetHeaders(ctxx, headers.AsMap())
 	}
-	tm.pool.Scheduler().AddTask(ctxx, t, opts...)
+	tm.scheduler.AddTask(ctxx, t, opts...)
 	return mq.Result{CreatedAt: t.CreatedAt, TaskID: t.ID, Topic: t.Topic, Status: mq.Pending}
 }
 

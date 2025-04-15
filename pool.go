@@ -143,7 +143,6 @@ var Config = &DynamicConfig{
 // Pool represents the worker pool processing tasks.
 type Pool struct {
 	taskStorage                TaskStorage
-	scheduler                  *Scheduler
 	stop                       chan struct{}
 	taskNotify                 chan struct{}
 	workerAdjust               chan int
@@ -190,12 +189,12 @@ func NewPool(numOfWorkers int, opts ...PoolOption) *Pool {
 		backoffDuration:         Config.BackoffDuration,
 		maxRetries:              Config.MaxRetries,
 		logger:                  Logger,
+		numOfWorkers:            int32(numOfWorkers),
 		dlq:                     NewDeadLetterQueue(),
 		metricsRegistry:         NewInMemoryMetricsRegistry(),
 		diagnosticsEnabled:      true,
 		gracefulShutdownTimeout: 10 * time.Second,
 	}
-	pool.scheduler = NewScheduler(pool)
 	pool.taskAvailableCond = sync.NewCond(&sync.Mutex{})
 	for _, opt := range opts {
 		opt(pool)
@@ -203,12 +202,15 @@ func NewPool(numOfWorkers int, opts ...PoolOption) *Pool {
 	if pool.taskQueue == nil {
 		pool.taskQueue = make(PriorityQueue, 0, 10)
 	}
-	heap.Init(&pool.taskQueue)
-	pool.scheduler.Start()
-	pool.Start(numOfWorkers)
-	startConfigReloader(pool)
-	go pool.dynamicWorkerScaler()
+	pool.Init()
 	return pool
+}
+
+func (wp *Pool) Init() {
+	heap.Init(&wp.taskQueue)
+	wp.Start(int(wp.numOfWorkers))
+	go startConfigReloader(wp)
+	go wp.dynamicWorkerScaler()
 }
 
 func validateDynamicConfig(c *DynamicConfig) error {
@@ -225,45 +227,43 @@ func validateDynamicConfig(c *DynamicConfig) error {
 }
 
 func startConfigReloader(pool *Pool) {
-	go func() {
-		ticker := time.NewTicker(Config.ReloadInterval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				if err := validateDynamicConfig(Config); err != nil {
-					Logger.Error().Err(err).Msg("Invalid dynamic config, skipping reload")
-					continue
-				}
-				if pool.timeout != Config.Timeout {
-					pool.timeout = Config.Timeout
-				}
-				if pool.batchSize != Config.BatchSize {
-					pool.batchSize = Config.BatchSize
-				}
-				if pool.maxMemoryLoad != Config.MaxMemoryLoad {
-					pool.maxMemoryLoad = Config.MaxMemoryLoad
-				}
-				if pool.idleTimeout != Config.IdleTimeout {
-					pool.idleTimeout = Config.IdleTimeout
-				}
-				if pool.backoffDuration != Config.BackoffDuration {
-					pool.backoffDuration = Config.BackoffDuration
-				}
-				if pool.maxRetries != Config.MaxRetries {
-					pool.maxRetries = Config.MaxRetries
-				}
-				if pool.thresholds.HighMemory != Config.WarningThreshold.HighMemory {
-					pool.thresholds.HighMemory = Config.WarningThreshold.HighMemory
-				}
-				if pool.thresholds.LongExecution != Config.WarningThreshold.LongExecution {
-					pool.thresholds.LongExecution = Config.WarningThreshold.LongExecution
-				}
-			case <-pool.stop:
-				return
+	ticker := time.NewTicker(Config.ReloadInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			if err := validateDynamicConfig(Config); err != nil {
+				Logger.Error().Err(err).Msg("Invalid dynamic config, skipping reload")
+				continue
 			}
+			if pool.timeout != Config.Timeout {
+				pool.timeout = Config.Timeout
+			}
+			if pool.batchSize != Config.BatchSize {
+				pool.batchSize = Config.BatchSize
+			}
+			if pool.maxMemoryLoad != Config.MaxMemoryLoad {
+				pool.maxMemoryLoad = Config.MaxMemoryLoad
+			}
+			if pool.idleTimeout != Config.IdleTimeout {
+				pool.idleTimeout = Config.IdleTimeout
+			}
+			if pool.backoffDuration != Config.BackoffDuration {
+				pool.backoffDuration = Config.BackoffDuration
+			}
+			if pool.maxRetries != Config.MaxRetries {
+				pool.maxRetries = Config.MaxRetries
+			}
+			if pool.thresholds.HighMemory != Config.WarningThreshold.HighMemory {
+				pool.thresholds.HighMemory = Config.WarningThreshold.HighMemory
+			}
+			if pool.thresholds.LongExecution != Config.WarningThreshold.LongExecution {
+				pool.thresholds.LongExecution = Config.WarningThreshold.LongExecution
+			}
+		case <-pool.stop:
+			return
 		}
-	}()
+	}
 }
 
 func (wp *Pool) Start(numWorkers int) {
@@ -564,8 +564,11 @@ func (wp *Pool) AdjustWorkerCount(newWorkerCount int) {
 	}
 }
 
+func (wp *Pool) AddScheduledMetrics(total int) {
+	wp.metrics.TotalScheduled = int64(total)
+}
+
 func (wp *Pool) Metrics() Metrics {
-	wp.metrics.TotalScheduled = int64(len(wp.scheduler.tasks))
 	return wp.metrics
 }
 
@@ -583,8 +586,6 @@ type FormattedMetrics struct {
 
 // FormattedMetrics returns a formatted version of the pool metrics.
 func (wp *Pool) FormattedMetrics() FormattedMetrics {
-	// Update TotalScheduled from the scheduler.
-	wp.metrics.TotalScheduled = int64(len(wp.scheduler.tasks))
 	var avgExec time.Duration
 	if wp.metrics.CompletedTasks > 0 {
 		avgExec = time.Duration(wp.metrics.ExecutionTime/wp.metrics.CompletedTasks) * time.Millisecond
@@ -600,8 +601,6 @@ func (wp *Pool) FormattedMetrics() FormattedMetrics {
 		AverageExecution:     avgExec.String(),
 	}
 }
-
-func (wp *Pool) Scheduler() *Scheduler { return wp.scheduler }
 
 func (wp *Pool) dynamicWorkerScaler() {
 	ticker := time.NewTicker(10 * time.Second)

@@ -10,52 +10,67 @@ import (
 	"time"
 
 	"github.com/oarkflow/log"
+
+	"github.com/oarkflow/mq/storage"
+	"github.com/oarkflow/mq/storage/memory"
 )
 
 var Logger = log.DefaultLogger
 
 type ScheduleOptions struct {
-	Handler   Handler
-	Callback  Callback
-	Interval  time.Duration
-	Overlap   bool
-	Recurring bool
+	Handler      Handler
+	Callback     Callback
+	Interval     time.Duration
+	Overlap      bool
+	Recurring    bool
+	ScheduleSpec string
 }
 
 type SchedulerOption func(*ScheduleOptions)
 
-// WithSchedulerHandler Helper functions to create SchedulerOptions
+// WithSchedulerHandler sets the handler.
 func WithSchedulerHandler(handler Handler) SchedulerOption {
 	return func(opts *ScheduleOptions) {
 		opts.Handler = handler
 	}
 }
 
+// WithSchedulerCallback sets the callback.
 func WithSchedulerCallback(callback Callback) SchedulerOption {
 	return func(opts *ScheduleOptions) {
 		opts.Callback = callback
 	}
 }
 
+// WithOverlap indicates that overlapping executions are allowed.
 func WithOverlap() SchedulerOption {
 	return func(opts *ScheduleOptions) {
 		opts.Overlap = true
 	}
 }
 
+// WithInterval sets a fixed interval.
 func WithInterval(interval time.Duration) SchedulerOption {
 	return func(opts *ScheduleOptions) {
 		opts.Interval = interval
 	}
 }
 
+// WithRecurring indicates that the task should be rescheduled after execution.
 func WithRecurring() SchedulerOption {
 	return func(opts *ScheduleOptions) {
 		opts.Recurring = true
 	}
 }
 
-// defaultOptions returns the default scheduling options
+// WithScheduleSpec provides a schedule string (e.g., cron expression, @daily, @every 1h30m, etc.)
+func WithScheduleSpec(spec string) SchedulerOption {
+	return func(opts *ScheduleOptions) {
+		opts.ScheduleSpec = spec
+	}
+}
+
+// defaultSchedulerOptions returns the default scheduling options.
 func defaultSchedulerOptions() *ScheduleOptions {
 	return &ScheduleOptions{
 		Interval:  time.Minute,
@@ -63,38 +78,31 @@ func defaultSchedulerOptions() *ScheduleOptions {
 	}
 }
 
-type SchedulerConfig struct {
-	Callback Callback
-	Overlap  bool
-}
+// --------------------------------------------------------
+// Schedule and Cron Structures
+// --------------------------------------------------------
 
-type ScheduledTask struct {
-	ctx              context.Context
-	handler          Handler
-	payload          *Task
-	config           SchedulerConfig
-	schedule         *Schedule
-	stop             chan struct{}
-	executionHistory []ExecutionHistory
-}
-
+// Schedule holds a schedule. It may be defined via:
+// - A fixed time-interval (Interval)
+// - A cron spec (CronSpec) string (which may be 5 or 6 fields)
+// - A specific time of day, specific days of week or month.
 type Schedule struct {
-	TimeOfDay  time.Time
-	CronSpec   string
-	DayOfWeek  []time.Weekday
-	DayOfMonth []int
-	Interval   time.Duration
-	Recurring  bool
+	TimeOfDay  time.Time      // Optional: time of day for one-off daily recurrence.
+	CronSpec   string         // For cron-based scheduling.
+	DayOfWeek  []time.Weekday // Optional: days of the week.
+	DayOfMonth []int          // Optional: days of the month.
+	Interval   time.Duration  // For duration-based scheduling (e.g. @every).
+	Recurring  bool           // Indicates if schedule recurs.
 }
 
+// ToHumanReadable returns a human‑readable description of the schedule.
 func (s *Schedule) ToHumanReadable() string {
 	var sb strings.Builder
 	if s.CronSpec != "" {
-		cronDescription, err := parseCronSpec(s.CronSpec)
-		if err != nil {
+		if desc, err := parseCronSpecDescription(s.CronSpec); err != nil {
 			sb.WriteString(fmt.Sprintf("Invalid CRON spec: %s\n", err.Error()))
 		} else {
-			sb.WriteString(fmt.Sprintf("CRON-based schedule: %s\n", cronDescription))
+			sb.WriteString(fmt.Sprintf("CRON-based schedule: %s\n", desc))
 		}
 	}
 	if s.Interval > 0 {
@@ -134,7 +142,9 @@ func (s *Schedule) ToHumanReadable() string {
 	return sb.String()
 }
 
+// CronSchedule represents a parsed cron expression. It supports both 5‑field and 6‑field (extended) formats.
 type CronSchedule struct {
+	Seconds    string // Optional; if empty, assume "0"
 	Minute     string
 	Hour       string
 	DayOfMonth string
@@ -142,88 +152,250 @@ type CronSchedule struct {
 	DayOfWeek  string
 }
 
+// String returns a summary string for the cron schedule.
 func (c CronSchedule) String() string {
-	return fmt.Sprintf("At %s minute(s) past %s, on %s, during %s, every %s", c.Minute, c.Hour, c.DayOfWeek, c.Month, c.DayOfMonth)
+	if c.Seconds != "" && c.Seconds != "0" {
+		return fmt.Sprintf("At %s seconds, %s minutes past %s, on %s, during %s, every %s",
+			c.Seconds, c.Minute, c.Hour, c.DayOfWeek, c.Month, c.DayOfMonth)
+	}
+	return fmt.Sprintf("At %s minutes past %s, on %s, during %s, every %s",
+		c.Minute, c.Hour, c.DayOfWeek, c.Month, c.DayOfMonth)
 }
 
-func parseCronSpec(cronSpec string) (CronSchedule, error) {
-	parts := strings.Fields(cronSpec)
-	if len(parts) != 5 {
-		return CronSchedule{}, fmt.Errorf("invalid CRON spec: expected 5 fields, got %d", len(parts))
+// --------------------------------------------------------
+// Parsing: Special Schedule Strings and Cron Specs
+// --------------------------------------------------------
+
+// parseScheduleSpec inspects a schedule spec string and returns a Schedule.
+// The spec may be a special keyword (starting with '@') or a standard cron expression.
+func parseScheduleSpec(spec string) (*Schedule, error) {
+	s := &Schedule{Recurring: true} // default recurring
+	if strings.HasPrefix(spec, "@") {
+		// Handle special cases.
+		switch {
+		case strings.HasPrefix(spec, "@every"):
+			// Format: "@every <duration>", use time.ParseDuration.
+			durationStr := strings.TrimSpace(strings.TrimPrefix(spec, "@every"))
+			d, err := time.ParseDuration(durationStr)
+			if err != nil {
+				// If duration parsing fails, try to support days or weeks.
+				// For example: "1d", "1w".
+				if strings.HasSuffix(durationStr, "d") || strings.HasSuffix(durationStr, "w") {
+					numStr := durationStr[:len(durationStr)-1]
+					num, err2 := strconv.Atoi(numStr)
+					if err2 != nil {
+						return nil, fmt.Errorf("unable to parse duration in @every: %s", durationStr)
+					}
+					if strings.HasSuffix(durationStr, "d") {
+						d = time.Duration(num) * 24 * time.Hour
+					} else if strings.HasSuffix(durationStr, "w") {
+						d = time.Duration(num) * 7 * 24 * time.Hour
+					}
+				} else {
+					return nil, fmt.Errorf("unable to parse @every duration: %v", err)
+				}
+			}
+			s.Interval = d
+			return s, nil
+		case spec == "@daily":
+			s.CronSpec = "0 0 * * *"
+			return s, nil
+		case spec == "@weekly":
+			s.CronSpec = "0 0 * * 0"
+			return s, nil
+		case spec == "@monthly":
+			s.CronSpec = "0 0 1 * *"
+			return s, nil
+		case spec == "@yearly" || spec == "@annually":
+			s.CronSpec = "0 0 1 1 *"
+			return s, nil
+		case spec == "@reboot":
+			// For @reboot, you might want to run the task once at startup.
+			s.Recurring = false
+			return s, nil
+		default:
+			return nil, fmt.Errorf("unknown special schedule: %s", spec)
+		}
+	} else {
+		// Assume a standard cron spec
+		s.CronSpec = spec
+		return s, nil
 	}
-	minute, err := cronFieldToString(parts[0], "minute")
-	if err != nil {
-		return CronSchedule{}, err
-	}
-	hour, err := cronFieldToString(parts[1], "hour")
-	if err != nil {
-		return CronSchedule{}, err
-	}
-	dayOfMonth, err := cronFieldToString(parts[2], "day of the month")
-	if err != nil {
-		return CronSchedule{}, err
-	}
-	month, err := cronFieldToString(parts[3], "month")
-	if err != nil {
-		return CronSchedule{}, err
-	}
-	dayOfWeek, err := cronFieldToString(parts[4], "day of the week")
-	if err != nil {
-		return CronSchedule{}, err
-	}
-	return CronSchedule{
-		Minute:     minute,
-		Hour:       hour,
-		DayOfMonth: dayOfMonth,
-		Month:      month,
-		DayOfWeek:  dayOfWeek,
-	}, nil
 }
 
-func cronFieldToString(field string, fieldName string) (string, error) {
+// parseCronSpecDescription parses a cron spec and returns a human‑readable description.
+func parseCronSpecDescription(cronSpec string) (string, error) {
+	cs, err := parseCronSpec(cronSpec)
+	if err != nil {
+		return "", err
+	}
+	return cs.String(), nil
+}
+
+// parseCronSpec parses a cron specification string, supporting either 5 fields or 6 (with seconds).
+func parseCronSpec(spec string) (CronSchedule, error) {
+	parts := strings.Fields(spec)
+	if len(parts) == 5 {
+		// Assume no seconds provided; use default "0"
+		return CronSchedule{
+			Seconds:    "0",
+			Minute:     parts[0],
+			Hour:       parts[1],
+			DayOfMonth: parts[2],
+			Month:      parts[3],
+			DayOfWeek:  parts[4],
+		}, nil
+	} else if len(parts) == 6 {
+		// Extended spec with seconds.
+		return CronSchedule{
+			Seconds:    parts[0],
+			Minute:     parts[1],
+			Hour:       parts[2],
+			DayOfMonth: parts[3],
+			Month:      parts[4],
+			DayOfWeek:  parts[5],
+		}, nil
+	}
+	return CronSchedule{}, fmt.Errorf("invalid CRON spec: expected 5 or 6 fields, got %d", len(parts))
+}
+
+// --------------------------------------------------------
+// Helper: Checking if a time matches a cron field value.
+// (Supports "*" and comma separated list of integers.)
+//
+// For simplicity, we assume all fields in the cron spec represent numeric values.
+func matchesCronField(val int, field string) bool {
 	if field == "*" {
-		return fmt.Sprintf("every %s", fieldName), nil
+		return true
 	}
-	values, err := parseCronValue(field)
-	if err != nil {
-		return "", fmt.Errorf("invalid %s field: %s", fieldName, err.Error())
-	}
-	return fmt.Sprintf("%s %s", strings.Join(values, ", "), fieldName), nil
-}
-
-func parseCronValue(field string) ([]string, error) {
-	var values []string
-	ranges := strings.Split(field, ",")
-	for _, r := range ranges {
-		if strings.Contains(r, "-") {
-			bounds := strings.Split(r, "-")
-			if len(bounds) != 2 {
-				return nil, fmt.Errorf("invalid range: %s", r)
-			}
-			start, err := strconv.Atoi(bounds[0])
-			if err != nil {
-				return nil, err
-			}
-			end, err := strconv.Atoi(bounds[1])
-			if err != nil {
-				return nil, err
-			}
-			for i := start; i <= end; i++ {
-				values = append(values, strconv.Itoa(i))
-			}
-		} else {
-			values = append(values, r)
+	// Support lists separated by commas.
+	parts := strings.Split(field, ",")
+	for _, p := range parts {
+		// Trim any potential spaces.
+		p = strings.TrimSpace(p)
+		ival, err := strconv.Atoi(p)
+		if err == nil && ival == val {
+			return true
 		}
 	}
-	return values, nil
+	return false
 }
 
+// checkTimeMatchesCron tests whether a given time t satisfies the cron expression.
+func checkTimeMatchesCron(t time.Time, cs CronSchedule) bool {
+	// Check seconds, minutes, hour, day, month, weekday.
+	sec := t.Second()
+	min := t.Minute()
+	hour := t.Hour()
+	day := t.Day()
+	month := int(t.Month())
+	weekday := int(t.Weekday()) // Sunday==0, match cron where Sunday==0
+
+	if !matchesCronField(sec, cs.Seconds) {
+		return false
+	}
+	if !matchesCronField(min, cs.Minute) {
+		return false
+	}
+	if !matchesCronField(hour, cs.Hour) {
+		return false
+	}
+	if !matchesCronField(day, cs.DayOfMonth) {
+		return false
+	}
+	if !matchesCronField(month, cs.Month) {
+		return false
+	}
+	if !matchesCronField(weekday, cs.DayOfWeek) {
+		return false
+	}
+	return true
+}
+
+// nextCronRunTime computes the next time after now that matches the cron spec.
+// For simplicity, it iterates minute by minute (or second by second if extended).
+func nextCronRunTime(now time.Time, cs CronSchedule) time.Time {
+	// We'll search up to a year ahead.
+	searchLimit := now.AddDate(1, 0, 0)
+	t := now.Add(time.Second) // start a second later
+	for !t.After(now) {
+		t = t.Add(time.Second)
+	}
+	// If seconds field is in use (not just "0"), iterate second-by-second.
+	for t.Before(searchLimit) {
+		if checkTimeMatchesCron(t, cs) {
+			return t
+		}
+		// Increment by one second if seconds precision is needed;
+		// otherwise, for minute-level precision, you can use t = t.Add(time.Minute)
+		if cs.Seconds != "0" && cs.Seconds != "*" {
+			t = t.Add(time.Second)
+		} else {
+			t = t.Add(time.Minute)
+		}
+	}
+	// Fallback: return the search limit if no matching time is found.
+	return searchLimit
+}
+
+// --------------------------------------------------------
+// Scheduled Task and Scheduler Structures
+// --------------------------------------------------------
+
+// ScheduledTask represents a scheduled job.
+type ScheduledTask struct {
+	ctx              context.Context
+	handler          Handler
+	payload          *Task
+	config           SchedulerConfig
+	schedule         *Schedule
+	stop             chan struct{}
+	executionHistory []ExecutionHistory
+	// running is used to indicate whether the task is currently executing (if !Overlap).
+	running int32
+}
+
+type SchedulerConfig struct {
+	Callback Callback
+	Overlap  bool
+}
+
+type ExecutionHistory struct {
+	Timestamp time.Time
+	Result    Result
+}
+
+// Scheduler manages scheduling and executing tasks.
 type Scheduler struct {
-	pool  *Pool
-	tasks []ScheduledTask
-	mu    sync.Mutex
+	pool    *Pool
+	tasks   []*ScheduledTask
+	mu      sync.Mutex
+	storage storage.IMap[string, *ScheduledTask] // added storage field
 }
 
+// New functional option type for Scheduler.
+type SchedulerOpt func(*Scheduler)
+
+// WithStorage sets the storage for ScheduledTasks.
+func WithStorage(sm storage.IMap[string, *ScheduledTask]) SchedulerOpt {
+	return func(s *Scheduler) {
+		s.storage = sm
+	}
+}
+
+// Update the NewScheduler constructor to use SchedulerOpt.
+func NewScheduler(pool *Pool, opts ...SchedulerOpt) *Scheduler {
+	s := &Scheduler{
+		pool:    pool,
+		storage: memory.New[string, *ScheduledTask](),
+	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
+}
+
+// Start begins executing scheduled tasks.
 func (s *Scheduler) Start() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -232,30 +404,35 @@ func (s *Scheduler) Start() {
 	}
 }
 
-func (s *Scheduler) schedule(task ScheduledTask) {
-	// Check for graceful shutdown
-	if s.pool.gracefulShutdown {
-		return
-	}
+func (s *Scheduler) Close() error {
+	s.pool.Stop()
+	return nil
+}
+
+// schedule dispatches task execution based on its schedule.
+func (s *Scheduler) schedule(task *ScheduledTask) {
+	// Use the task context for cancellation.
+	ctx := task.ctx
+	// Main scheduling loop.
 	if task.schedule.Interval > 0 {
+		// Duration-based scheduling (@every).
 		ticker := time.NewTicker(task.schedule.Interval)
 		defer ticker.Stop()
-
 		if task.schedule.Recurring {
 			for {
 				select {
 				case <-ticker.C:
-					// Check for graceful shutdown before executing
 					if s.pool.gracefulShutdown {
 						return
 					}
 					s.executeTask(task)
 				case <-task.stop:
 					return
+				case <-ctx.Done():
+					return
 				}
 			}
 		} else {
-			// Execute once and return
 			select {
 			case <-ticker.C:
 				if s.pool.gracefulShutdown {
@@ -264,12 +441,20 @@ func (s *Scheduler) schedule(task ScheduledTask) {
 				s.executeTask(task)
 			case <-task.stop:
 				return
+			case <-ctx.Done():
+				return
 			}
 		}
-	} else if task.schedule.Recurring {
+	} else if task.schedule.CronSpec != "" {
+		// Cron-based scheduling.
+		cs, err := parseCronSpec(task.schedule.CronSpec)
+		if err != nil {
+			Logger.Error().Err(err).Msg("Invalid CRON spec")
+			return
+		}
 		for {
 			now := time.Now()
-			nextRun := task.getNextRunTime(now)
+			nextRun := nextCronRunTime(now, cs)
 			select {
 			case <-time.After(nextRun.Sub(now)):
 				if s.pool.gracefulShutdown {
@@ -278,43 +463,46 @@ func (s *Scheduler) schedule(task ScheduledTask) {
 				s.executeTask(task)
 			case <-task.stop:
 				return
+			case <-ctx.Done():
+				return
+			}
+		}
+	} else if !task.schedule.TimeOfDay.IsZero() {
+		// A one-off daily time-of-day scheduling.
+		for {
+			now := time.Now()
+			nextRun := time.Date(now.Year(), now.Month(), now.Day(),
+				task.schedule.TimeOfDay.Hour(), task.schedule.TimeOfDay.Minute(), 0, 0, now.Location())
+			if !nextRun.After(now) {
+				nextRun = nextRun.AddDate(0, 0, 1)
+			}
+			select {
+			case <-time.After(nextRun.Sub(now)):
+				if s.pool.gracefulShutdown {
+					return
+				}
+				s.executeTask(task)
+				if !task.schedule.Recurring {
+					return
+				}
+			case <-task.stop:
+				return
+			case <-ctx.Done():
+				return
 			}
 		}
 	}
 }
 
-func startSpan(operation string) (context.Context, func()) {
-	startTime := time.Now()
-	Logger.Info().Str("operation", operation).Msg("Span started")
-	ctx := context.WithValue(context.Background(), "traceID", fmt.Sprintf("%d", startTime.UnixNano()))
-	return ctx, func() {
-		duration := time.Since(startTime)
-		Logger.Info().Str("operation", operation).Msgf("Span ended; duration: %v", duration)
+// executeTask runs the task. It checks the overlap setting and uses context cancellation.
+func (s *Scheduler) executeTask(task *ScheduledTask) {
+	// If overlapping executions are not allowed, use an atomic flag.
+	if !task.config.Overlap {
+		if !atomic.CompareAndSwapInt32(&task.running, 0, 1) {
+			Logger.Warn().Str("taskID", task.payload.ID).Msg("Skipping execution due to overlap configuration")
+			return
+		}
 	}
-}
-
-func acquireDistributedLock(taskID string) bool {
-	Logger.Info().Str("taskID", taskID).Msg("Acquiring distributed lock (stub)")
-	return true
-}
-
-func releaseDistributedLock(taskID string) {
-	Logger.Info().Str("taskID", taskID).Msg("Releasing distributed lock (stub)")
-}
-
-var taskPool = sync.Pool{
-	New: func() interface{} { return new(Task) },
-}
-var queueTaskPool = sync.Pool{
-	New: func() interface{} { return new(QueueTask) },
-}
-
-func getQueueTask() *QueueTask {
-	return queueTaskPool.Get().(*QueueTask)
-}
-
-// Enhance executeTask with circuit breaker and diagnostics logging support.
-func (s *Scheduler) executeTask(task ScheduledTask) {
 	go func() {
 		_, cancelSpan := startSpan("executeTask")
 		defer cancelSpan()
@@ -325,6 +513,9 @@ func (s *Scheduler) executeTask(task ScheduledTask) {
 		}
 		if !acquireDistributedLock(task.payload.ID) {
 			Logger.Warn().Str("taskID", task.payload.ID).Msg("Failed to acquire distributed lock")
+			if !task.config.Overlap {
+				atomic.StoreInt32(&task.running, 0)
+			}
 			return
 		}
 		defer releaseDistributedLock(task.payload.ID)
@@ -354,96 +545,13 @@ func (s *Scheduler) executeTask(task ScheduledTask) {
 			plug.AfterTask(getQueueTask(), result)
 		}
 		Logger.Info().Str("taskID", task.payload.ID).Msg("Scheduled task executed")
+		if !task.config.Overlap {
+			atomic.StoreInt32(&task.running, 0)
+		}
 	}()
 }
 
-func NewScheduler(pool *Pool) *Scheduler {
-	return &Scheduler{pool: pool}
-}
-
-func (task ScheduledTask) getNextRunTime(now time.Time) time.Time {
-	if task.schedule.CronSpec != "" {
-		return task.getNextCronRunTime(now)
-	}
-	if len(task.schedule.DayOfMonth) > 0 {
-		for _, day := range task.schedule.DayOfMonth {
-			nextRun := time.Date(now.Year(), now.Month(), day, task.schedule.TimeOfDay.Hour(), task.schedule.TimeOfDay.Minute(), 0, 0, now.Location())
-			if nextRun.After(now) {
-				return nextRun
-			}
-		}
-		nextMonth := now.AddDate(0, 1, 0)
-		return time.Date(nextMonth.Year(), nextMonth.Month(), task.schedule.DayOfMonth[0], task.schedule.TimeOfDay.Hour(), task.schedule.TimeOfDay.Minute(), 0, 0, now.Location())
-	}
-	if len(task.schedule.DayOfWeek) > 0 {
-		for _, weekday := range task.schedule.DayOfWeek {
-			nextRun := nextWeekday(now, weekday).Truncate(time.Minute).Add(task.schedule.TimeOfDay.Sub(time.Time{}))
-			if nextRun.After(now) {
-				return nextRun
-			}
-		}
-	}
-	return now
-}
-
-func (task ScheduledTask) getNextCronRunTime(now time.Time) time.Time {
-	cronSpecs, err := parseCronSpec(task.schedule.CronSpec)
-	if err != nil {
-		Logger.Error().Err(err).Msg("Invalid CRON spec")
-		return now
-	}
-	nextRun := now
-	nextRun = task.applyCronField(nextRun, cronSpecs.Minute, "minute")
-	nextRun = task.applyCronField(nextRun, cronSpecs.Hour, "hour")
-	nextRun = task.applyCronField(nextRun, cronSpecs.DayOfMonth, "day")
-	nextRun = task.applyCronField(nextRun, cronSpecs.Month, "month")
-	nextRun = task.applyCronField(nextRun, cronSpecs.DayOfWeek, "weekday")
-	return nextRun
-}
-
-func (task ScheduledTask) applyCronField(t time.Time, fieldSpec string, unit string) time.Time {
-	if fieldSpec == "*" {
-		return t
-	}
-	value, _ := strconv.Atoi(fieldSpec)
-	switch unit {
-	case "minute":
-		if t.Minute() > value {
-			t = t.Add(time.Hour)
-		}
-		t = time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), value, 0, 0, t.Location())
-	case "hour":
-		if t.Hour() > value {
-			t = t.AddDate(0, 0, 1)
-		}
-		t = time.Date(t.Year(), t.Month(), t.Day(), value, t.Minute(), 0, 0, t.Location())
-	case "day":
-		if t.Day() > value {
-			t = t.AddDate(0, 1, 0)
-		}
-		t = time.Date(t.Year(), t.Month(), value, t.Hour(), t.Minute(), 0, 0, t.Location())
-	case "month":
-		if int(t.Month()) > value {
-			t = t.AddDate(1, 0, 0)
-		}
-		t = time.Date(t.Year(), time.Month(value), t.Day(), t.Hour(), t.Minute(), 0, 0, t.Location())
-	case "weekday":
-		weekday := time.Weekday(value)
-		for t.Weekday() != weekday {
-			t = t.AddDate(0, 0, 1)
-		}
-	}
-	return t
-}
-
-func nextWeekday(t time.Time, weekday time.Weekday) time.Time {
-	daysUntil := (int(weekday) - int(t.Weekday()) + 7) % 7
-	if daysUntil == 0 {
-		daysUntil = 7
-	}
-	return t.AddDate(0, 0, daysUntil)
-}
-
+// AddTask adds a new scheduled task using the supplied context, payload, and options.
 func (s *Scheduler) AddTask(ctx context.Context, payload *Task, opts ...SchedulerOption) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -457,8 +565,22 @@ func (s *Scheduler) AddTask(ctx context.Context, payload *Task, opts ...Schedule
 	if options.Callback == nil {
 		options.Callback = s.pool.callback
 	}
+
+	// Determine the schedule from ScheduleSpec or Interval.
+	var sched *Schedule
+	var err error
+	if options.ScheduleSpec != "" {
+		sched, err = parseScheduleSpec(options.ScheduleSpec)
+		if err != nil {
+			Logger.Error().Err(err).Msg("Failed to parse schedule spec; defaulting to interval-based schedule")
+			sched = &Schedule{Interval: options.Interval, Recurring: options.Recurring}
+		}
+	} else {
+		sched = &Schedule{Interval: options.Interval, Recurring: options.Recurring}
+	}
+
 	stop := make(chan struct{})
-	newTask := ScheduledTask{
+	newTask := &ScheduledTask{
 		ctx:     ctx,
 		handler: options.Handler,
 		payload: payload,
@@ -467,15 +589,17 @@ func (s *Scheduler) AddTask(ctx context.Context, payload *Task, opts ...Schedule
 			Callback: options.Callback,
 			Overlap:  options.Overlap,
 		},
-		schedule: &Schedule{
-			Interval:  options.Interval,
-			Recurring: options.Recurring,
-		},
+		schedule: sched,
 	}
 	s.tasks = append(s.tasks, newTask)
+	// Persist the task in storage if available.
+	if s.storage != nil {
+		s.storage.Set(newTask.payload.ID, newTask)
+	}
 	go s.schedule(newTask)
 }
 
+// RemoveTask stops and removes a task by its payload ID.
 func (s *Scheduler) RemoveTask(payloadID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -483,16 +607,16 @@ func (s *Scheduler) RemoveTask(payloadID string) {
 		if task.payload.ID == payloadID {
 			close(task.stop)
 			s.tasks = append(s.tasks[:i], s.tasks[i+1:]...)
+			// Remove task from storage if available.
+			if s.storage != nil {
+				s.storage.Del(payloadID)
+			}
 			break
 		}
 	}
 }
 
-type ExecutionHistory struct {
-	Timestamp time.Time
-	Result    Result
-}
-
+// PrintAllTasks prints a summary of all scheduled tasks.
 func (s *Scheduler) PrintAllTasks() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -502,6 +626,7 @@ func (s *Scheduler) PrintAllTasks() {
 	}
 }
 
+// PrintExecutionHistory prints the execution history for a task by its ID.
 func (s *Scheduler) PrintExecutionHistory(taskID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -515,4 +640,74 @@ func (s *Scheduler) PrintExecutionHistory(taskID string) {
 		}
 	}
 	fmt.Printf("No task found with ID: %s\n", taskID)
+}
+
+// getNextRunTime computes the next run time for the task.
+func (task *ScheduledTask) getNextRunTime(now time.Time) time.Time {
+	if task.schedule.Interval > 0 {
+		return now.Add(task.schedule.Interval)
+	}
+	if task.schedule.CronSpec != "" {
+		cs, err := parseCronSpec(task.schedule.CronSpec)
+		if err != nil {
+			Logger.Error().Err(err).Msg("Invalid CRON spec")
+			return now
+		}
+		return nextCronRunTime(now, cs)
+	}
+	if !task.schedule.TimeOfDay.IsZero() {
+		nextRun := time.Date(now.Year(), now.Month(), now.Day(),
+			task.schedule.TimeOfDay.Hour(), task.schedule.TimeOfDay.Minute(), 0, 0, now.Location())
+		if !nextRun.After(now) {
+			nextRun = nextRun.AddDate(0, 0, 1)
+		}
+		return nextRun
+	}
+	// For DayOfWeek or DayOfMonth based scheduling, you could add additional logic.
+	return now
+}
+
+// --------------------------------------------------------
+// Additional Helper Functions and Stubs
+// --------------------------------------------------------
+
+// startSpan is a stub for tracing span creation.
+func startSpan(operation string) (context.Context, func()) {
+	startTime := time.Now()
+	Logger.Info().Str("operation", operation).Msg("Span started")
+	ctx := context.WithValue(context.Background(), "traceID", fmt.Sprintf("%d", startTime.UnixNano()))
+	return ctx, func() {
+		duration := time.Since(startTime)
+		Logger.Info().Str("operation", operation).Msgf("Span ended; duration: %v", duration)
+	}
+}
+
+// acquireDistributedLock is a stub for distributed locking.
+func acquireDistributedLock(taskID string) bool {
+	Logger.Info().Str("taskID", taskID).Msg("Acquiring distributed lock (stub)")
+	return true
+}
+
+// releaseDistributedLock is a stub for releasing a distributed lock.
+func releaseDistributedLock(taskID string) {
+	Logger.Info().Str("taskID", taskID).Msg("Releasing distributed lock (stub)")
+}
+
+var taskPool = sync.Pool{
+	New: func() any { return new(Task) },
+}
+
+var queueTaskPool = sync.Pool{
+	New: func() any { return new(QueueTask) },
+}
+
+func getQueueTask() *QueueTask {
+	return queueTaskPool.Get().(*QueueTask)
+}
+
+// CircuitBreaker holds configuration for error threshold detection.
+type CircuitBreaker struct {
+	Enabled          bool
+	FailureThreshold int
+	ResetTimeout     time.Duration
 }
