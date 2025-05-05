@@ -68,6 +68,8 @@ type Task struct {
 	Status      string          `json:"status"`
 	Payload     json.RawMessage `json:"payload"`
 	dag         any
+	// new deduplication field
+	DedupKey string `json:"dedup_key,omitempty"`
 }
 
 func (t *Task) GetFlow() any {
@@ -83,4 +85,11 @@ func NewTask(id string, payload json.RawMessage, nodeKey string, opts ...TaskOpt
 		opt(task)
 	}
 	return task
+}
+
+// new TaskOption for deduplication:
+func WithDedupKey(key string) TaskOption {
+	return func(t *Task) {
+		t.DedupKey = key
+	}
 }

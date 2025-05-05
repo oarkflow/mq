@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/oarkflow/log"
+	"github.com/oarkflow/xid"
 
 	"github.com/oarkflow/mq/storage"
 	"github.com/oarkflow/mq/storage/memory"
@@ -351,8 +352,8 @@ type ScheduledTask struct {
 	schedule         *Schedule
 	stop             chan struct{}
 	executionHistory []ExecutionHistory
-	// running is used to indicate whether the task is currently executing (if !Overlap).
-	running int32
+	running          int32
+	id               string
 }
 
 type SchedulerConfig struct {
@@ -368,8 +369,6 @@ type ExecutionHistory struct {
 // Scheduler manages scheduling and executing tasks.
 type Scheduler struct {
 	pool    *Pool
-	tasks   []*ScheduledTask
-	mu      sync.Mutex
 	storage storage.IMap[string, *ScheduledTask] // added storage field
 }
 
@@ -397,11 +396,10 @@ func NewScheduler(pool *Pool, opts ...SchedulerOpt) *Scheduler {
 
 // Start begins executing scheduled tasks.
 func (s *Scheduler) Start() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, task := range s.tasks {
+	s.storage.ForEach(func(_ string, task *ScheduledTask) bool {
 		go s.schedule(task)
-	}
+		return true
+	})
 }
 
 func (s *Scheduler) Close() error {
@@ -552,9 +550,20 @@ func (s *Scheduler) executeTask(task *ScheduledTask) {
 }
 
 // AddTask adds a new scheduled task using the supplied context, payload, and options.
-func (s *Scheduler) AddTask(ctx context.Context, payload *Task, opts ...SchedulerOption) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+func (s *Scheduler) AddTask(ctx context.Context, payload *Task, opts ...SchedulerOption) string {
+	var hasDuplicate bool
+	if payload.DedupKey != "" {
+		s.storage.ForEach(func(_ string, task *ScheduledTask) bool {
+			if task.payload.DedupKey == payload.DedupKey {
+				hasDuplicate = true
+				Logger.Warn().Str("dedup", payload.DedupKey).Msg("Duplicate scheduled task prevented")
+			}
+			return true
+		})
+	}
+	if hasDuplicate {
+		return ""
+	}
 	options := defaultSchedulerOptions()
 	for _, opt := range opts {
 		opt(options)
@@ -581,6 +590,7 @@ func (s *Scheduler) AddTask(ctx context.Context, payload *Task, opts ...Schedule
 
 	stop := make(chan struct{})
 	newTask := &ScheduledTask{
+		id:      xid.New().String(),
 		ctx:     ctx,
 		handler: options.Handler,
 		payload: payload,
@@ -591,55 +601,43 @@ func (s *Scheduler) AddTask(ctx context.Context, payload *Task, opts ...Schedule
 		},
 		schedule: sched,
 	}
-	s.tasks = append(s.tasks, newTask)
-	// Persist the task in storage if available.
-	if s.storage != nil {
-		s.storage.Set(newTask.payload.ID, newTask)
-	}
+	s.storage.Set(newTask.id, newTask)
 	go s.schedule(newTask)
+	return newTask.id
 }
 
 // RemoveTask stops and removes a task by its payload ID.
-func (s *Scheduler) RemoveTask(payloadID string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for i, task := range s.tasks {
-		if task.payload.ID == payloadID {
-			close(task.stop)
-			s.tasks = append(s.tasks[:i], s.tasks[i+1:]...)
-			// Remove task from storage if available.
-			if s.storage != nil {
-				s.storage.Del(payloadID)
-			}
-			break
-		}
+func (s *Scheduler) RemoveTask(id string) error {
+	task, ok := s.storage.Get(id)
+	if !ok {
+		return fmt.Errorf("No task found with ID: %s\n", id)
 	}
+	close(task.stop)
+	if s.storage != nil {
+		s.storage.Del(id)
+	}
+	return nil
 }
 
 // PrintAllTasks prints a summary of all scheduled tasks.
 func (s *Scheduler) PrintAllTasks() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	fmt.Println("Scheduled Tasks:")
-	for _, task := range s.tasks {
+	s.storage.ForEach(func(_ string, task *ScheduledTask) bool {
 		fmt.Printf("Task ID: %s, Next Execution: %s\n", task.payload.ID, task.getNextRunTime(time.Now()))
-	}
+		return true
+	})
 }
 
 // PrintExecutionHistory prints the execution history for a task by its ID.
-func (s *Scheduler) PrintExecutionHistory(taskID string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, task := range s.tasks {
-		if task.payload.ID == taskID {
-			fmt.Printf("Execution History for Task ID: %s\n", taskID)
-			for _, history := range task.executionHistory {
-				fmt.Printf("Timestamp: %s, Result: %v\n", history.Timestamp, history.Result.Error)
-			}
-			return
-		}
+func (s *Scheduler) PrintExecutionHistory(id string) error {
+	task, ok := s.storage.Get(id)
+	if !ok {
+		return fmt.Errorf("No task found with ID: %s\n", id)
 	}
-	fmt.Printf("No task found with ID: %s\n", taskID)
+	for _, history := range task.executionHistory {
+		fmt.Printf("Timestamp: %s, Result: %v\n", history.Timestamp, history.Result.Error)
+	}
+	return nil
 }
 
 // getNextRunTime computes the next run time for the task.
@@ -665,6 +663,26 @@ func (task *ScheduledTask) getNextRunTime(now time.Time) time.Time {
 	}
 	// For DayOfWeek or DayOfMonth based scheduling, you could add additional logic.
 	return now
+}
+
+// New type to hold scheduled task information.
+type TaskInfo struct {
+	TaskID      string    `json:"task_id"`
+	NextRunTime time.Time `json:"next_run_time"`
+}
+
+// ListScheduledTasks returns details of all scheduled tasks along with their next run time.
+func (s *Scheduler) ListScheduledTasks() []TaskInfo {
+	now := time.Now()
+	infos := make([]TaskInfo, 0, s.storage.Size())
+	s.storage.ForEach(func(_ string, task *ScheduledTask) bool {
+		infos = append(infos, TaskInfo{
+			TaskID:      task.payload.ID,
+			NextRunTime: task.getNextRunTime(now),
+		})
+		return true
+	})
+	return infos
 }
 
 // --------------------------------------------------------
