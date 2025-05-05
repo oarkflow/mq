@@ -245,16 +245,48 @@ func parseCronFieldNames(field string, fieldType string) string {
 	return field
 }
 
-func matchesCronField(val int, field string) bool {
+func matchCronFieldEx(val int, field string) bool {
 	if field == "*" {
 		return true
 	}
-	parts := strings.Split(field, ",")
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		ival, err := strconv.Atoi(p)
-		if err == nil && ival == val {
-			return true
+	tokens := strings.Split(field, ",")
+	for _, token := range tokens {
+		token = strings.TrimSpace(token)
+		if strings.Contains(token, "/") {
+			parts := strings.Split(token, "/")
+			base := parts[0]
+			step, err := strconv.Atoi(parts[1])
+			if err != nil || step <= 0 {
+				continue
+			}
+			if base == "*" {
+				if val%step == 0 {
+					return true
+				}
+			} else if strings.Contains(base, "-") {
+				rangeParts := strings.Split(base, "-")
+				if len(rangeParts) == 2 {
+					start, err1 := strconv.Atoi(rangeParts[0])
+					end, err2 := strconv.Atoi(rangeParts[1])
+					if err1 == nil && err2 == nil && val >= start && val <= end && (val-start)%step == 0 {
+						return true
+					}
+				}
+			}
+		} else if strings.Contains(token, "-") {
+			rangeParts := strings.Split(token, "-")
+			if len(rangeParts) == 2 {
+				start, err1 := strconv.Atoi(rangeParts[0])
+				end, err2 := strconv.Atoi(rangeParts[1])
+				if err1 == nil && err2 == nil && val >= start && val <= end {
+					return true
+				}
+			}
+		} else {
+			num, err := strconv.Atoi(token)
+			if err == nil && val == num {
+				return true
+			}
 		}
 	}
 	return false
@@ -267,22 +299,22 @@ func checkTimeMatchesCron(t time.Time, cs CronSchedule) bool {
 	day := t.Day()
 	month := int(t.Month())
 	weekday := int(t.Weekday())
-	if !matchesCronField(sec, cs.Seconds) {
+	if !matchCronFieldEx(sec, cs.Seconds) {
 		return false
 	}
-	if !matchesCronField(minute, cs.Minute) {
+	if !matchCronFieldEx(minute, cs.Minute) {
 		return false
 	}
-	if !matchesCronField(hour, cs.Hour) {
+	if !matchCronFieldEx(hour, cs.Hour) {
 		return false
 	}
-	if !matchesCronField(day, cs.DayOfMonth) {
+	if !matchCronFieldEx(day, cs.DayOfMonth) {
 		return false
 	}
-	if !matchesCronField(month, cs.Month) {
+	if !matchCronFieldEx(month, cs.Month) {
 		return false
 	}
-	if !matchesCronField(weekday, cs.DayOfWeek) {
+	if !matchCronFieldEx(weekday, cs.DayOfWeek) {
 		return false
 	}
 	return true
@@ -660,20 +692,22 @@ func startSpan(operation string) (context.Context, func()) {
 	}
 }
 
-var distributedLockMap sync.Map
-
-type LockEntry struct {
-	mu     sync.Mutex
-	expiry int64
+type DistributedLocker interface {
+	Acquire(key string, ttl time.Duration) bool
+	Release(key string)
 }
 
-func acquireDistributedLock(taskID string) bool {
+type inMemoryLocker struct{}
+
+var defaultDistributedLocker DistributedLocker = &inMemoryLocker{}
+
+func (l *inMemoryLocker) Acquire(key string, ttl time.Duration) bool {
 	now := time.Now().UnixNano()
-	value, _ := distributedLockMap.LoadOrStore(taskID, &LockEntry{expiry: 0})
+	value, _ := lockerMap.LoadOrStore(key, &LockEntry{expiry: 0})
 	entry := value.(*LockEntry)
 	entry.mu.Lock()
 	if entry.expiry < now {
-		entry.expiry = now + int64(30*time.Second)
+		entry.expiry = now + int64(ttl)
 		entry.mu.Unlock()
 		return true
 	}
@@ -681,9 +715,9 @@ func acquireDistributedLock(taskID string) bool {
 	return false
 }
 
-func releaseDistributedLock(taskID string) {
+func (l *inMemoryLocker) Release(key string) {
 	now := time.Now().UnixNano()
-	if value, ok := distributedLockMap.Load(taskID); ok {
+	if value, ok := lockerMap.Load(key); ok {
 		entry := value.(*LockEntry)
 		entry.mu.Lock()
 		if entry.expiry > now {
@@ -691,6 +725,21 @@ func releaseDistributedLock(taskID string) {
 		}
 		entry.mu.Unlock()
 	}
+}
+
+var lockerMap sync.Map
+
+type LockEntry struct {
+	mu     sync.Mutex
+	expiry int64
+}
+
+func acquireDistributedLock(taskID string) bool {
+	return defaultDistributedLocker.Acquire(taskID, 30*time.Second)
+}
+
+func releaseDistributedLock(taskID string) {
+	defaultDistributedLocker.Release(taskID)
 }
 
 func acquireLockWithRetry(taskID string, retries int) bool {
