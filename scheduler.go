@@ -286,7 +286,7 @@ func matchesCronField(val int, field string) bool {
 func checkTimeMatchesCron(t time.Time, cs CronSchedule) bool {
 	// Check seconds, minutes, hour, day, month, weekday.
 	sec := t.Second()
-	min := t.Minute()
+	minute := t.Minute()
 	hour := t.Hour()
 	day := t.Day()
 	month := int(t.Month())
@@ -295,7 +295,7 @@ func checkTimeMatchesCron(t time.Time, cs CronSchedule) bool {
 	if !matchesCronField(sec, cs.Seconds) {
 		return false
 	}
-	if !matchesCronField(min, cs.Minute) {
+	if !matchesCronField(minute, cs.Minute) {
 		return false
 	}
 	if !matchesCronField(hour, cs.Hour) {
@@ -372,7 +372,7 @@ type Scheduler struct {
 	storage storage.IMap[string, *ScheduledTask] // added storage field
 }
 
-// New functional option type for Scheduler.
+// SchedulerOpt functional option type for Scheduler.
 type SchedulerOpt func(*Scheduler)
 
 // WithStorage sets the storage for ScheduledTasks.
@@ -382,7 +382,7 @@ func WithStorage(sm storage.IMap[string, *ScheduledTask]) SchedulerOpt {
 	}
 }
 
-// Update the NewScheduler constructor to use SchedulerOpt.
+// NewScheduler constructor to use SchedulerOpt.
 func NewScheduler(pool *Pool, opts ...SchedulerOpt) *Scheduler {
 	s := &Scheduler{
 		pool:    pool,
