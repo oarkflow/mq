@@ -8,27 +8,36 @@ import (
 )
 
 var (
-	TasksProcessed = prometheus.NewCounterVec(
+	taskProcessed = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "tasks_processed_total",
-			Help: "Total number of processed tasks.",
+			Help: "Total number of tasks processed.",
 		},
 		[]string{"status"},
 	)
-	TasksErrors = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "tasks_errors_total",
-			Help: "Total number of errors encountered while processing tasks.",
+	taskProcessingTime = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Name:    "task_processing_time_seconds",
+			Help:    "Histogram of task processing times.",
+			Buckets: prometheus.DefBuckets,
 		},
-		[]string{"node"},
 	)
 )
 
 func init() {
-	prometheus.MustRegister(TasksProcessed)
-	prometheus.MustRegister(TasksErrors)
+	prometheus.MustRegister(taskProcessed)
+	prometheus.MustRegister(taskProcessingTime)
 }
 
-func HandleHTTP() {
+func RecordTaskProcessed(status string) {
+	taskProcessed.WithLabelValues(status).Inc()
+}
+
+func RecordTaskProcessingTime(duration float64) {
+	taskProcessingTime.Observe(duration)
+}
+
+func StartMetricsServer(port string) {
 	http.Handle("/metrics", promhttp.Handler())
+	go http.ListenAndServe(port, nil)
 }

@@ -2,6 +2,7 @@ package mq
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/oarkflow/json"
@@ -91,5 +92,22 @@ func NewTask(id string, payload json.RawMessage, nodeKey string, opts ...TaskOpt
 func WithDedupKey(key string) TaskOption {
 	return func(t *Task) {
 		t.DedupKey = key
+	}
+}
+
+// Add advanced dead-letter queue management
+func (b *Broker) ReprocessDLQ(queueName string) error {
+	dlqName := queueName + "_dlq"
+	dlq, ok := b.deadLetter.Get(dlqName)
+	if !ok {
+		return fmt.Errorf("dead-letter queue %s does not exist", dlqName)
+	}
+	for {
+		select {
+		case task := <-dlq.tasks:
+			b.NewQueue(queueName).tasks <- task
+		default:
+			return nil
+		}
 	}
 }

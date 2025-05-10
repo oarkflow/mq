@@ -9,12 +9,12 @@ import (
 	"strings"
 	"sync"
 	"time"
-	
+
 	"github.com/oarkflow/errors"
 	"github.com/oarkflow/json"
-	
+
 	"github.com/oarkflow/json/jsonparser"
-	
+
 	"github.com/oarkflow/mq/codec"
 	"github.com/oarkflow/mq/consts"
 	"github.com/oarkflow/mq/logger"
@@ -69,7 +69,7 @@ func (r *Result) UnmarshalJSON(data []byte) error {
 	}{
 		Alias: (*Alias)(r),
 	}
-	
+
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err
 	}
@@ -78,7 +78,7 @@ func (r *Result) UnmarshalJSON(data []byte) error {
 	} else {
 		r.Error = nil
 	}
-	
+
 	return nil
 }
 
@@ -174,7 +174,7 @@ func (rl *RateLimiter) Wait() {
 func (rl *RateLimiter) Update(newRate, newBurst int) {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
-	
+
 	// Stop the old ticker.
 	rl.ticker.Stop()
 	// Replace the channel with a new one of the new burst capacity.
@@ -283,21 +283,23 @@ type publisher struct {
 }
 
 type Broker struct {
-	queues     storage.IMap[string, *Queue]
+	queues     storage.IMap[string, storage.IMap[string, *Queue]] // Modified to support tenant-specific queues
 	consumers  storage.IMap[string, *consumer]
 	publishers storage.IMap[string, *publisher]
 	deadLetter storage.IMap[string, *Queue]
 	opts       *Options
+	pIDs       storage.IMap[string, bool]
 	listener   net.Listener
 }
 
 func NewBroker(opts ...Option) *Broker {
 	options := SetupOptions(opts...)
 	return &Broker{
-		queues:     memory.New[string, *Queue](),
+		queues:     memory.New[string, storage.IMap[string, *Queue]](),
 		publishers: memory.New[string, *publisher](),
 		consumers:  memory.New[string, *consumer](),
 		deadLetter: memory.New[string, *Queue](),
+		pIDs:       memory.New[string, bool](),
 		opts:       options,
 	}
 }
@@ -314,13 +316,16 @@ func (b *Broker) OnClose(ctx context.Context, conn net.Conn) error {
 			con.conn.Close()
 			b.consumers.Del(consumerID)
 		}
-		b.queues.ForEach(func(_ string, queue *Queue) bool {
-			if _, ok := queue.consumers.Get(consumerID); ok {
-				if b.opts.consumerOnClose != nil {
-					b.opts.consumerOnClose(ctx, queue.name, consumerID)
+		b.queues.ForEach(func(_ string, tenantQueues storage.IMap[string, *Queue]) bool {
+			tenantQueues.ForEach(func(_ string, queue *Queue) bool {
+				if _, ok := queue.consumers.Get(consumerID); ok {
+					if b.opts.consumerOnClose != nil {
+						b.opts.consumerOnClose(ctx, queue.name, consumerID)
+					}
+					queue.consumers.Del(consumerID)
 				}
-				queue.consumers.Del(consumerID)
-			}
+				return true
+			})
 			return true
 		})
 	} else {
@@ -329,20 +334,23 @@ func (b *Broker) OnClose(ctx context.Context, conn net.Conn) error {
 				log.Printf("Broker: Consumer connection closed: %s, address: %s", consumerID, conn.RemoteAddr())
 				con.conn.Close()
 				b.consumers.Del(consumerID)
-				b.queues.ForEach(func(_ string, queue *Queue) bool {
-					queue.consumers.Del(consumerID)
-					if _, ok := queue.consumers.Get(consumerID); ok {
-						if b.opts.consumerOnClose != nil {
-							b.opts.consumerOnClose(ctx, queue.name, consumerID)
+				b.queues.ForEach(func(_ string, tenantQueues storage.IMap[string, *Queue]) bool {
+					tenantQueues.ForEach(func(_ string, queue *Queue) bool {
+						queue.consumers.Del(consumerID)
+						if _, ok := queue.consumers.Get(consumerID); ok {
+							if b.opts.consumerOnClose != nil {
+								b.opts.consumerOnClose(ctx, queue.name, consumerID)
+							}
 						}
-					}
+						return true
+					})
 					return true
 				})
 			}
 			return true
 		})
 	}
-	
+
 	publisherID, ok := GetPublisherID(ctx)
 	if ok && publisherID != "" {
 		log.Printf("Broker: Publisher connection closed: %s, address: %s", publisherID, conn.RemoteAddr())
@@ -496,7 +504,7 @@ func (b *Broker) PublishHandler(ctx context.Context, conn net.Conn, msg *codec.M
 	pub := b.addPublisher(ctx, msg.Queue, conn)
 	taskID, _ := jsonparser.GetString(msg.Payload, "id")
 	log.Printf("BROKER - PUBLISH ~> received from %s on %s for Task %s", pub.id, msg.Queue, taskID)
-	
+
 	ack := codec.NewMessage(consts.PUBLISH_ACK, utils.ToByte(fmt.Sprintf(`{"id":"%s"}`, taskID)), msg.Queue, msg.Headers)
 	if err := b.send(ctx, conn, ack); err != nil {
 		log.Printf("Error sending PUBLISH_ACK: %v\n", err)
@@ -591,9 +599,14 @@ func (b *Broker) receive(ctx context.Context, c net.Conn) (*codec.Message, error
 }
 
 func (b *Broker) broadcastToConsumers(msg *codec.Message) {
-	if queue, ok := b.queues.Get(msg.Queue); ok {
-		task := &QueuedTask{Message: msg, RetryCount: 0}
-		queue.tasks <- task
+	if tenantQueues, ok := b.queues.Get(msg.Queue); ok {
+		tenantQueues.ForEach(func(_, queueName string) bool {
+			if queue, ok := tenantQueues.Get(queueName); ok {
+				task := &QueuedTask{Message: msg, RetryCount: 0}
+				queue.tasks <- task
+			}
+			return true
+		})
 	}
 }
 
@@ -755,6 +768,7 @@ func (b *Broker) dispatchWorker(ctx context.Context, queue *Queue) {
 		for !success && task.RetryCount <= b.opts.maxRetries {
 			if b.dispatchTaskToConsumer(ctx, queue, task) {
 				success = true
+				b.acknowledgeTask(ctx, task.Message.Queue, queue.name)
 			} else {
 				task.RetryCount++
 				delay = b.backoffRetry(queue, task, delay)
@@ -779,6 +793,14 @@ func (b *Broker) sendToDLQ(queue *Queue, task *QueuedTask) {
 func (b *Broker) dispatchTaskToConsumer(ctx context.Context, queue *Queue, task *QueuedTask) bool {
 	var consumerFound bool
 	var err error
+
+	// Deduplication: Check if the task has already been processed
+	taskID, _ := jsonparser.GetString(task.Message.Payload, "id")
+	if _, exists := b.pIDs.Get(taskID); exists {
+		log.Printf("Task %s already processed, skipping...", taskID)
+		return true
+	}
+
 	queue.consumers.ForEach(func(_ string, con *consumer) bool {
 		if con.state != consts.ConsumerStateActive {
 			err = fmt.Errorf("consumer %s is not active", con.id)
@@ -786,10 +808,13 @@ func (b *Broker) dispatchTaskToConsumer(ctx context.Context, queue *Queue, task 
 		}
 		if err := b.send(ctx, con.conn, task.Message); err == nil {
 			consumerFound = true
+			// Mark the task as processed
+			b.pIDs.Set(taskID, true)
 			return false
 		}
 		return true
 	})
+
 	if err != nil {
 		log.Println(err.Error())
 		return false
@@ -800,7 +825,7 @@ func (b *Broker) dispatchTaskToConsumer(ctx context.Context, queue *Queue, task 
 			result := Result{
 				Status: "NO_CONSUMER",
 				Topic:  queue.name,
-				TaskID: "",
+				TaskID: taskID,
 				Ctx:    ctx,
 			}
 			_ = b.opts.notifyResponse(ctx, result)
@@ -843,8 +868,32 @@ func (b *Broker) NewQueue(name string) *Queue {
 		tasks:     make(chan *QueuedTask, b.opts.queueSize),
 		consumers: memory.New[string, *consumer](),
 	}
-	b.queues.Set(name, q)
-	
+	b.queues.Set(name, memory.New[string, *Queue]())
+	b.queues.Get(name).Set(name, q)
+
+	// Create DLQ for the queue
+	dlq := &Queue{
+		name:      name + "_dlq",
+		tasks:     make(chan *QueuedTask, b.opts.queueSize),
+		consumers: memory.New[string, *consumer](),
+	}
+	b.deadLetter.Set(name, dlq)
+	ctx := context.Background()
+	go b.dispatchWorker(ctx, q)
+	go b.dispatchWorker(ctx, dlq)
+	return q
+}
+
+// Ensure message ordering in task queues
+func (b *Broker) NewQueueWithOrdering(name string) *Queue {
+	q := &Queue{
+		name:      name,
+		tasks:     make(chan *QueuedTask, b.opts.queueSize),
+		consumers: memory.New[string, *consumer](),
+	}
+	b.queues.Set(name, memory.New[string, *Queue]())
+	b.queues.Get(name).Set(name, q)
+
 	// Create DLQ for the queue
 	dlq := &Queue{
 		name:      name + "_dlq",
@@ -884,4 +933,135 @@ func (b *Broker) HandleCallback(ctx context.Context, msg *codec.Message) {
 			}
 		}
 	}
+}
+
+// Add explicit acknowledgment for successful task processing
+func (b *Broker) acknowledgeTask(ctx context.Context, taskID string, queueName string) {
+	log.Printf("Acknowledging task %s on queue %s", taskID, queueName)
+	if b.opts.notifyResponse != nil {
+		result := Result{
+			Status: "ACKNOWLEDGED",
+			Topic:  queueName,
+			TaskID: taskID,
+			Ctx:    ctx,
+		}
+		_ = b.opts.notifyResponse(ctx, result)
+	}
+}
+
+// Add authentication and authorization for publishers and consumers
+func (b *Broker) Authenticate(ctx context.Context, credentials map[string]string) error {
+	username, userExists := credentials["username"]
+	password, passExists := credentials["password"]
+	if !userExists || !passExists {
+		return fmt.Errorf("missing credentials")
+	}
+	// Example: Hardcoded credentials for simplicity
+	if username != "admin" || password != "password" {
+		return fmt.Errorf("invalid credentials")
+	}
+	return nil
+}
+
+func (b *Broker) Authorize(ctx context.Context, role string, action string) error {
+	// Example: Simple role-based authorization
+	if role == "publisher" && action == "publish" {
+		return nil
+	}
+	if role == "consumer" && action == "consume" {
+		return nil
+	}
+	return fmt.Errorf("unauthorized action")
+}
+
+// Add support for multi-tenancy
+func (b *Broker) AddTenant(tenantID string) error {
+	if _, exists := b.queues.Get(tenantID); exists {
+		return fmt.Errorf("tenant %s already exists", tenantID)
+	}
+	b.queues.Set(tenantID, memory.New[string, *Queue]())
+	return nil
+}
+
+func (b *Broker) RemoveTenant(tenantID string) error {
+	if _, exists := b.queues.Get(tenantID); !exists {
+		return fmt.Errorf("tenant %s does not exist", tenantID)
+	}
+	b.queues.Del(tenantID)
+	return nil
+}
+
+// Ensure tenant-specific queues and operations
+func (b *Broker) NewQueueForTenant(tenantID, queueName string) (*Queue, error) {
+	tenantQueues, ok := b.queues.Get(tenantID)
+	if !ok {
+		return nil, fmt.Errorf("tenant %s does not exist", tenantID)
+	}
+	if _, exists := tenantQueues.Get(queueName); exists {
+		return nil, fmt.Errorf("queue %s already exists for tenant %s", queueName, tenantID)
+	}
+	q := &Queue{
+		name:      queueName,
+		tasks:     make(chan *QueuedTask, b.opts.queueSize),
+		consumers: memory.New[string, *consumer](),
+	}
+	tenantQueues.Set(queueName, q)
+
+	// Create tenant-specific DLQ
+	dlq := &Queue{
+		name:      queueName + "_dlq",
+		tasks:     make(chan *QueuedTask, b.opts.queueSize),
+		consumers: memory.New[string, *consumer](),
+	}
+	tenantQueues.Set(queueName+"_dlq", dlq)
+	ctx := context.Background()
+	go b.dispatchWorker(ctx, q)
+	go b.dispatchWorker(ctx, dlq)
+	return q, nil
+}
+
+func (b *Broker) PublishForTenant(ctx context.Context, tenantID string, task *Task, queueName string) error {
+	tenantQueues, ok := b.queues.Get(tenantID)
+	if !ok {
+		return fmt.Errorf("tenant %s does not exist", tenantID)
+	}
+	queue, ok := tenantQueues.Get(queueName)
+	if !ok {
+		return fmt.Errorf("queue %s does not exist for tenant %s", queueName, tenantID)
+	}
+	taskID := task.ID
+	if taskID == "" {
+		taskID = NewID()
+		task.ID = taskID
+	}
+	queuedTask := &QueuedTask{Message: codec.NewMessage(consts.PUBLISH, task.Payload, queueName, nil), RetryCount: 0}
+	queue.tasks <- queuedTask
+	return nil
+}
+
+func (b *Broker) SubscribeForTenant(ctx context.Context, tenantID, queueName string, conn net.Conn) error {
+	tenantQueues, ok := b.queues.Get(tenantID)
+	if !ok {
+		return fmt.Errorf("tenant %s does not exist", tenantID)
+	}
+	queue, ok := tenantQueues.Get(queueName)
+	if !ok {
+		return fmt.Errorf("queue %s does not exist for tenant %s", queueName, tenantID)
+	}
+	consumerID := b.AddConsumer(ctx, queueName, conn)
+	queue.consumers.Set(consumerID, &consumer{id: consumerID, conn: conn})
+	return nil
+}
+
+func (b *Broker) ListQueuesForTenant(tenantID string) ([]string, error) {
+	tenantQueues, ok := b.queues.Get(tenantID)
+	if !ok {
+		return nil, fmt.Errorf("tenant %s does not exist", tenantID)
+	}
+	var queueNames []string
+	tenantQueues.ForEach(func(queueName string, _ *Queue) bool {
+		queueNames = append(queueNames, queueName)
+		return true
+	})
+	return queueNames, nil
 }

@@ -9,13 +9,15 @@ import (
 	"net/http"
 	"strings"
 	"time"
-	
+
 	"github.com/oarkflow/json"
-	
+
 	"github.com/oarkflow/json/jsonparser"
-	
+
 	"github.com/oarkflow/mq/codec"
 	"github.com/oarkflow/mq/consts"
+	"github.com/oarkflow/mq/storage"
+	"github.com/oarkflow/mq/storage/memory"
 	"github.com/oarkflow/mq/utils"
 )
 
@@ -38,6 +40,7 @@ type Consumer struct {
 	opts    *Options
 	id      string
 	queue   string
+	pIDs    storage.IMap[string, bool]
 }
 
 func NewConsumer(id string, queue string, handler Handler, opts ...Option) *Consumer {
@@ -47,6 +50,7 @@ func NewConsumer(id string, queue string, handler Handler, opts ...Option) *Cons
 		opts:    options,
 		queue:   queue,
 		handler: handler,
+		pIDs:    memory.New[string, bool](),
 	}
 }
 
@@ -154,10 +158,32 @@ func (c *Consumer) ConsumeMessage(ctx context.Context, msg *codec.Message, conn 
 		log.Printf("Error unmarshalling message: %v", err)
 		return
 	}
-	ctx = SetHeaders(ctx, map[string]string{consts.QueueKey: msg.Queue})
-	if err := c.pool.EnqueueTask(ctx, &task, 1); err != nil {
-		c.sendDenyMessage(ctx, task.ID, msg.Queue, err)
+
+	// Check if the task has already been processed
+	if _, exists := c.pIDs.Get(task.ID); exists {
+		log.Printf("Task %s already processed, skipping...", task.ID)
 		return
+	}
+
+	ctx = SetHeaders(ctx, map[string]string{consts.QueueKey: msg.Queue})
+	retryCount := 0
+	for {
+		err := c.pool.EnqueueTask(ctx, &task, 1)
+		if err == nil {
+			// Mark the task as processed
+			c.pIDs.Set(task.ID, true)
+			break
+		}
+
+		if retryCount >= c.opts.maxRetries {
+			c.sendDenyMessage(ctx, task.ID, msg.Queue, err)
+			return
+		}
+
+		retryCount++
+		backoffDuration := utils.CalculateJitter(c.opts.initialDelay*(1<<retryCount), c.opts.jitterPercent)
+		log.Printf("Retrying task %s after %v (attempt %d/%d)", task.ID, backoffDuration, retryCount, c.opts.maxRetries)
+		time.Sleep(backoffDuration)
 	}
 }
 
@@ -218,7 +244,7 @@ func (c *Consumer) attemptConnect() error {
 			delay = c.opts.maxBackoff
 		}
 	}
-	
+
 	return fmt.Errorf("could not connect to server %s after %d attempts: %w", c.opts.brokerAddr, c.opts.maxRetries, err)
 }
 
@@ -362,7 +388,7 @@ func (c *Consumer) StartHTTPAPI() (int, error) {
 		return 0, fmt.Errorf("failed to start listener: %w", err)
 	}
 	port := ln.Addr().(*net.TCPAddr).Port
-	
+
 	// Create a new HTTP mux and register endpoints.
 	mux := http.NewServeMux()
 	mux.HandleFunc("/stats", c.handleStats)
@@ -370,7 +396,7 @@ func (c *Consumer) StartHTTPAPI() (int, error) {
 	mux.HandleFunc("/pause", c.handlePause)
 	mux.HandleFunc("/resume", c.handleResume)
 	mux.HandleFunc("/stop", c.handleStop)
-	
+
 	// Start the server in a new goroutine.
 	go func() {
 		// Log errors if the HTTP server stops.
@@ -378,7 +404,7 @@ func (c *Consumer) StartHTTPAPI() (int, error) {
 			log.Printf("HTTP server error on port %d: %v", port, err)
 		}
 	}()
-	
+
 	log.Printf("HTTP API for consumer %s started on port %d", c.id, port)
 	return port, nil
 }
@@ -389,14 +415,14 @@ func (c *Consumer) handleStats(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	
+
 	// Gather consumer and pool stats using formatted metrics.
 	stats := map[string]interface{}{
 		"consumer_id":  c.id,
 		"queue":        c.queue,
 		"pool_metrics": c.pool.FormattedMetrics(),
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(stats); err != nil {
 		http.Error(w, fmt.Sprintf("failed to encode stats: %v", err), http.StatusInternalServerError)
@@ -410,7 +436,7 @@ func (c *Consumer) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	
+
 	// Read the request body.
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -418,13 +444,13 @@ func (c *Consumer) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer r.Body.Close()
-	
+
 	// Call the Update method on the consumer (which in turn updates the pool configuration).
 	if err := c.Update(r.Context(), body); err != nil {
 		http.Error(w, fmt.Sprintf("failed to update configuration: %v", err), http.StatusInternalServerError)
 		return
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	resp := map[string]string{"status": "configuration updated"}
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
@@ -438,12 +464,12 @@ func (c *Consumer) handlePause(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	
+
 	if err := c.Pause(r.Context()); err != nil {
 		http.Error(w, fmt.Sprintf("failed to pause consumer: %v", err), http.StatusInternalServerError)
 		return
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	resp := map[string]string{"status": "consumer paused"}
 	json.NewEncoder(w).Encode(resp)
@@ -455,12 +481,12 @@ func (c *Consumer) handleResume(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	
+
 	if err := c.Resume(r.Context()); err != nil {
 		http.Error(w, fmt.Sprintf("failed to resume consumer: %v", err), http.StatusInternalServerError)
 		return
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	resp := map[string]string{"status": "consumer resumed"}
 	json.NewEncoder(w).Encode(resp)
@@ -472,13 +498,13 @@ func (c *Consumer) handleStop(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	
+
 	// Stop the consumer.
 	if err := c.Stop(r.Context()); err != nil {
 		http.Error(w, fmt.Sprintf("failed to stop consumer: %v", err), http.StatusInternalServerError)
 		return
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	resp := map[string]string{"status": "consumer stopped"}
 	json.NewEncoder(w).Encode(resp)
