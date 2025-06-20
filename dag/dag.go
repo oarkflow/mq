@@ -723,3 +723,85 @@ func (tm *DAG) GetStatus() map[string]interface{} {
 
 	return status
 }
+
+// RemoveNode removes the node with the given nodeID and adjusts the edges.
+// For example, if A -> B and B -> C exist and B is removed, a new edge A -> C is created.
+func (tm *DAG) RemoveNode(nodeID string) error {
+	node, exists := tm.nodes.Get(nodeID)
+	if !exists {
+		return fmt.Errorf("node %s does not exist", nodeID)
+	}
+	// Collect incoming edges (from nodes pointing to the removed node).
+	var incomingEdges []Edge
+	tm.nodes.ForEach(func(_ string, n *Node) bool {
+		for _, edge := range n.Edges {
+			if edge.To.ID == nodeID {
+				incomingEdges = append(incomingEdges, Edge{
+					From:  n,
+					To:    node,
+					Label: edge.Label,
+					Type:  edge.Type,
+				})
+			}
+		}
+		return true
+	})
+	// Get outgoing edges from the node being removed.
+	outgoingEdges := node.Edges
+	// For each incoming edge and each outgoing edge, create a new edge A -> C.
+	for _, inEdge := range incomingEdges {
+		for _, outEdge := range outgoingEdges {
+			// Avoid creating self-loop.
+			if inEdge.From.ID != outEdge.To.ID {
+				newEdge := Edge{
+					From:  inEdge.From,
+					To:    outEdge.To,
+					Label: inEdge.Label + "_" + outEdge.Label,
+					Type:  Simple, // Use Simple edge type for adjusted flows.
+				}
+				// Append new edge if one doesn't already exist.
+				existsNewEdge := false
+				for _, e := range inEdge.From.Edges {
+					if e.To.ID == newEdge.To.ID {
+						existsNewEdge = true
+						break
+					}
+				}
+				if !existsNewEdge {
+					inEdge.From.Edges = append(inEdge.From.Edges, newEdge)
+				}
+			}
+		}
+	}
+	// Remove all edges that are connected to the removed node.
+	tm.nodes.ForEach(func(_ string, n *Node) bool {
+		var updatedEdges []Edge
+		for _, edge := range n.Edges {
+			if edge.To.ID != nodeID {
+				updatedEdges = append(updatedEdges, edge)
+			}
+		}
+		n.Edges = updatedEdges
+		return true
+	})
+	// Remove any conditions referencing the removed node.
+	for key, cond := range tm.conditions {
+		if key == nodeID {
+			delete(tm.conditions, key)
+		} else {
+			for when, target := range cond {
+				if target == nodeID {
+					delete(cond, when)
+				}
+			}
+		}
+	}
+	// Remove the node from the DAG.
+	tm.nodes.Del(nodeID)
+	// Invalidate caches.
+	tm.nextNodesCache = nil
+	tm.prevNodesCache = nil
+	tm.Logger().Info("Node removed and edges adjusted",
+		logger.Field{Key: "removed_node", Value: nodeID})
+	return nil
+}

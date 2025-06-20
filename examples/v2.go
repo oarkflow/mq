@@ -183,7 +183,7 @@ func main() {
 		panic(flow.Error)
 	}
 	app := fiber.New()
-	flowApp := app.Group("/test")
-	flow.Handlers(flowApp, "/test")
+	flowApp := app.Group("/")
+	flow.Handlers(flowApp, "/")
 	app.Listen(":8082")
 }
