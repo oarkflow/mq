@@ -276,8 +276,9 @@ type Options struct {
 	enableWorkerPool     bool
 	respondPendingResult bool
 	logger               logger.Logger
-	BrokerRateLimiter    *RateLimiter // new field for broker rate limiting
-	ConsumerRateLimiter  *RateLimiter // new field for consumer rate limiting
+	BrokerRateLimiter    *RateLimiter  // new field for broker rate limiting
+	ConsumerRateLimiter  *RateLimiter  // new field for consumer rate limiting
+	consumerTimeout      time.Duration // timeout for consumer message processing (0 = no timeout)
 }
 
 func (o *Options) SetSyncMode(sync bool) {
@@ -314,6 +315,10 @@ func (o *Options) BrokerAddr() string {
 
 func (o *Options) HTTPApi() bool {
 	return o.enableHTTPApi
+}
+
+func (o *Options) ConsumerTimeout() time.Duration {
+	return o.consumerTimeout
 }
 
 func HeadersWithConsumerID(ctx context.Context, id string) map[string]string {

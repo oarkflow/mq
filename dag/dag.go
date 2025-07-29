@@ -253,7 +253,16 @@ func (tm *DAG) AddNode(nodeType NodeType, name, nodeID string, handler mq.Proces
 	if tm.Error != nil {
 		return tm
 	}
-	con := mq.NewConsumer(nodeID, nodeID, handler.ProcessTask, mq.WithBrokerURL(tm.server.Options().BrokerAddr()))
+
+	// Configure consumer options based on node type
+	consumerOpts := []mq.Option{mq.WithBrokerURL(tm.server.Options().BrokerAddr())}
+
+	// Page nodes should have no timeout to allow unlimited time for user input
+	if nodeType == Page {
+		consumerOpts = append(consumerOpts, mq.WithConsumerTimeout(0)) // 0 = no timeout
+	}
+
+	con := mq.NewConsumer(nodeID, nodeID, handler.ProcessTask, consumerOpts...)
 	n := &Node{
 		Label:     name,
 		ID:        nodeID,

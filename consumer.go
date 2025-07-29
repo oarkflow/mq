@@ -316,6 +316,40 @@ func (c *Consumer) ProcessTask(ctx context.Context, msg *Task) Result {
 	if msg.Topic == "" && queue != "" {
 		msg.Topic = queue
 	}
+
+	// Apply timeout to individual task processing (not consumer connection)
+	timeout := c.opts.ConsumerTimeout()
+	if timeout > 0 {
+		// Use configurable timeout for task processing
+		taskCtx, cancel := context.WithTimeout(ctx, timeout)
+		defer cancel()
+
+		// Run task with timeout in a goroutine
+		resultCh := make(chan Result, 1)
+		go func() {
+			result := c.handler(taskCtx, msg)
+			result.Topic = msg.Topic
+			result.TaskID = msg.ID
+			resultCh <- result
+		}()
+
+		// Wait for result or timeout
+		select {
+		case result := <-resultCh:
+			return result
+		case <-taskCtx.Done():
+			// Task processing timeout
+			return Result{
+				Error:  fmt.Errorf("task processing timeout after %v", timeout),
+				Topic:  msg.Topic,
+				TaskID: msg.ID,
+				Status: "FAILED",
+				Ctx:    ctx,
+			}
+		}
+	}
+
+	// No timeout - for page nodes that need unlimited time for user input
 	result := c.handler(ctx, msg)
 	result.Topic = msg.Topic
 	result.TaskID = msg.ID
@@ -590,10 +624,8 @@ func (c *Consumer) Consume(ctx context.Context) error {
 }
 
 func (c *Consumer) processWithTimeout(ctx context.Context) error {
-	// Create timeout context for message processing - reduced timeout for better responsiveness
-	msgCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-
+	// Consumer should wait indefinitely for messages from broker - no I/O timeout
+	// Only individual task processing should have timeouts, not the consumer connection
 	c.connMutex.RLock()
 	conn := c.conn
 	c.connMutex.RUnlock()
@@ -602,20 +634,8 @@ func (c *Consumer) processWithTimeout(ctx context.Context) error {
 		return fmt.Errorf("no connection available")
 	}
 
-	// Process message reading in a goroutine to make it cancellable
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- c.readMessage(msgCtx, conn)
-	}()
-
-	select {
-	case err := <-errCh:
-		return err
-	case <-msgCtx.Done():
-		return msgCtx.Err()
-	case <-ctx.Done():
-		return ctx.Err()
-	}
+	// Read message without timeout - consumer should be long-running background service
+	return c.readMessage(ctx, conn)
 }
 
 func (c *Consumer) handleReconnection(ctx context.Context) error {
