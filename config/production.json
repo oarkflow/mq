@@ -1,0 +1,99 @@
+{
+    "broker": {
+        "address": "localhost",
+        "port": 8080,
+        "max_connections": 1000,
+        "connection_timeout": "5s",
+        "read_timeout": "300s",
+        "write_timeout": "30s",
+        "idle_timeout": "600s",
+        "keep_alive": true,
+        "keep_alive_period": "60s",
+        "max_queue_depth": 10000,
+        "enable_dead_letter": true,
+        "dead_letter_max_retries": 3
+    },
+    "consumer": {
+        "enable_http_api": true,
+        "max_retries": 5,
+        "initial_delay": "2s",
+        "max_backoff": "30s",
+        "jitter_percent": 0.5,
+        "batch_size": 10,
+        "prefetch_count": 100,
+        "auto_ack": false,
+        "requeue_on_failure": true
+    },
+    "publisher": {
+        "enable_http_api": true,
+        "max_retries": 3,
+        "initial_delay": "1s",
+        "max_backoff": "10s",
+        "confirm_delivery": true,
+        "publish_timeout": "5s",
+        "connection_pool_size": 10
+    },
+    "pool": {
+        "queue_size": 1000,
+        "max_workers": 20,
+        "max_memory_load": 1073741824,
+        "idle_timeout": "300s",
+        "graceful_shutdown_timeout": "30s",
+        "task_timeout": "60s",
+        "enable_metrics": true,
+        "enable_diagnostics": true
+    },
+    "security": {
+        "enable_tls": false,
+        "tls_cert_path": "./certs/server.crt",
+        "tls_key_path": "./certs/server.key",
+        "tls_ca_path": "./certs/ca.crt",
+        "enable_auth": false,
+        "auth_provider": "jwt",
+        "jwt_secret": "your-secret-key",
+        "enable_encryption": false,
+        "encryption_key": "32-byte-encryption-key-here!!"
+    },
+    "monitoring": {
+        "metrics_port": 9090,
+        "health_check_port": 9091,
+        "enable_metrics": true,
+        "enable_health_checks": true,
+        "metrics_interval": "10s",
+        "health_check_interval": "30s",
+        "retention_period": "24h",
+        "enable_tracing": true,
+        "jaeger_endpoint": "http://localhost:14268/api/traces"
+    },
+    "persistence": {
+        "enable": true,
+        "provider": "postgres",
+        "connection_string": "postgres://user:password@localhost:5432/mq_db?sslmode=disable",
+        "max_connections": 50,
+        "connection_timeout": "30s",
+        "enable_migrations": true,
+        "backup_enabled": true,
+        "backup_interval": "6h"
+    },
+    "clustering": {
+        "enable": false,
+        "node_id": "node-1",
+        "cluster_name": "mq-cluster",
+        "peers": [ ],
+        "election_timeout": "5s",
+        "heartbeat_interval": "1s",
+        "enable_auto_discovery": false,
+        "discovery_port": 7946
+    },
+    "rate_limit": {
+        "broker_rate": 1000,
+        "broker_burst": 100,
+        "consumer_rate": 500,
+        "consumer_burst": 50,
+        "publisher_rate": 200,
+        "publisher_burst": 20,
+        "global_rate": 2000,
+        "global_burst": 200
+    },
+    "last_updated": "2025-07-29T00:00:00Z"
+}
