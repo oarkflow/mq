@@ -139,6 +139,7 @@ func defaultOptions() *Options {
 		maxMemoryLoad:        5000000,
 		storage:              NewMemoryTaskStorage(10 * time.Minute),
 		logger:               logger.NewDefaultLogger(),
+		consumerTimeout:      30 * time.Second, // default timeout for backward compatibility
 	}
 }
 
@@ -301,5 +302,11 @@ type TaskOption func(*Task)
 func WithDAG(dag any) TaskOption {
 	return func(opts *Task) {
 		opts.dag = dag
+	}
+}
+
+func WithConsumerTimeout(timeout time.Duration) Option {
+	return func(opts *Options) {
+		opts.consumerTimeout = timeout
 	}
 }

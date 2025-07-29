@@ -81,6 +81,23 @@ type DAG struct {
 	PreProcessHook  func(ctx context.Context, node *Node, taskID string, payload json.RawMessage) context.Context
 	PostProcessHook func(ctx context.Context, node *Node, taskID string, result mq.Result)
 	metrics         *TaskMetrics // <-- new field for task metrics
+
+	// Enhanced features
+	validator            *DAGValidator
+	monitor              *Monitor
+	retryManager         *NodeRetryManager
+	rateLimiter          *RateLimiter
+	cache                *DAGCache
+	configManager        *ConfigManager
+	batchProcessor       *BatchProcessor
+	transactionManager   *TransactionManager
+	cleanupManager       *CleanupManager
+	webhookManager       *WebhookManager
+	performanceOptimizer *PerformanceOptimizer
+
+	// Circuit breakers per node
+	circuitBreakers   map[string]*CircuitBreaker
+	circuitBreakersMu sync.RWMutex
 }
 
 // SetPreProcessHook configures a function to be called before each node is processed.
@@ -96,21 +113,39 @@ func (tm *DAG) SetPostProcessHook(hook func(ctx context.Context, node *Node, tas
 func NewDAG(name, key string, finalResultCallback func(taskID string, result mq.Result), opts ...mq.Option) *DAG {
 	callback := func(ctx context.Context, result mq.Result) error { return nil }
 	d := &DAG{
-		name:          name,
-		key:           key,
-		nodes:         memory.New[string, *Node](),
-		taskManager:   memory.New[string, *TaskManager](),
-		iteratorNodes: memory.New[string, []Edge](),
-		conditions:    make(map[string]map[string]string),
-		finalResult:   finalResultCallback,
-		metrics:       &TaskMetrics{}, // <-- initialize metrics
+		name:            name,
+		key:             key,
+		nodes:           memory.New[string, *Node](),
+		taskManager:     memory.New[string, *TaskManager](),
+		iteratorNodes:   memory.New[string, []Edge](),
+		conditions:      make(map[string]map[string]string),
+		finalResult:     finalResultCallback,
+		metrics:         &TaskMetrics{}, // <-- initialize metrics
+		circuitBreakers: make(map[string]*CircuitBreaker),
+		nextNodesCache:  make(map[string][]*Node),
+		prevNodesCache:  make(map[string][]*Node),
 	}
+
 	opts = append(opts,
 		mq.WithCallback(d.onTaskCallback),
 		mq.WithConsumerOnSubscribe(d.onConsumerJoin),
 		mq.WithConsumerOnClose(d.onConsumerClose),
 	)
 	d.server = mq.NewBroker(opts...)
+
+	// Now initialize enhanced features that need the server
+	logger := d.server.Options().Logger()
+	d.validator = NewDAGValidator(d)
+	d.monitor = NewMonitor(d, logger)
+	d.retryManager = NewNodeRetryManager(nil, logger)
+	d.rateLimiter = NewRateLimiter(logger)
+	d.cache = NewDAGCache(5*time.Minute, 1000, logger)
+	d.configManager = NewConfigManager(logger)
+	d.batchProcessor = NewBatchProcessor(d, 50, 5*time.Second, logger)
+	d.transactionManager = NewTransactionManager(d, logger)
+	d.cleanupManager = NewCleanupManager(d, 10*time.Minute, 1*time.Hour, 1000, logger)
+	d.performanceOptimizer = NewPerformanceOptimizer(d, d.monitor, d.configManager, logger)
+
 	options := d.server.Options()
 	d.pool = mq.NewPool(
 		options.NumOfWorkers(),
@@ -149,7 +184,13 @@ func (d *DAG) updateTaskMetrics(taskID string, result mq.Result, duration time.D
 func (d *DAG) GetTaskMetrics() TaskMetrics {
 	d.metrics.mu.Lock()
 	defer d.metrics.mu.Unlock()
-	return *d.metrics
+	return TaskMetrics{
+		NotStarted: d.metrics.NotStarted,
+		Queued:     d.metrics.Queued,
+		Cancelled:  d.metrics.Cancelled,
+		Completed:  d.metrics.Completed,
+		Failed:     d.metrics.Failed,
+	}
 }
 
 func (tm *DAG) SetKey(key string) {
@@ -212,7 +253,16 @@ func (tm *DAG) AddNode(nodeType NodeType, name, nodeID string, handler mq.Proces
 	if tm.Error != nil {
 		return tm
 	}
-	con := mq.NewConsumer(nodeID, nodeID, handler.ProcessTask, mq.WithBrokerURL(tm.server.Options().BrokerAddr()))
+
+	// Configure consumer options based on node type
+	consumerOpts := []mq.Option{mq.WithBrokerURL(tm.server.Options().BrokerAddr())}
+
+	// Page nodes should have no timeout to allow unlimited time for user input
+	if nodeType == Page {
+		consumerOpts = append(consumerOpts, mq.WithConsumerTimeout(0)) // 0 = no timeout
+	}
+
+	con := mq.NewConsumer(nodeID, nodeID, handler.ProcessTask, consumerOpts...)
 	n := &Node{
 		Label:     name,
 		ID:        nodeID,
@@ -298,6 +348,70 @@ func (tm *DAG) Logger() logger.Logger {
 }
 
 func (tm *DAG) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
+	// Enhanced processing with monitoring and rate limiting
+	startTime := time.Now()
+
+	// Record task start in monitoring
+	if tm.monitor != nil {
+		tm.monitor.metrics.RecordTaskStart(task.ID)
+	}
+
+	// Check rate limiting
+	if tm.rateLimiter != nil && !tm.rateLimiter.Allow(task.Topic) {
+		if err := tm.rateLimiter.Wait(ctx, task.Topic); err != nil {
+			return mq.Result{
+				Error: fmt.Errorf("rate limit exceeded for node %s: %w", task.Topic, err),
+				Ctx:   ctx,
+			}
+		}
+	}
+
+	// Get circuit breaker for the node
+	circuitBreaker := tm.getOrCreateCircuitBreaker(task.Topic)
+
+	var result mq.Result
+
+	// Execute with circuit breaker protection
+	err := circuitBreaker.Execute(func() error {
+		result = tm.processTaskInternal(ctx, task)
+		return result.Error
+	})
+
+	if err != nil && result.Error == nil {
+		result.Error = err
+		result.Ctx = ctx
+	}
+
+	// Record completion
+	duration := time.Since(startTime)
+	if tm.monitor != nil {
+		tm.monitor.metrics.RecordTaskCompletion(task.ID, result.Status)
+		tm.monitor.metrics.RecordNodeExecution(task.Topic, duration, result.Error == nil)
+	}
+
+	// Update internal metrics
+	tm.updateTaskMetrics(task.ID, result, duration)
+
+	// Trigger webhooks if configured
+	if tm.webhookManager != nil {
+		event := WebhookEvent{
+			Type:      "task_completed",
+			TaskID:    task.ID,
+			NodeID:    task.Topic,
+			Timestamp: time.Now(),
+			Data: map[string]interface{}{
+				"status":   string(result.Status),
+				"duration": duration.String(),
+				"success":  result.Error == nil,
+			},
+		}
+		tm.webhookManager.TriggerWebhook(event)
+	}
+
+	return result
+}
+
+func (tm *DAG) processTaskInternal(ctx context.Context, task *mq.Task) mq.Result {
 	ctx = context.WithValue(ctx, "task_id", task.ID)
 	userContext := form.UserContext(ctx)
 	next := userContext.Get("next")
@@ -804,4 +918,206 @@ func (tm *DAG) RemoveNode(nodeID string) error {
 	tm.Logger().Info("Node removed and edges adjusted",
 		logger.Field{Key: "removed_node", Value: nodeID})
 	return nil
+}
+
+// getOrCreateCircuitBreaker gets or creates a circuit breaker for a node
+func (tm *DAG) getOrCreateCircuitBreaker(nodeID string) *CircuitBreaker {
+	tm.circuitBreakersMu.RLock()
+	cb, exists := tm.circuitBreakers[nodeID]
+	tm.circuitBreakersMu.RUnlock()
+
+	if exists {
+		return cb
+	}
+
+	tm.circuitBreakersMu.Lock()
+	defer tm.circuitBreakersMu.Unlock()
+
+	// Double-check after acquiring write lock
+	if cb, exists := tm.circuitBreakers[nodeID]; exists {
+		return cb
+	}
+
+	// Create new circuit breaker with default config
+	config := &CircuitBreakerConfig{
+		FailureThreshold: 5,
+		ResetTimeout:     30 * time.Second,
+		HalfOpenMaxCalls: 3,
+	}
+
+	cb = NewCircuitBreaker(config, tm.Logger())
+	tm.circuitBreakers[nodeID] = cb
+
+	return cb
+}
+
+// Enhanced DAG methods for new features
+
+// ValidateDAG validates the DAG structure
+func (tm *DAG) ValidateDAG() error {
+	if tm.validator == nil {
+		return fmt.Errorf("validator not initialized")
+	}
+	return tm.validator.ValidateStructure()
+}
+
+// StartMonitoring starts DAG monitoring
+func (tm *DAG) StartMonitoring(ctx context.Context) {
+	if tm.monitor != nil {
+		tm.monitor.Start(ctx)
+	}
+	if tm.cleanupManager != nil {
+		tm.cleanupManager.Start(ctx)
+	}
+}
+
+// StopMonitoring stops DAG monitoring
+func (tm *DAG) StopMonitoring() {
+	if tm.monitor != nil {
+		tm.monitor.Stop()
+	}
+	if tm.cleanupManager != nil {
+		tm.cleanupManager.Stop()
+	}
+	if tm.cache != nil {
+		tm.cache.Stop()
+	}
+	if tm.batchProcessor != nil {
+		tm.batchProcessor.Stop()
+	}
+}
+
+// SetRateLimit sets rate limit for a node
+func (tm *DAG) SetRateLimit(nodeID string, requestsPerSecond float64, burst int) {
+	if tm.rateLimiter != nil {
+		tm.rateLimiter.SetNodeLimit(nodeID, requestsPerSecond, burst)
+	}
+}
+
+// SetWebhookManager sets the webhook manager
+func (tm *DAG) SetWebhookManager(webhookManager *WebhookManager) {
+	tm.webhookManager = webhookManager
+}
+
+// GetMonitoringMetrics returns current monitoring metrics
+func (tm *DAG) GetMonitoringMetrics() *MonitoringMetrics {
+	if tm.monitor != nil {
+		return tm.monitor.GetMetrics()
+	}
+	return nil
+}
+
+// GetNodeStats returns statistics for a specific node
+func (tm *DAG) GetNodeStats(nodeID string) *NodeStats {
+	if tm.monitor != nil {
+		return tm.monitor.metrics.GetNodeStats(nodeID)
+	}
+	return nil
+}
+
+// OptimizePerformance runs performance optimization
+func (tm *DAG) OptimizePerformance() error {
+	if tm.performanceOptimizer != nil {
+		return tm.performanceOptimizer.OptimizePerformance()
+	}
+	return fmt.Errorf("performance optimizer not initialized")
+}
+
+// BeginTransaction starts a new transaction for task execution
+func (tm *DAG) BeginTransaction(taskID string) *Transaction {
+	if tm.transactionManager != nil {
+		return tm.transactionManager.BeginTransaction(taskID)
+	}
+	return nil
+}
+
+// CommitTransaction commits a transaction
+func (tm *DAG) CommitTransaction(txID string) error {
+	if tm.transactionManager != nil {
+		return tm.transactionManager.CommitTransaction(txID)
+	}
+	return fmt.Errorf("transaction manager not initialized")
+}
+
+// RollbackTransaction rolls back a transaction
+func (tm *DAG) RollbackTransaction(txID string) error {
+	if tm.transactionManager != nil {
+		return tm.transactionManager.RollbackTransaction(txID)
+	}
+	return fmt.Errorf("transaction manager not initialized")
+}
+
+// GetTopologicalOrder returns nodes in topological order
+func (tm *DAG) GetTopologicalOrder() ([]string, error) {
+	if tm.validator != nil {
+		return tm.validator.GetTopologicalOrder()
+	}
+	return nil, fmt.Errorf("validator not initialized")
+}
+
+// GetCriticalPath finds the longest path in the DAG
+func (tm *DAG) GetCriticalPath() ([]string, error) {
+	if tm.validator != nil {
+		return tm.validator.GetCriticalPath()
+	}
+	return nil, fmt.Errorf("validator not initialized")
+}
+
+// GetDAGStatistics returns comprehensive DAG statistics
+func (tm *DAG) GetDAGStatistics() map[string]interface{} {
+	if tm.validator != nil {
+		return tm.validator.GetNodeStatistics()
+	}
+	return make(map[string]interface{})
+}
+
+// SetRetryConfig sets retry configuration for the DAG
+func (tm *DAG) SetRetryConfig(config *RetryConfig) {
+	if tm.retryManager != nil {
+		tm.retryManager.config = config
+	}
+}
+
+// AddNodeWithRetry adds a node with retry capabilities
+func (tm *DAG) AddNodeWithRetry(nodeType NodeType, name, nodeID string, handler mq.Processor, retryConfig *RetryConfig, startNode ...bool) *DAG {
+	if tm.Error != nil {
+		return tm
+	}
+
+	// Wrap handler with retry logic if config provided
+	if retryConfig != nil {
+		handler = NewRetryableProcessor(handler, retryConfig, tm.Logger())
+	}
+
+	return tm.AddNode(nodeType, name, nodeID, handler, startNode...)
+}
+
+// SetAlertThresholds configures monitoring alert thresholds
+func (tm *DAG) SetAlertThresholds(thresholds *AlertThresholds) {
+	if tm.monitor != nil {
+		tm.monitor.SetAlertThresholds(thresholds)
+	}
+}
+
+// AddAlertHandler adds an alert handler for monitoring
+func (tm *DAG) AddAlertHandler(handler AlertHandler) {
+	if tm.monitor != nil {
+		tm.monitor.AddAlertHandler(handler)
+	}
+}
+
+// UpdateConfiguration updates the DAG configuration
+func (tm *DAG) UpdateConfiguration(config *DAGConfig) error {
+	if tm.configManager != nil {
+		return tm.configManager.UpdateConfig(config)
+	}
+	return fmt.Errorf("config manager not initialized")
+}
+
+// GetConfiguration returns the current DAG configuration
+func (tm *DAG) GetConfiguration() *DAGConfig {
+	if tm.configManager != nil {
+		return tm.configManager.GetConfig()
+	}
+	return DefaultDAGConfig()
 }

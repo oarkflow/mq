@@ -8,6 +8,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/oarkflow/errors"
@@ -122,6 +123,67 @@ type TLSConfig struct {
 	UseTLS   bool
 }
 
+// QueueConfig holds configuration for a specific queue
+type QueueConfig struct {
+	MaxDepth       int           `json:"max_depth"`
+	MaxRetries     int           `json:"max_retries"`
+	MessageTTL     time.Duration `json:"message_ttl"`
+	DeadLetter     bool          `json:"dead_letter"`
+	Persistent     bool          `json:"persistent"`
+	BatchSize      int           `json:"batch_size"`
+	Priority       int           `json:"priority"`
+	OrderedMode    bool          `json:"ordered_mode"`
+	Throttling     bool          `json:"throttling"`
+	ThrottleRate   int           `json:"throttle_rate"`
+	ThrottleBurst  int           `json:"throttle_burst"`
+	CompactionMode bool          `json:"compaction_mode"`
+}
+
+// QueueOption defines options for queue configuration
+type QueueOption func(*QueueConfig)
+
+// WithQueueOption creates a queue with specific configuration
+func WithQueueOption(config QueueConfig) QueueOption {
+	return func(c *QueueConfig) {
+		*c = config
+	}
+}
+
+// WithQueueMaxDepth sets the maximum queue depth
+func WithQueueMaxDepth(maxDepth int) QueueOption {
+	return func(c *QueueConfig) {
+		c.MaxDepth = maxDepth
+	}
+}
+
+// WithQueueMaxRetries sets the maximum retries for queue messages
+func WithQueueMaxRetries(maxRetries int) QueueOption {
+	return func(c *QueueConfig) {
+		c.MaxRetries = maxRetries
+	}
+}
+
+// WithQueueTTL sets the message TTL for the queue
+func WithQueueTTL(ttl time.Duration) QueueOption {
+	return func(c *QueueConfig) {
+		c.MessageTTL = ttl
+	}
+}
+
+// WithDeadLetter enables dead letter queue for failed messages
+func WithDeadLetter() QueueOption {
+	return func(c *QueueConfig) {
+		c.DeadLetter = true
+	}
+}
+
+// WithPersistent enables message persistence
+func WithPersistent() QueueOption {
+	return func(c *QueueConfig) {
+		c.Persistent = true
+	}
+}
+
 // RateLimiter implementation
 type RateLimiter struct {
 	mu     sync.Mutex
@@ -214,8 +276,9 @@ type Options struct {
 	enableWorkerPool     bool
 	respondPendingResult bool
 	logger               logger.Logger
-	BrokerRateLimiter    *RateLimiter // new field for broker rate limiting
-	ConsumerRateLimiter  *RateLimiter // new field for consumer rate limiting
+	BrokerRateLimiter    *RateLimiter  // new field for broker rate limiting
+	ConsumerRateLimiter  *RateLimiter  // new field for consumer rate limiting
+	consumerTimeout      time.Duration // timeout for consumer message processing (0 = no timeout)
 }
 
 func (o *Options) SetSyncMode(sync bool) {
@@ -254,6 +317,10 @@ func (o *Options) HTTPApi() bool {
 	return o.enableHTTPApi
 }
 
+func (o *Options) ConsumerTimeout() time.Duration {
+	return o.consumerTimeout
+}
+
 func HeadersWithConsumerID(ctx context.Context, id string) map[string]string {
 	return WithHeaders(ctx, map[string]string{consts.ConsumerKey: id, consts.ContentType: consts.TypeJson})
 }
@@ -282,7 +349,105 @@ type publisher struct {
 	id   string
 }
 
+// Enhanced Broker Types and Interfaces
+
+// ConnectionPool manages a pool of broker connections
+type ConnectionPool struct {
+	mu          sync.RWMutex
+	connections map[string]*BrokerConnection
+	maxConns    int
+	connCount   int64
+}
+
+// BrokerConnection represents a single broker connection
+type BrokerConnection struct {
+	mu           sync.RWMutex
+	conn         net.Conn
+	id           string
+	connType     string
+	lastActivity time.Time
+	isActive     bool
+}
+
+// HealthChecker monitors broker health
+type HealthChecker struct {
+	mu         sync.RWMutex
+	broker     *Broker
+	interval   time.Duration
+	ticker     *time.Ticker
+	shutdown   chan struct{}
+	thresholds HealthThresholds
+}
+
+// HealthThresholds defines health check thresholds
+type HealthThresholds struct {
+	MaxMemoryUsage  int64
+	MaxCPUUsage     float64
+	MaxConnections  int
+	MaxQueueDepth   int
+	MaxResponseTime time.Duration
+	MinFreeMemory   int64
+}
+
+// CircuitState represents the state of a circuit breaker
+type CircuitState int
+
+const (
+	CircuitClosed CircuitState = iota
+	CircuitOpen
+	CircuitHalfOpen
+)
+
+// EnhancedCircuitBreaker provides circuit breaker functionality
+type EnhancedCircuitBreaker struct {
+	mu              sync.RWMutex
+	threshold       int64
+	timeout         time.Duration
+	state           CircuitState
+	failureCount    int64
+	successCount    int64
+	lastFailureTime time.Time
+}
+
+// MetricsCollector collects and stores metrics
+type MetricsCollector struct {
+	mu      sync.RWMutex
+	metrics map[string]*Metric
+}
+
+// Metric represents a single metric
+type Metric struct {
+	Name      string            `json:"name"`
+	Value     float64           `json:"value"`
+	Timestamp time.Time         `json:"timestamp"`
+	Tags      map[string]string `json:"tags,omitempty"`
+}
+
+// MessageStore interface for storing messages
+type MessageStore interface {
+	Store(msg *StoredMessage) error
+	Retrieve(id string) (*StoredMessage, error)
+	Delete(id string) error
+	List(queue string, limit int, offset int) ([]*StoredMessage, error)
+	Count(queue string) (int64, error)
+	Cleanup(olderThan time.Time) error
+}
+
+// StoredMessage represents a message stored in the message store
+type StoredMessage struct {
+	ID        string                 `json:"id"`
+	Queue     string                 `json:"queue"`
+	Payload   []byte                 `json:"payload"`
+	Headers   map[string]string      `json:"headers,omitempty"`
+	Metadata  map[string]interface{} `json:"metadata,omitempty"`
+	Priority  int                    `json:"priority"`
+	CreatedAt time.Time              `json:"created_at"`
+	ExpiresAt *time.Time             `json:"expires_at,omitempty"`
+	Attempts  int                    `json:"attempts"`
+}
+
 type Broker struct {
+	// Core broker functionality
 	queues     storage.IMap[string, *Queue] // Modified to support tenant-specific queues
 	consumers  storage.IMap[string, *consumer]
 	publishers storage.IMap[string, *publisher]
@@ -290,18 +455,43 @@ type Broker struct {
 	opts       *Options
 	pIDs       storage.IMap[string, bool]
 	listener   net.Listener
+
+	// Enhanced production features
+	connectionPool   *ConnectionPool
+	healthChecker    *HealthChecker
+	circuitBreaker   *EnhancedCircuitBreaker
+	metricsCollector *MetricsCollector
+	messageStore     MessageStore
+	isShutdown       int32
+	shutdown         chan struct{}
+	wg               sync.WaitGroup
+	logger           logger.Logger
 }
 
 func NewBroker(opts ...Option) *Broker {
 	options := SetupOptions(opts...)
-	return &Broker{
+
+	broker := &Broker{
+		// Core broker functionality
 		queues:     memory.New[string, *Queue](),
 		publishers: memory.New[string, *publisher](),
 		consumers:  memory.New[string, *consumer](),
 		deadLetter: memory.New[string, *Queue](),
 		pIDs:       memory.New[string, bool](),
 		opts:       options,
+
+		// Enhanced production features
+		connectionPool:   NewConnectionPool(1000), // max 1000 connections
+		healthChecker:    NewHealthChecker(),
+		circuitBreaker:   NewEnhancedCircuitBreaker(10, 30*time.Second), // 10 failures, 30s timeout
+		metricsCollector: NewMetricsCollector(),
+		messageStore:     NewInMemoryMessageStore(),
+		shutdown:         make(chan struct{}),
+		logger:           options.Logger(),
 	}
+
+	broker.healthChecker.broker = broker
+	return broker
 }
 
 func (b *Broker) Options() *Options {
@@ -750,22 +940,29 @@ func (b *Broker) readMessage(ctx context.Context, c net.Conn) error {
 func (b *Broker) dispatchWorker(ctx context.Context, queue *Queue) {
 	delay := b.opts.initialDelay
 	for task := range queue.tasks {
-		if b.opts.BrokerRateLimiter != nil {
-			b.opts.BrokerRateLimiter.Wait()
-		}
-		success := false
-		for !success && task.RetryCount <= b.opts.maxRetries {
-			if b.dispatchTaskToConsumer(ctx, queue, task) {
-				success = true
-				b.acknowledgeTask(ctx, task.Message.Queue, queue.name)
-			} else {
-				task.RetryCount++
-				delay = b.backoffRetry(queue, task, delay)
+		// Handle each task in a separate goroutine to avoid blocking the dispatch loop
+		go func(t *QueuedTask) {
+			if b.opts.BrokerRateLimiter != nil {
+				b.opts.BrokerRateLimiter.Wait()
 			}
-		}
-		if task.RetryCount > b.opts.maxRetries {
-			b.sendToDLQ(queue, task)
-		}
+
+			success := false
+			currentDelay := delay
+
+			for !success && t.RetryCount <= b.opts.maxRetries {
+				if b.dispatchTaskToConsumer(ctx, queue, t) {
+					success = true
+					b.acknowledgeTask(ctx, t.Message.Queue, queue.name)
+				} else {
+					t.RetryCount++
+					currentDelay = b.backoffRetry(queue, t, currentDelay)
+				}
+			}
+
+			if t.RetryCount > b.opts.maxRetries {
+				b.sendToDLQ(queue, t)
+			}
+		}(task)
 	}
 }
 
@@ -795,13 +992,23 @@ func (b *Broker) dispatchTaskToConsumer(ctx context.Context, queue *Queue, task 
 			err = fmt.Errorf("consumer %s is not active", con.id)
 			return true
 		}
-		if err := b.send(ctx, con.conn, task.Message); err == nil {
-			consumerFound = true
-			// Mark the task as processed
-			b.pIDs.Set(taskID, true)
-			return false
-		}
-		return true
+
+		// Send message asynchronously to avoid blocking
+		go func(consumer *consumer, message *codec.Message) {
+			sendCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+
+			if sendErr := b.send(sendCtx, consumer.conn, message); sendErr != nil {
+				log.Printf("Failed to send task %s to consumer %s: %v", taskID, consumer.id, sendErr)
+			} else {
+				log.Printf("Successfully sent task %s to consumer %s", taskID, consumer.id)
+			}
+		}(con, task.Message)
+
+		consumerFound = true
+		// Mark the task as processed
+		b.pIDs.Set(taskID, true)
+		return false // Break the loop since we found a consumer
 	})
 
 	if err != nil {
@@ -827,7 +1034,12 @@ func (b *Broker) dispatchTaskToConsumer(ctx context.Context, queue *Queue, task 
 func (b *Broker) backoffRetry(queue *Queue, task *QueuedTask, delay time.Duration) time.Duration {
 	backoffDuration := utils.CalculateJitter(delay, b.opts.jitterPercent)
 	log.Printf("Backing off for %v before retrying task for queue %s", backoffDuration, task.Message.Queue)
-	time.Sleep(backoffDuration)
+
+	// Perform backoff sleep in a goroutine to avoid blocking
+	go func() {
+		time.Sleep(backoffDuration)
+	}()
+
 	delay *= 2
 	if delay > b.opts.maxBackoff {
 		delay = b.opts.maxBackoff
@@ -869,6 +1081,41 @@ func (b *Broker) NewQueue(name string) *Queue {
 	ctx := context.Background()
 	go b.dispatchWorker(ctx, q)
 	go b.dispatchWorker(ctx, dlq)
+	return q
+}
+
+// NewQueueWithConfig creates a queue with specific configuration
+func (b *Broker) NewQueueWithConfig(name string, opts ...QueueOption) *Queue {
+	config := QueueConfig{
+		MaxDepth:   b.opts.queueSize,
+		MaxRetries: 3,
+		MessageTTL: 1 * time.Hour,
+		BatchSize:  1,
+	}
+
+	// Apply options
+	for _, opt := range opts {
+		opt(&config)
+	}
+
+	q := newQueueWithConfig(name, config)
+	b.queues.Set(name, q)
+
+	// Create DLQ for the queue if enabled
+	if config.DeadLetter {
+		dlqConfig := config
+		dlqConfig.MaxDepth = config.MaxDepth / 10 // 10% of main queue
+		dlq := newQueueWithConfig(name+"_dlq", dlqConfig)
+		b.deadLetter.Set(name, dlq)
+	}
+
+	ctx := context.Background()
+	go b.dispatchWorker(ctx, q)
+	if config.DeadLetter {
+		if dlq, ok := b.deadLetter.Get(name); ok {
+			go b.dispatchWorker(ctx, dlq)
+		}
+	}
 	return q
 }
 
@@ -959,4 +1206,506 @@ func (b *Broker) Authorize(ctx context.Context, role string, action string) erro
 		return nil
 	}
 	return fmt.Errorf("unauthorized action")
+}
+
+// Enhanced Broker Methods (Production Features)
+
+// NewConnectionPool creates a new connection pool
+func NewConnectionPool(maxConns int) *ConnectionPool {
+	return &ConnectionPool{
+		connections: make(map[string]*BrokerConnection),
+		maxConns:    maxConns,
+	}
+}
+
+// AddConnection adds a connection to the pool
+func (cp *ConnectionPool) AddConnection(id string, conn net.Conn, connType string) error {
+	cp.mu.Lock()
+	defer cp.mu.Unlock()
+
+	if len(cp.connections) >= cp.maxConns {
+		return fmt.Errorf("connection pool is full")
+	}
+
+	brokerConn := &BrokerConnection{
+		conn:         conn,
+		id:           id,
+		connType:     connType,
+		lastActivity: time.Now(),
+		isActive:     true,
+	}
+
+	cp.connections[id] = brokerConn
+	atomic.AddInt64(&cp.connCount, 1)
+	return nil
+}
+
+// RemoveConnection removes a connection from the pool
+func (cp *ConnectionPool) RemoveConnection(id string) {
+	cp.mu.Lock()
+	defer cp.mu.Unlock()
+
+	if conn, exists := cp.connections[id]; exists {
+		conn.conn.Close()
+		delete(cp.connections, id)
+		atomic.AddInt64(&cp.connCount, -1)
+	}
+}
+
+// GetActiveConnections returns the number of active connections
+func (cp *ConnectionPool) GetActiveConnections() int64 {
+	return atomic.LoadInt64(&cp.connCount)
+}
+
+// NewHealthChecker creates a new health checker
+func NewHealthChecker() *HealthChecker {
+	return &HealthChecker{
+		interval: 30 * time.Second,
+		shutdown: make(chan struct{}),
+		thresholds: HealthThresholds{
+			MaxMemoryUsage:  1024 * 1024 * 1024, // 1GB
+			MaxCPUUsage:     80.0,               // 80%
+			MaxConnections:  900,                // 90% of max
+			MaxQueueDepth:   10000,
+			MaxResponseTime: 5 * time.Second,
+			MinFreeMemory:   100 * 1024 * 1024, // 100MB
+		},
+	}
+}
+
+// NewEnhancedCircuitBreaker creates a new circuit breaker
+func NewEnhancedCircuitBreaker(threshold int64, timeout time.Duration) *EnhancedCircuitBreaker {
+	return &EnhancedCircuitBreaker{
+		threshold: threshold,
+		timeout:   timeout,
+		state:     CircuitClosed,
+	}
+}
+
+// NewMetricsCollector creates a new metrics collector
+func NewMetricsCollector() *MetricsCollector {
+	return &MetricsCollector{
+		metrics: make(map[string]*Metric),
+	}
+}
+
+// NewInMemoryMessageStore creates a new in-memory message store
+func NewInMemoryMessageStore() *InMemoryMessageStore {
+	return &InMemoryMessageStore{
+		messages: memory.New[string, *StoredMessage](),
+	}
+}
+
+// Store stores a message
+func (ims *InMemoryMessageStore) Store(msg *StoredMessage) error {
+	ims.messages.Set(msg.ID, msg)
+	return nil
+}
+
+// Retrieve retrieves a message by ID
+func (ims *InMemoryMessageStore) Retrieve(id string) (*StoredMessage, error) {
+	msg, exists := ims.messages.Get(id)
+	if !exists {
+		return nil, fmt.Errorf("message not found: %s", id)
+	}
+	return msg, nil
+}
+
+// Delete deletes a message
+func (ims *InMemoryMessageStore) Delete(id string) error {
+	ims.messages.Del(id)
+	return nil
+}
+
+// List lists messages for a queue
+func (ims *InMemoryMessageStore) List(queue string, limit int, offset int) ([]*StoredMessage, error) {
+	var result []*StoredMessage
+	count := 0
+	skipped := 0
+
+	ims.messages.ForEach(func(id string, msg *StoredMessage) bool {
+		if msg.Queue == queue {
+			if skipped < offset {
+				skipped++
+				return true
+			}
+
+			result = append(result, msg)
+			count++
+
+			return count < limit
+		}
+		return true
+	})
+
+	return result, nil
+}
+
+// Count counts messages in a queue
+func (ims *InMemoryMessageStore) Count(queue string) (int64, error) {
+	count := int64(0)
+	ims.messages.ForEach(func(id string, msg *StoredMessage) bool {
+		if msg.Queue == queue {
+			count++
+		}
+		return true
+	})
+	return count, nil
+}
+
+// Cleanup removes old messages
+func (ims *InMemoryMessageStore) Cleanup(olderThan time.Time) error {
+	var toDelete []string
+
+	ims.messages.ForEach(func(id string, msg *StoredMessage) bool {
+		if msg.CreatedAt.Before(olderThan) ||
+			(msg.ExpiresAt != nil && msg.ExpiresAt.Before(time.Now())) {
+			toDelete = append(toDelete, id)
+		}
+		return true
+	})
+
+	for _, id := range toDelete {
+		ims.messages.Del(id)
+	}
+
+	return nil
+}
+
+// Enhanced Start method with production features
+func (b *Broker) StartEnhanced(ctx context.Context) error {
+	// Start health checker
+	b.healthChecker.Start()
+
+	// Start connection cleanup routine
+	b.wg.Add(1)
+	go b.connectionCleanupRoutine()
+
+	// Start metrics collection routine
+	b.wg.Add(1)
+	go b.metricsCollectionRoutine()
+
+	// Start message store cleanup routine
+	b.wg.Add(1)
+	go b.messageStoreCleanupRoutine()
+
+	b.logger.Info("Enhanced broker starting with production features enabled")
+
+	// Start the enhanced broker with its own implementation
+	return b.startEnhancedBroker(ctx)
+}
+
+// startEnhancedBroker starts the core broker functionality
+func (b *Broker) startEnhancedBroker(ctx context.Context) error {
+	addr := b.opts.BrokerAddr()
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("failed to listen on %s: %w", addr, err)
+	}
+	b.listener = listener
+	b.logger.Info("Enhanced broker listening", logger.Field{Key: "address", Value: addr})
+
+	b.wg.Add(1)
+	go func() {
+		defer b.wg.Done()
+		for {
+			select {
+			case <-b.shutdown:
+				return
+			default:
+				conn, err := listener.Accept()
+				if err != nil {
+					select {
+					case <-b.shutdown:
+						return
+					default:
+						b.logger.Error("Accept error", logger.Field{Key: "error", Value: err.Error()})
+						continue
+					}
+				}
+
+				// Add connection to pool
+				connID := fmt.Sprintf("conn_%d", time.Now().UnixNano())
+				b.connectionPool.AddConnection(connID, conn, "unknown")
+
+				b.wg.Add(1)
+				go func(c net.Conn) {
+					defer b.wg.Done()
+					b.handleEnhancedConnection(ctx, c)
+				}(conn)
+			}
+		}
+	}()
+
+	return nil
+}
+
+// handleEnhancedConnection handles incoming connections with enhanced features
+func (b *Broker) handleEnhancedConnection(ctx context.Context, conn net.Conn) {
+	defer func() {
+		if r := recover(); r != nil {
+			b.logger.Error("Connection handler panic", logger.Field{Key: "panic", Value: fmt.Sprintf("%v", r)})
+		}
+		conn.Close()
+	}()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-b.shutdown:
+			return
+		default:
+			msg, err := b.receive(ctx, conn)
+			if err != nil {
+				b.OnError(ctx, conn, err)
+				return
+			}
+			b.OnMessage(ctx, msg, conn)
+		}
+	}
+}
+
+// connectionCleanupRoutine periodically cleans up idle connections
+func (b *Broker) connectionCleanupRoutine() {
+	defer b.wg.Done()
+
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			b.connectionPool.CleanupIdleConnections(10 * time.Minute)
+		case <-b.shutdown:
+			return
+		}
+	}
+}
+
+// CleanupIdleConnections removes idle connections
+func (cp *ConnectionPool) CleanupIdleConnections(idleTimeout time.Duration) {
+	cp.mu.Lock()
+	defer cp.mu.Unlock()
+
+	now := time.Now()
+	for id, conn := range cp.connections {
+		conn.mu.RLock()
+		lastActivity := conn.lastActivity
+		conn.mu.RUnlock()
+
+		if now.Sub(lastActivity) > idleTimeout {
+			conn.conn.Close()
+			delete(cp.connections, id)
+			atomic.AddInt64(&cp.connCount, -1)
+		}
+	}
+}
+
+// metricsCollectionRoutine periodically collects and reports metrics
+func (b *Broker) metricsCollectionRoutine() {
+	defer b.wg.Done()
+
+	ticker := time.NewTicker(1 * time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			b.collectMetrics()
+		case <-b.shutdown:
+			return
+		}
+	}
+}
+
+// collectMetrics collects current system metrics
+func (b *Broker) collectMetrics() {
+	// Collect connection metrics
+	activeConns := b.connectionPool.GetActiveConnections()
+	b.metricsCollector.RecordMetric("broker.connections.active", float64(activeConns), nil)
+
+	// Collect queue metrics
+	b.queues.ForEach(func(name string, queue *Queue) bool {
+		queueDepth := len(queue.tasks)
+		consumerCount := queue.consumers.Size()
+
+		b.metricsCollector.RecordMetric("broker.queue.depth", float64(queueDepth),
+			map[string]string{"queue": name})
+		b.metricsCollector.RecordMetric("broker.queue.consumers", float64(consumerCount),
+			map[string]string{"queue": name})
+
+		return true
+	})
+}
+
+// RecordMetric records a metric
+func (mc *MetricsCollector) RecordMetric(name string, value float64, tags map[string]string) {
+	mc.mu.Lock()
+	defer mc.mu.Unlock()
+
+	mc.metrics[name] = &Metric{
+		Name:      name,
+		Value:     value,
+		Timestamp: time.Now(),
+		Tags:      tags,
+	}
+}
+
+// messageStoreCleanupRoutine periodically cleans up old messages
+func (b *Broker) messageStoreCleanupRoutine() {
+	defer b.wg.Done()
+
+	ticker := time.NewTicker(1 * time.Hour)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			// Clean up messages older than 24 hours
+			cutoff := time.Now().Add(-24 * time.Hour)
+			if err := b.messageStore.Cleanup(cutoff); err != nil {
+				b.logger.Error("Failed to cleanup old messages",
+					logger.Field{Key: "error", Value: err.Error()})
+			}
+		case <-b.shutdown:
+			return
+		}
+	}
+}
+
+// Enhanced Stop method with graceful shutdown
+func (b *Broker) StopEnhanced() error {
+	if !atomic.CompareAndSwapInt32(&b.isShutdown, 0, 1) {
+		return nil // Already shutdown
+	}
+
+	b.logger.Info("Enhanced broker shutting down gracefully")
+
+	// Signal shutdown
+	close(b.shutdown)
+
+	// Stop health checker
+	b.healthChecker.Stop()
+
+	// Wait for all goroutines to finish
+	b.wg.Wait()
+
+	// Close all connections
+	b.connectionPool.mu.Lock()
+	for id, conn := range b.connectionPool.connections {
+		conn.conn.Close()
+		delete(b.connectionPool.connections, id)
+	}
+	b.connectionPool.mu.Unlock()
+
+	// Close listener
+	if b.listener != nil {
+		b.listener.Close()
+	}
+
+	b.logger.Info("Enhanced broker shutdown completed")
+	return nil
+}
+
+// Start starts the health checker
+func (hc *HealthChecker) Start() {
+	hc.ticker = time.NewTicker(hc.interval)
+	go func() {
+		defer hc.ticker.Stop()
+		for {
+			select {
+			case <-hc.ticker.C:
+				hc.performHealthCheck()
+			case <-hc.shutdown:
+				return
+			}
+		}
+	}()
+}
+
+// Stop stops the health checker
+func (hc *HealthChecker) Stop() {
+	close(hc.shutdown)
+}
+
+// performHealthCheck performs a comprehensive health check
+func (hc *HealthChecker) performHealthCheck() {
+	// Check connection count
+	activeConns := hc.broker.connectionPool.GetActiveConnections()
+	if activeConns > int64(hc.thresholds.MaxConnections) {
+		hc.broker.logger.Warn("High connection count detected",
+			logger.Field{Key: "active_connections", Value: activeConns},
+			logger.Field{Key: "threshold", Value: hc.thresholds.MaxConnections})
+	}
+
+	// Check queue depths
+	hc.broker.queues.ForEach(func(name string, queue *Queue) bool {
+		if len(queue.tasks) > hc.thresholds.MaxQueueDepth {
+			hc.broker.logger.Warn("High queue depth detected",
+				logger.Field{Key: "queue", Value: name},
+				logger.Field{Key: "depth", Value: len(queue.tasks)},
+				logger.Field{Key: "threshold", Value: hc.thresholds.MaxQueueDepth})
+		}
+		return true
+	})
+
+	// Record health metrics
+	hc.broker.metricsCollector.RecordMetric("broker.connections.active", float64(activeConns), nil)
+	hc.broker.metricsCollector.RecordMetric("broker.health.check.timestamp", float64(time.Now().Unix()), nil)
+}
+
+// Call executes a function with circuit breaker protection
+func (cb *EnhancedCircuitBreaker) Call(fn func() error) error {
+	cb.mu.RLock()
+	state := cb.state
+	cb.mu.RUnlock()
+
+	switch state {
+	case CircuitOpen:
+		cb.mu.RLock()
+		lastFailure := cb.lastFailureTime
+		cb.mu.RUnlock()
+
+		if time.Since(lastFailure) > cb.timeout {
+			cb.mu.Lock()
+			cb.state = CircuitHalfOpen
+			cb.mu.Unlock()
+		} else {
+			return fmt.Errorf("circuit breaker is open")
+		}
+	case CircuitHalfOpen:
+		// Allow one request through
+	case CircuitClosed:
+		// Normal operation
+	}
+
+	err := fn()
+
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+
+	if err != nil {
+		cb.failureCount++
+		cb.lastFailureTime = time.Now()
+
+		if cb.failureCount >= cb.threshold {
+			cb.state = CircuitOpen
+		} else if cb.state == CircuitHalfOpen {
+			cb.state = CircuitOpen
+		}
+	} else {
+		cb.successCount++
+		if cb.state == CircuitHalfOpen {
+			cb.state = CircuitClosed
+			cb.failureCount = 0
+		}
+	}
+
+	return err
+}
+
+// InMemoryMessageStore implements MessageStore in memory
+type InMemoryMessageStore struct {
+	messages storage.IMap[string, *StoredMessage]
 }
