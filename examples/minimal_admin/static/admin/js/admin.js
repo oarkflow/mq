@@ -810,7 +810,7 @@ class MQAdminDashboard {
             const consumer = this.data.consumers.find(c => c.id === consumerId);
             const action = consumer?.status === 'paused' ? 'resume' : 'pause';
 
-            const response = await fetch(`/api/admin/consumers/${consumerId}/${action}`, {
+            const response = await fetch(`/api/admin/consumers/${action}?id=${consumerId}`, {
                 method: 'POST'
             });
 
@@ -828,7 +828,7 @@ class MQAdminDashboard {
     async stopConsumer(consumerId) {
         this.confirmAction('stop this consumer', async () => {
             try {
-                const response = await fetch(`/api/admin/consumers/${consumerId}/stop`, {
+                const response = await fetch(`/api/admin/consumers/stop?id=${consumerId}`, {
                     method: 'POST'
                 });
 

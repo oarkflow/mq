@@ -31,6 +31,10 @@ type QueueMetrics struct {
 	CurrentDepth      int64         `json:"current_depth"`
 	AverageLatency    time.Duration `json:"average_latency"`
 	LastActivity      time.Time     `json:"last_activity"`
+	WorkerCount       int           `json:"worker_count"`
+	QueueDepth        int           `json:"queue_depth"`
+	ActiveTasks       int           `json:"active_tasks"`
+	MaxMemoryLoad     int64         `json:"max_memory_load"`
 }
 
 func newQueue(name string, queueSize int) *Queue {

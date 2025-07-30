@@ -37,20 +37,23 @@ type Processor interface {
 }
 
 type Consumer struct {
-	conn         net.Conn
-	handler      Handler
-	pool         *Pool
-	opts         *Options
-	id           string
-	queue        string
-	pIDs         storage.IMap[string, bool]
-	connMutex    sync.RWMutex
-	isConnected  int32 // atomic flag
-	isShutdown   int32 // atomic flag
-	shutdown     chan struct{}
-	reconnectCh  chan struct{}
-	healthTicker *time.Ticker
-	logger       logger.Logger
+	conn                 net.Conn
+	handler              Handler
+	pool                 *Pool
+	opts                 *Options
+	id                   string
+	queue                string
+	pIDs                 storage.IMap[string, bool]
+	connMutex            sync.RWMutex
+	isConnected          int32 // atomic flag
+	isShutdown           int32 // atomic flag
+	shutdown             chan struct{}
+	reconnectCh          chan struct{}
+	healthTicker         *time.Ticker
+	logger               logger.Logger
+	reconnectAttempts    int32      // track consecutive reconnection attempts
+	lastReconnectAttempt time.Time  // track when last reconnect was attempted
+	reconnectMutex       sync.Mutex // protect reconnection attempt tracking
 }
 
 func NewConsumer(id string, queue string, handler Handler, opts ...Option) *Consumer {
@@ -587,9 +590,11 @@ func (c *Consumer) Consume(ctx context.Context) error {
 			c.logger.Info("Reconnection triggered",
 				logger.Field{Key: "consumer_id", Value: c.id})
 			if err := c.handleReconnection(ctx); err != nil {
-				c.logger.Error("Reconnection failed",
+				c.logger.Error("Reconnection failed, will retry based on backoff policy",
 					logger.Field{Key: "consumer_id", Value: c.id},
 					logger.Field{Key: "error", Value: err.Error()})
+				// The handleReconnection method now implements its own backoff,
+				// so we don't need to do anything here except continue the loop
 			}
 
 		default:
@@ -635,10 +640,76 @@ func (c *Consumer) processWithTimeout(ctx context.Context) error {
 	}
 
 	// Read message without timeout - consumer should be long-running background service
-	return c.readMessage(ctx, conn)
+	err := c.readMessage(ctx, conn)
+
+	// If message was processed successfully, reset reconnection attempts
+	if err == nil {
+		if atomic.LoadInt32(&c.reconnectAttempts) > 0 {
+			atomic.StoreInt32(&c.reconnectAttempts, 0)
+			c.logger.Debug("Reset reconnection attempts after successful message processing",
+				logger.Field{Key: "consumer_id", Value: c.id})
+		}
+	}
+
+	return err
 }
 
 func (c *Consumer) handleReconnection(ctx context.Context) error {
+	c.reconnectMutex.Lock()
+	defer c.reconnectMutex.Unlock()
+
+	// Increment reconnection attempts
+	attempts := atomic.AddInt32(&c.reconnectAttempts, 1)
+
+	// Calculate backoff based on consecutive attempts
+	backoffDelay := utils.CalculateJitter(
+		c.opts.initialDelay*time.Duration(1<<minInt(int(attempts-1), 6)), // Cap exponential growth at 2^6
+		c.opts.jitterPercent,
+	)
+
+	// Cap maximum backoff
+	if backoffDelay > c.opts.maxBackoff {
+		backoffDelay = c.opts.maxBackoff
+	}
+
+	// If we've been reconnecting too frequently, implement circuit breaker logic
+	timeSinceLastAttempt := time.Since(c.lastReconnectAttempt)
+	if attempts > 1 && timeSinceLastAttempt < backoffDelay {
+		remainingWait := backoffDelay - timeSinceLastAttempt
+		c.logger.Warn("Throttling reconnection attempt",
+			logger.Field{Key: "consumer_id", Value: c.id},
+			logger.Field{Key: "consecutive_attempts", Value: int(attempts)},
+			logger.Field{Key: "wait_duration", Value: remainingWait.String()})
+
+		// Wait with context cancellation support
+		select {
+		case <-time.After(remainingWait):
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-c.shutdown:
+			return fmt.Errorf("consumer is shutdown")
+		}
+	}
+
+	c.lastReconnectAttempt = time.Now()
+
+	// If we've exceeded reasonable attempts, implement longer backoff
+	if attempts > int32(c.opts.maxRetries*2) {
+		longBackoff := 5 * time.Minute // Long circuit breaker period
+		c.logger.Warn("Too many consecutive reconnection attempts, entering long backoff",
+			logger.Field{Key: "consumer_id", Value: c.id},
+			logger.Field{Key: "consecutive_attempts", Value: int(attempts)},
+			logger.Field{Key: "backoff_duration", Value: longBackoff.String()})
+
+		select {
+		case <-time.After(longBackoff):
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-c.shutdown:
+			return fmt.Errorf("consumer is shutdown")
+		}
+	}
+
 	// Mark as disconnected
 	atomic.StoreInt32(&c.isConnected, 0)
 
@@ -650,48 +721,42 @@ func (c *Consumer) handleReconnection(ctx context.Context) error {
 	}
 	c.connMutex.Unlock()
 
-	// Attempt reconnection with exponential backoff
-	backoff := c.opts.initialDelay
-	maxRetries := c.opts.maxRetries
+	c.logger.Info("Attempting reconnection",
+		logger.Field{Key: "consumer_id", Value: c.id},
+		logger.Field{Key: "attempt", Value: int(attempts)},
+		logger.Field{Key: "backoff_delay", Value: backoffDelay.String()})
 
-	for attempt := 1; attempt <= maxRetries; attempt++ {
-		if atomic.LoadInt32(&c.isShutdown) == 1 {
-			return fmt.Errorf("consumer is shutdown")
-		}
-
-		if err := c.attemptConnect(); err != nil {
-			if attempt == maxRetries {
-				return fmt.Errorf("failed to reconnect after %d attempts: %w", maxRetries, err)
-			}
-
-			sleepDuration := utils.CalculateJitter(backoff, c.opts.jitterPercent)
-			c.logger.Warn("Reconnection attempt failed, retrying",
-				logger.Field{Key: "consumer_id", Value: c.id},
-				logger.Field{Key: "attempt", Value: fmt.Sprintf("%d/%d", attempt, maxRetries)},
-				logger.Field{Key: "retry_in", Value: sleepDuration.String()})
-
-			time.Sleep(sleepDuration)
-			backoff *= 2
-			if backoff > c.opts.maxBackoff {
-				backoff = c.opts.maxBackoff
-			}
-			continue
-		}
-
-		// Reconnection successful, resubscribe
-		if err := c.subscribe(ctx, c.queue); err != nil {
-			c.logger.Error("Failed to resubscribe after reconnection",
-				logger.Field{Key: "consumer_id", Value: c.id},
-				logger.Field{Key: "error", Value: err.Error()})
-			continue
-		}
-
-		c.logger.Info("Successfully reconnected and resubscribed",
-			logger.Field{Key: "consumer_id", Value: c.id})
-		return nil
+	// Attempt reconnection
+	if err := c.attemptConnect(); err != nil {
+		c.logger.Error("Reconnection failed",
+			logger.Field{Key: "consumer_id", Value: c.id},
+			logger.Field{Key: "attempt", Value: int(attempts)},
+			logger.Field{Key: "error", Value: err.Error()})
+		return fmt.Errorf("failed to reconnect (attempt %d): %w", attempts, err)
 	}
 
-	return fmt.Errorf("failed to reconnect")
+	// Reconnection successful, try to resubscribe
+	if err := c.subscribe(ctx, c.queue); err != nil {
+		c.logger.Error("Failed to resubscribe after reconnection",
+			logger.Field{Key: "consumer_id", Value: c.id},
+			logger.Field{Key: "error", Value: err.Error()})
+		return fmt.Errorf("failed to resubscribe after reconnection: %w", err)
+	}
+
+	// Reset reconnection attempts on successful reconnection
+	atomic.StoreInt32(&c.reconnectAttempts, 0)
+
+	c.logger.Info("Successfully reconnected and resubscribed",
+		logger.Field{Key: "consumer_id", Value: c.id})
+	return nil
+}
+
+// Helper function to get minimum of two integers
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func isConnectionError(err error) bool {

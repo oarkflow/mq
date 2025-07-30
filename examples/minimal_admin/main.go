@@ -19,7 +19,7 @@ func main() {
 	fmt.Println("✅ Logger created")
 
 	// Create broker
-	broker := mq.NewBroker(mq.WithLogger(lg))
+	broker := mq.NewBroker(mq.WithLogger(lg), mq.WithBrokerURL(":8081"))
 	fmt.Println("✅ Broker created")
 
 	// Start broker

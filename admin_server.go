@@ -764,6 +764,8 @@ func (a *AdminServer) handlePauseConsumer(w http.ResponseWriter, r *http.Request
 
 	a.logger.Info("Consumer pause requested", logger.Field{Key: "consumer_id", Value: consumerID})
 
+	a.broker.PauseConsumer(r.Context(), consumerID)
+
 	// In a real implementation, you would find the consumer and pause it
 	// For now, we'll just acknowledge the request
 
@@ -799,6 +801,8 @@ func (a *AdminServer) handleResumeConsumer(w http.ResponseWriter, r *http.Reques
 
 	a.logger.Info("Consumer resume requested", logger.Field{Key: "consumer_id", Value: consumerID})
 
+	a.broker.ResumeConsumer(r.Context(), consumerID)
+
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.WriteHeader(http.StatusOK)
@@ -830,6 +834,8 @@ func (a *AdminServer) handleStopConsumer(w http.ResponseWriter, r *http.Request)
 	}
 
 	a.logger.Info("Consumer stop requested", logger.Field{Key: "consumer_id", Value: consumerID})
+
+	a.broker.StopConsumer(r.Context(), consumerID)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -1018,59 +1024,11 @@ func (a *AdminServer) getQueues() []*AdminQueueInfo {
 }
 
 func (a *AdminServer) getConsumers() []*AdminConsumerMetrics {
-	// This would need to be implemented based on how you track consumers
-	// For now, return sample data as placeholder
-	consumers := []*AdminConsumerMetrics{
-		{
-			ID:                 "consumer-1",
-			Queue:              "demo_queue",
-			Status:             "active",
-			ProcessedTasks:     150,
-			ErrorCount:         2,
-			LastActivity:       time.Now().Add(-30 * time.Second),
-			MaxConcurrentTasks: 10,
-			TaskTimeout:        30,
-			MaxRetries:         3,
-		},
-		{
-			ID:                 "consumer-2",
-			Queue:              "priority_queue",
-			Status:             "paused",
-			ProcessedTasks:     89,
-			ErrorCount:         0,
-			LastActivity:       time.Now().Add(-2 * time.Minute),
-			MaxConcurrentTasks: 5,
-			TaskTimeout:        60,
-			MaxRetries:         5,
-		},
-	}
-	return consumers
+	return a.broker.GetConsumers()
 }
 
 func (a *AdminServer) getPools() []*AdminPoolMetrics {
-	// This would need to be implemented based on how you track pools
-	// For now, return sample data as placeholder
-	pools := []*AdminPoolMetrics{
-		{
-			ID:            "pool-1",
-			Workers:       10,
-			QueueSize:     100,
-			ActiveTasks:   7,
-			Status:        "running",
-			MaxMemoryLoad: 1024 * 1024 * 512, // 512MB
-			LastActivity:  time.Now().Add(-10 * time.Second),
-		},
-		{
-			ID:            "pool-2",
-			Workers:       5,
-			QueueSize:     50,
-			ActiveTasks:   2,
-			Status:        "running",
-			MaxMemoryLoad: 1024 * 1024 * 256, // 256MB
-			LastActivity:  time.Now().Add(-1 * time.Minute),
-		},
-	}
-	return pools
+	return a.broker.GetPools()
 }
 
 func (a *AdminServer) getBrokerInfo() *AdminBrokerInfo {
