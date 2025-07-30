@@ -88,6 +88,11 @@ class MQAdminDashboard {
         document.getElementById('flushQueues').addEventListener('click', () => {
             this.confirmAction('flush all queues', () => this.flushQueues());
         });
+
+        // Tasks refresh button
+        document.getElementById('refreshTasks').addEventListener('click', () => {
+            this.fetchTasks();
+        });
     }
 
     setupFormHandlers() {
@@ -140,6 +145,9 @@ class MQAdminDashboard {
             case 'pools':
                 this.loadPoolsData();
                 break;
+            case 'tasks':
+                this.loadTasksData();
+                break;
             case 'monitoring':
                 this.loadMonitoringData();
                 break;
@@ -149,31 +157,34 @@ class MQAdminDashboard {
     connectWebSocket() {
         try {
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl = `${protocol}//${window.location.host}/ws/admin`;
+            const wsUrl = `${protocol}//${window.location.host}/ws`;
 
-            this.wsConnection = new WebSocket(wsUrl);
+            // Use the Socket class instead of raw WebSocket
+            this.wsConnection = new Socket(wsUrl, 'admin-user');
+            this.wsConnection.connect().then(connected => {
+                console.log('WebSocket connected');
+                this.wsConnection.onConnect(() => {
+                    this.updateConnectionStatus(true);
+                    this.showToast('Connected to MQ Admin', 'success');
+                    console.log('WebSocket connected');
+                });
 
-            this.wsConnection.onopen = () => {
-                this.updateConnectionStatus(true);
-                this.showToast('Connected to MQ Admin', 'success');
-            };
+                this.wsConnection.on('update', (data) => {
+                    try {
+                        // Data is already parsed by the Socket class
+                        this.handleWebSocketMessage(data);
+                    } catch (error) {
+                        console.error('Failed to handle WebSocket message:', error);
+                    }
+                });
 
-            this.wsConnection.onmessage = (event) => {
-                this.handleWebSocketMessage(JSON.parse(event.data));
-            };
-
-            this.wsConnection.onclose = () => {
-                this.updateConnectionStatus(false);
-                this.showToast('Disconnected from MQ Admin', 'warning');
-                // Attempt to reconnect after 5 seconds
-                setTimeout(() => this.connectWebSocket(), 5000);
-            };
-
-            this.wsConnection.onerror = (error) => {
-                console.error('WebSocket error:', error);
-                this.updateConnectionStatus(false);
-                this.showToast('Connection error', 'error');
-            };
+                this.wsConnection.onDisconnect(() => {
+                    this.updateConnectionStatus(false);
+                    this.showToast('Disconnected from MQ Admin', 'warning');
+                    console.log('WebSocket disconnected');
+                    // Socket class handles reconnection automatically
+                });
+            });
         } catch (error) {
             console.error('Failed to connect WebSocket:', error);
             this.updateConnectionStatus(false);
@@ -181,28 +192,73 @@ class MQAdminDashboard {
     }
 
     handleWebSocketMessage(data) {
+        console.log('WebSocket message received:', data);
+
         switch (data.type) {
-            case 'metrics_update':
-                this.updateMetrics(data.payload);
+            case 'metrics':
+                this.updateMetrics(data.data);
                 break;
-            case 'queue_update':
-                this.updateQueues(data.payload);
+            case 'queues':
+                this.updateQueues(data.data);
                 break;
-            case 'consumer_update':
-                this.updateConsumers(data.payload);
+            case 'consumers':
+                this.updateConsumers(data.data);
                 break;
-            case 'pool_update':
-                this.updatePools(data.payload);
+            case 'pools':
+                this.updatePools(data.data);
                 break;
-            case 'broker_update':
-                this.updateBroker(data.payload);
+            case 'broker':
+                this.updateBroker(data.data);
                 break;
-            case 'health_update':
-                this.updateHealthChecks(data.payload);
+            case 'task_update':
+                this.handleTaskUpdate(data.data);
                 break;
-            case 'activity':
-                this.addActivity(data.payload);
+            case 'broker_restart':
+            case 'broker_stop':
+            case 'broker_pause':
+            case 'broker_resume':
+                this.showToast(data.data.message || 'Broker operation completed', 'info');
+                // Refresh broker info
+                this.fetchBrokerInfo();
                 break;
+            case 'consumer_pause':
+            case 'consumer_resume':
+            case 'consumer_stop':
+                this.showToast(data.data.message || 'Consumer operation completed', 'info');
+                // Refresh consumer info
+                this.fetchConsumers();
+                break;
+            case 'pool_pause':
+            case 'pool_resume':
+            case 'pool_stop':
+                this.showToast(data.data.message || 'Pool operation completed', 'info');
+                // Refresh pool info
+                this.fetchPools();
+                break;
+            case 'queue_purge':
+            case 'queues_flush':
+                this.showToast(data.data.message || 'Queue operation completed', 'info');
+                // Refresh queue info
+                this.fetchQueues();
+                break;
+            default:
+                console.log('Unknown WebSocket message type:', data.type);
+        }
+    }
+
+    handleTaskUpdate(taskData) {
+        // Add to activity feed
+        const activity = {
+            type: 'task',
+            message: `Task ${taskData.task_id} ${taskData.status} in queue ${taskData.queue}`,
+            timestamp: new Date(taskData.updated_at),
+            status: taskData.status === 'completed' ? 'success' : taskData.status === 'failed' ? 'error' : 'info'
+        };
+        this.addActivity(activity);
+
+        // Update metrics if on overview tab
+        if (this.currentTab === 'overview') {
+            this.fetchMetrics();
         }
     }
 
@@ -238,6 +294,7 @@ class MQAdminDashboard {
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
+                animation: false, // Disable animations to prevent loops
                 scales: {
                     y: {
                         beginAtZero: true
@@ -419,6 +476,85 @@ class MQAdminDashboard {
         }
     }
 
+    async fetchTasks() {
+        try {
+            const response = await fetch('/api/admin/tasks');
+            const data = await response.json();
+            this.updateTasks(data.tasks || []);
+        } catch (error) {
+            console.error('Failed to fetch tasks:', error);
+        }
+    }
+
+    updateTasks(tasks) {
+        this.data.tasks = tasks;
+
+        // Update task count cards
+        const activeTasks = tasks.filter(task => task.status === 'queued' || task.status === 'processing').length;
+        const completedTasks = tasks.filter(task => task.status === 'completed').length;
+        const failedTasks = tasks.filter(task => task.status === 'failed').length;
+        const queuedTasks = tasks.filter(task => task.status === 'queued').length;
+
+        document.getElementById('activeTasks').textContent = activeTasks;
+        document.getElementById('completedTasks').textContent = completedTasks;
+        document.getElementById('failedTasks').textContent = failedTasks;
+        document.getElementById('queuedTasks').textContent = queuedTasks;
+
+        // Update tasks table
+        this.renderTasksTable(tasks);
+    }
+
+    renderTasksTable(tasks) {
+        const tbody = document.getElementById('tasksTableBody');
+        tbody.innerHTML = '';
+
+        if (!tasks || tasks.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="6" class="px-6 py-4 text-sm text-gray-500 text-center">
+                        No tasks found
+                    </td>
+                </tr>
+            `;
+            return;
+        }
+
+        tasks.forEach(task => {
+            const row = document.createElement('tr');
+            row.className = 'hover:bg-gray-50';
+
+            const statusClass = this.getStatusClass(task.status);
+            const createdAt = this.formatTime(task.created_at);
+            const payload = typeof task.payload === 'string' ? task.payload : JSON.stringify(task.payload);
+            const truncatedPayload = payload.length > 50 ? payload.substring(0, 50) + '...' : payload;
+
+            row.innerHTML = `
+                <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                    ${task.id}
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                    ${task.queue}
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap">
+                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${statusClass}">
+                        ${task.status}
+                    </span>
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                    ${task.retry_count || 0}
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                    ${createdAt}
+                </td>
+                <td class="px-6 py-4 text-sm text-gray-500" title="${payload}">
+                    ${truncatedPayload}
+                </td>
+            `;
+
+            tbody.appendChild(row);
+        });
+    }
+
     updateMetrics(metrics) {
         this.data.metrics = metrics;
 
@@ -461,29 +597,47 @@ class MQAdminDashboard {
 
     updateThroughputChart(throughputHistory) {
         const chart = this.charts.throughput;
-        const now = new Date();
+        if (!chart || !throughputHistory) return;
 
-        // Keep last 20 data points
-        chart.data.labels = throughputHistory.map((_, index) => {
-            const time = new Date(now.getTime() - (throughputHistory.length - index - 1) * 5000);
-            return time.toLocaleTimeString();
-        });
+        try {
+            const now = new Date();
 
-        chart.data.datasets[0].data = throughputHistory;
-        chart.update('none');
+            // Keep last 20 data points
+            chart.data.labels = throughputHistory.map((_, index) => {
+                const time = new Date(now.getTime() - (throughputHistory.length - index - 1) * 5000);
+                return time.toLocaleTimeString();
+            });
+
+            chart.data.datasets[0].data = throughputHistory;
+            chart.update('none');
+        } catch (error) {
+            console.error('Error updating throughput chart:', error);
+        }
     }
 
     updateQueueDepthChart(queues) {
         const chart = this.charts.queueDepth;
-        chart.data.labels = queues.map(q => q.name);
-        chart.data.datasets[0].data = queues.map(q => q.depth || 0);
-        chart.update('none');
+        if (!chart || !queues) return;
+
+        try {
+            chart.data.labels = queues.map(q => q.name);
+            chart.data.datasets[0].data = queues.map(q => q.depth || 0);
+            chart.update('none');
+        } catch (error) {
+            console.error('Error updating queue depth chart:', error);
+        }
     }
 
     updateErrorChart(successCount, errorCount) {
         const chart = this.charts.error;
-        chart.data.datasets[0].data = [successCount, errorCount];
-        chart.update('none');
+        if (!chart) return;
+
+        try {
+            chart.data.datasets[0].data = [successCount, errorCount];
+            chart.update('none');
+        } catch (error) {
+            console.error('Error updating error chart:', error);
+        }
     }
 
     renderQueuesTable(queues) {
@@ -995,12 +1149,22 @@ class MQAdminDashboard {
     }
 
     startRefreshInterval() {
-        // Refresh data every 5 seconds
+        // Clear any existing interval first
+        if (this.refreshInterval) {
+            clearInterval(this.refreshInterval);
+            this.refreshInterval = null;
+        }
+
+        // Refresh data every 15 seconds (reduced frequency to prevent overload)
         this.refreshInterval = setInterval(() => {
-            if (this.isConnected) {
-                this.loadTabData(this.currentTab);
+            if (this.isConnected && this.currentTab) {
+                try {
+                    this.loadTabData(this.currentTab);
+                } catch (error) {
+                    console.error('Error during refresh:', error);
+                }
             }
-        }, 5000);
+        }, 15000);
     }
 
     loadOverviewData() {
@@ -1021,6 +1185,10 @@ class MQAdminDashboard {
 
     loadPoolsData() {
         this.fetchPools();
+    }
+
+    loadTasksData() {
+        this.fetchTasks();
     }
 
     loadMonitoringData() {

@@ -52,6 +52,9 @@
                 <button class="tab-btn py-2 px-1 border-b-2 font-medium text-sm" data-tab="pools">
                     Worker Pools
                 </button>
+                <button class="tab-btn py-2 px-1 border-b-2 font-medium text-sm" data-tab="tasks">
+                    Tasks
+                </button>
                 <button class="tab-btn py-2 px-1 border-b-2 font-medium text-sm" data-tab="monitoring">
                     Monitoring
                 </button>
@@ -158,11 +161,15 @@
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
                     <div class="bg-white p-6 rounded-lg shadow">
                         <h3 class="text-lg font-medium text-gray-900 mb-4">Message Throughput</h3>
-                        <canvas id="throughputChart" width="400" height="200"></canvas>
+                        <div class="chart-container" style="position: relative; height: 200px;">
+                            <canvas id="throughputChart"></canvas>
+                        </div>
                     </div>
                     <div class="bg-white p-6 rounded-lg shadow">
                         <h3 class="text-lg font-medium text-gray-900 mb-4">Queue Depths</h3>
-                        <canvas id="queueDepthChart" width="400" height="200"></canvas>
+                        <div class="chart-container" style="position: relative; height: 200px;">
+                            <canvas id="queueDepthChart"></canvas>
+                        </div>
                     </div>
                 </div>
 
@@ -357,11 +364,15 @@
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
                     <div class="bg-white p-6 rounded-lg shadow">
                         <h3 class="text-lg font-medium text-gray-900 mb-4">System Performance</h3>
-                        <canvas id="systemChart" width="400" height="200"></canvas>
+                        <div class="chart-container" style="position: relative; height: 200px;">
+                            <canvas id="systemChart"></canvas>
+                        </div>
                     </div>
                     <div class="bg-white p-6 rounded-lg shadow">
                         <h3 class="text-lg font-medium text-gray-900 mb-4">Error Rate</h3>
-                        <canvas id="errorChart" width="400" height="200"></canvas>
+                        <div class="chart-container" style="position: relative; height: 200px;">
+                            <canvas id="errorChart"></canvas>
+                        </div>
                     </div>
                 </div>
 
@@ -370,6 +381,153 @@
                     <h3 class="text-lg font-medium text-gray-900 mb-4">Health Checks</h3>
                     <div id="healthChecks" class="space-y-4">
                         <!-- Health check items will be populated here -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tasks Tab -->
+            <div id="tasks" class="tab-content hidden">
+                <!-- Tasks Overview Cards -->
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
+                    <div class="bg-white overflow-hidden shadow rounded-lg">
+                        <div class="p-5">
+                            <div class="flex items-center">
+                                <div class="flex-shrink-0">
+                                    <div class="w-8 h-8 bg-blue-500 rounded-md flex items-center justify-center">
+                                        <svg class="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 20 20">
+                                            <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                        </svg>
+                                    </div>
+                                </div>
+                                <div class="ml-5 w-0 flex-1">
+                                    <dl>
+                                        <dt class="text-sm font-medium text-gray-500 truncate">Active Tasks</dt>
+                                        <dd class="text-lg font-medium text-gray-900" id="activeTasks">0</dd>
+                                    </dl>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="bg-white overflow-hidden shadow rounded-lg">
+                        <div class="p-5">
+                            <div class="flex items-center">
+                                <div class="flex-shrink-0">
+                                    <div class="w-8 h-8 bg-green-500 rounded-md flex items-center justify-center">
+                                        <svg class="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 20 20">
+                                            <path fill-rule="evenodd"
+                                                d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                                                clip-rule="evenodd"></path>
+                                        </svg>
+                                    </div>
+                                </div>
+                                <div class="ml-5 w-0 flex-1">
+                                    <dl>
+                                        <dt class="text-sm font-medium text-gray-500 truncate">Completed</dt>
+                                        <dd class="text-lg font-medium text-gray-900" id="completedTasks">0</dd>
+                                    </dl>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="bg-white overflow-hidden shadow rounded-lg">
+                        <div class="p-5">
+                            <div class="flex items-center">
+                                <div class="flex-shrink-0">
+                                    <div class="w-8 h-8 bg-red-500 rounded-md flex items-center justify-center">
+                                        <svg class="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 20 20">
+                                            <path fill-rule="evenodd"
+                                                d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z"
+                                                clip-rule="evenodd"></path>
+                                        </svg>
+                                    </div>
+                                </div>
+                                <div class="ml-5 w-0 flex-1">
+                                    <dl>
+                                        <dt class="text-sm font-medium text-gray-500 truncate">Failed</dt>
+                                        <dd class="text-lg font-medium text-gray-900" id="failedTasks">0</dd>
+                                    </dl>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="bg-white overflow-hidden shadow rounded-lg">
+                        <div class="p-5">
+                            <div class="flex items-center">
+                                <div class="flex-shrink-0">
+                                    <div class="w-8 h-8 bg-yellow-500 rounded-md flex items-center justify-center">
+                                        <svg class="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 20 20">
+                                            <path fill-rule="evenodd"
+                                                d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z"
+                                                clip-rule="evenodd"></path>
+                                        </svg>
+                                    </div>
+                                </div>
+                                <div class="ml-5 w-0 flex-1">
+                                    <dl>
+                                        <dt class="text-sm font-medium text-gray-500 truncate">Queued</dt>
+                                        <dd class="text-lg font-medium text-gray-900" id="queuedTasks">0</dd>
+                                    </dl>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tasks Table -->
+                <div class="bg-white shadow rounded-lg">
+                    <div class="px-4 py-5 sm:p-6">
+                        <div class="flex items-center justify-between mb-4">
+                            <h3 class="text-lg leading-6 font-medium text-gray-900">Real-time Tasks</h3>
+                            <div class="flex space-x-2">
+                                <button id="refreshTasks"
+                                    class="inline-flex items-center px-3 py-2 border border-gray-300 shadow-sm text-sm leading-4 font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                                    <svg class="w-4 h-4 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                                        <path fill-rule="evenodd"
+                                            d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z"
+                                            clip-rule="evenodd"></path>
+                                    </svg>
+                                    Refresh
+                                </button>
+                            </div>
+                        </div>
+                        <div class="overflow-x-auto">
+                            <table class="min-w-full divide-y divide-gray-200">
+                                <thead class="bg-gray-50">
+                                    <tr>
+                                        <th scope="col"
+                                            class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                            Task ID
+                                        </th>
+                                        <th scope="col"
+                                            class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                            Queue
+                                        </th>
+                                        <th scope="col"
+                                            class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                            Status
+                                        </th>
+                                        <th scope="col"
+                                            class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                            Retry Count
+                                        </th>
+                                        <th scope="col"
+                                            class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                            Created At
+                                        </th>
+                                        <th scope="col"
+                                            class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                            Payload
+                                        </th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tasksTableBody" class="bg-white divide-y divide-gray-200">
+                                    <!-- Tasks will be populated here -->
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -463,6 +621,7 @@
         </div>
     </div>
 
+    <script src="/static/admin/js/socket.js"></script>
     <script src="/static/admin/js/admin.js"></script>
 </body>
 

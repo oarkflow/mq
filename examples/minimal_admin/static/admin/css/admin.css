@@ -11,6 +11,21 @@
     --light-color: #f9fafb;
 }
 
+/* Chart containers to prevent infinite resize loops */
+.chart-container {
+    position: relative;
+    width: 100%;
+    max-width: 100%;
+    overflow: hidden;
+}
+
+.chart-container canvas {
+    display: block;
+    width: 100% !important;
+    height: auto !important;
+    max-width: 100%;
+}
+
 /* Custom scrollbar */
 .scrollbar {
     scrollbar-width: thin;
