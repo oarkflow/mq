@@ -359,6 +359,11 @@ func (cm *ConfigManager) UpdateConfig(newConfig *DAGConfig) error {
 	return nil
 }
 
+// UpdateConfiguration updates the DAG configuration (alias for UpdateConfig)
+func (cm *ConfigManager) UpdateConfiguration(config *DAGConfig) error {
+	return cm.UpdateConfig(config)
+}
+
 // AddWatcher adds a configuration watcher
 func (cm *ConfigManager) AddWatcher(watcher ConfigWatcher) {
 	cm.mu.Lock()

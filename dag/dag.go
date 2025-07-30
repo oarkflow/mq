@@ -94,6 +94,7 @@ type DAG struct {
 	cleanupManager       *CleanupManager
 	webhookManager       *WebhookManager
 	performanceOptimizer *PerformanceOptimizer
+	activityLogger       *ActivityLogger
 
 	// Circuit breakers per node
 	circuitBreakers   map[string]*CircuitBreaker
@@ -874,17 +875,14 @@ func (tm *DAG) RemoveNode(nodeID string) error {
 					Type:  Simple, // Use Simple edge type for adjusted flows.
 				}
 				// Append new edge if one doesn't already exist.
-				existsNewEdge := false
 				for _, e := range inEdge.From.Edges {
 					if e.To.ID == newEdge.To.ID {
-						existsNewEdge = true
-						break
+						goto SKIP_ADD
 					}
 				}
-				if !existsNewEdge {
-					inEdge.From.Edges = append(inEdge.From.Edges, newEdge)
-				}
+				inEdge.From.Edges = append(inEdge.From.Edges, newEdge)
 			}
+		SKIP_ADD:
 		}
 	}
 	// Remove all edges that are connected to the removed node.
@@ -951,9 +949,338 @@ func (tm *DAG) getOrCreateCircuitBreaker(nodeID string) *CircuitBreaker {
 	return cb
 }
 
-// Enhanced DAG methods for new features
+// Complete missing methods for DAG
 
-// ValidateDAG validates the DAG structure
+func (tm *DAG) GetLastNodes() ([]*Node, error) {
+	var lastNodes []*Node
+	tm.nodes.ForEach(func(key string, node *Node) bool {
+		if len(node.Edges) == 0 {
+			if conds, exists := tm.conditions[node.ID]; !exists || len(conds) == 0 {
+				lastNodes = append(lastNodes, node)
+			}
+		}
+		return true
+	})
+	return lastNodes, nil
+}
+
+// parseInitialNode extracts the initial node from context
+func (tm *DAG) parseInitialNode(ctx context.Context) (string, error) {
+	if initialNode, ok := ctx.Value("initial_node").(string); ok && initialNode != "" {
+		return initialNode, nil
+	}
+
+	// If no initial node specified, use start node
+	if tm.startNode != "" {
+		return tm.startNode, nil
+	}
+
+	// Find first node if no start node is set
+	firstNode := tm.findStartNode()
+	if firstNode != nil {
+		return firstNode.ID, nil
+	}
+
+	return "", fmt.Errorf("no initial node found")
+}
+
+// findStartNode finds the first node in the DAG
+func (tm *DAG) findStartNode() *Node {
+	incomingEdges := make(map[string]bool)
+	connectedNodes := make(map[string]bool)
+	for _, node := range tm.nodes.AsMap() {
+		for _, edge := range node.Edges {
+			if edge.Type.IsValid() {
+				connectedNodes[node.ID] = true
+				connectedNodes[edge.To.ID] = true
+				incomingEdges[edge.To.ID] = true
+			}
+		}
+		if cond, ok := tm.conditions[node.ID]; ok {
+			for _, target := range cond {
+				connectedNodes[target] = true
+				incomingEdges[target] = true
+			}
+		}
+	}
+	for nodeID, node := range tm.nodes.AsMap() {
+		if !incomingEdges[nodeID] && connectedNodes[nodeID] {
+			return node
+		}
+	}
+	return nil
+}
+
+// IsLastNode checks if a node is the last node in the DAG
+func (tm *DAG) IsLastNode(nodeID string) (bool, error) {
+	node, exists := tm.nodes.Get(nodeID)
+	if !exists {
+		return false, fmt.Errorf("node %s not found", nodeID)
+	}
+
+	// Check if node has any outgoing edges
+	if len(node.Edges) > 0 {
+		return false, nil
+	}
+
+	// Check if node has any conditional edges
+	if conditions, exists := tm.conditions[nodeID]; exists && len(conditions) > 0 {
+		return false, nil
+	}
+
+	return true, nil
+}
+
+// GetNextNodes returns the next nodes for a given node
+func (tm *DAG) GetNextNodes(nodeID string) ([]*Node, error) {
+	nodeID = strings.Split(nodeID, Delimiter)[0]
+	if tm.nextNodesCache != nil {
+		if cached, exists := tm.nextNodesCache[nodeID]; exists {
+			return cached, nil
+		}
+	}
+
+	node, exists := tm.nodes.Get(nodeID)
+	if !exists {
+		return nil, fmt.Errorf("node %s not found", nodeID)
+	}
+
+	var nextNodes []*Node
+
+	// Add direct edge targets
+	for _, edge := range node.Edges {
+		nextNodes = append(nextNodes, edge.To)
+	}
+
+	// Add conditional targets
+	if conditions, exists := tm.conditions[nodeID]; exists {
+		for _, targetID := range conditions {
+			if targetNode, ok := tm.nodes.Get(targetID); ok {
+				nextNodes = append(nextNodes, targetNode)
+			}
+		}
+	}
+
+	// Cache the result
+	if tm.nextNodesCache != nil {
+		tm.nextNodesCache[nodeID] = nextNodes
+	}
+
+	return nextNodes, nil
+}
+
+// GetPreviousNodes returns the previous nodes for a given node
+func (tm *DAG) GetPreviousNodes(nodeID string) ([]*Node, error) {
+	nodeID = strings.Split(nodeID, Delimiter)[0]
+	if tm.prevNodesCache != nil {
+		if cached, exists := tm.prevNodesCache[nodeID]; exists {
+			return cached, nil
+		}
+	}
+
+	var prevNodes []*Node
+
+	// Find nodes that point to this node
+	tm.nodes.ForEach(func(id string, node *Node) bool {
+		// Check direct edges
+		for _, edge := range node.Edges {
+			if edge.To.ID == nodeID {
+				prevNodes = append(prevNodes, node)
+				break
+			}
+		}
+
+		// Check conditional edges
+		if conditions, exists := tm.conditions[id]; exists {
+			for _, targetID := range conditions {
+				if targetID == nodeID {
+					prevNodes = append(prevNodes, node)
+					break
+				}
+			}
+		}
+
+		return true
+	})
+
+	// Cache the result
+	if tm.prevNodesCache != nil {
+		tm.prevNodesCache[nodeID] = prevNodes
+	}
+
+	return prevNodes, nil
+}
+
+// GetNodeByID returns a node by its ID
+func (tm *DAG) GetNodeByID(nodeID string) (*Node, error) {
+	node, exists := tm.nodes.Get(nodeID)
+	if !exists {
+		return nil, fmt.Errorf("node %s not found", nodeID)
+	}
+	return node, nil
+}
+
+// GetAllNodes returns all nodes in the DAG
+func (tm *DAG) GetAllNodes() map[string]*Node {
+	result := make(map[string]*Node)
+	tm.nodes.ForEach(func(id string, node *Node) bool {
+		result[id] = node
+		return true
+	})
+	return result
+}
+
+// GetNodeCount returns the total number of nodes
+func (tm *DAG) GetNodeCount() int {
+	return tm.nodes.Size()
+}
+
+// GetEdgeCount returns the total number of edges
+func (tm *DAG) GetEdgeCount() int {
+	count := 0
+	tm.nodes.ForEach(func(id string, node *Node) bool {
+		count += len(node.Edges)
+		return true
+	})
+
+	// Add conditional edges
+	for _, conditions := range tm.conditions {
+		count += len(conditions)
+	}
+
+	return count
+}
+
+// Clone creates a deep copy of the DAG
+func (tm *DAG) Clone() *DAG {
+	newDAG := NewDAG(tm.name+"_clone", tm.key, tm.finalResult)
+
+	// Copy nodes
+	tm.nodes.ForEach(func(id string, node *Node) bool {
+		newDAG.AddNode(node.NodeType, node.Label, node.ID, node.processor)
+		return true
+	})
+
+	// Copy edges
+	tm.nodes.ForEach(func(id string, node *Node) bool {
+		for _, edge := range node.Edges {
+			newDAG.AddEdge(edge.Type, edge.Label, edge.From.ID, edge.To.ID)
+		}
+		return true
+	})
+
+	// Copy conditions
+	for fromNode, conditions := range tm.conditions {
+		newDAG.AddCondition(fromNode, conditions)
+	}
+
+	// Copy start node
+	newDAG.SetStartNode(tm.startNode)
+
+	return newDAG
+}
+
+// Export exports the DAG structure to a serializable format
+func (tm *DAG) Export() map[string]interface{} {
+	export := map[string]interface{}{
+		"name":       tm.name,
+		"key":        tm.key,
+		"start_node": tm.startNode,
+		"nodes":      make([]map[string]interface{}, 0),
+		"edges":      make([]map[string]interface{}, 0),
+		"conditions": tm.conditions,
+	}
+
+	// Export nodes
+	tm.nodes.ForEach(func(id string, node *Node) bool {
+		nodeData := map[string]interface{}{
+			"id":       node.ID,
+			"label":    node.Label,
+			"type":     node.NodeType.String(),
+			"is_ready": node.isReady,
+		}
+		export["nodes"] = append(export["nodes"].([]map[string]interface{}), nodeData)
+		return true
+	})
+
+	// Export edges
+	tm.nodes.ForEach(func(id string, node *Node) bool {
+		for _, edge := range node.Edges {
+			edgeData := map[string]interface{}{
+				"from":  edge.From.ID,
+				"to":    edge.To.ID,
+				"label": edge.Label,
+				"type":  edge.Type.String(),
+			}
+			export["edges"] = append(export["edges"].([]map[string]interface{}), edgeData)
+		}
+		return true
+	})
+
+	return export
+}
+
+// Enhanced DAG Methods for Production-Ready Features
+
+// InitializeActivityLogger initializes the activity logger for the DAG
+func (tm *DAG) InitializeActivityLogger(config ActivityLoggerConfig, persistence ActivityPersistence) {
+	tm.activityLogger = NewActivityLogger(tm.name, config, persistence, tm.Logger())
+
+	// Add activity logging hooks to existing components
+	if tm.monitor != nil {
+		tm.monitor.AddAlertHandler(&ActivityAlertHandler{activityLogger: tm.activityLogger})
+	}
+
+	tm.Logger().Info("Activity logger initialized for DAG",
+		logger.Field{Key: "dag_name", Value: tm.name})
+}
+
+// GetActivityLogger returns the activity logger instance
+func (tm *DAG) GetActivityLogger() *ActivityLogger {
+	return tm.activityLogger
+}
+
+// LogActivity logs an activity entry
+func (tm *DAG) LogActivity(ctx context.Context, level ActivityLevel, activityType ActivityType, message string, details map[string]interface{}) {
+	if tm.activityLogger != nil {
+		tm.activityLogger.LogWithContext(ctx, level, activityType, message, details)
+	}
+}
+
+// GetActivityStats returns activity statistics
+func (tm *DAG) GetActivityStats(filter ActivityFilter) (ActivityStats, error) {
+	if tm.activityLogger != nil {
+		return tm.activityLogger.GetStats(filter)
+	}
+	return ActivityStats{}, fmt.Errorf("activity logger not initialized")
+}
+
+// GetActivities retrieves activities based on filter
+func (tm *DAG) GetActivities(filter ActivityFilter) ([]ActivityEntry, error) {
+	if tm.activityLogger != nil {
+		return tm.activityLogger.GetActivities(filter)
+	}
+	return nil, fmt.Errorf("activity logger not initialized")
+}
+
+// AddActivityHook adds an activity hook
+func (tm *DAG) AddActivityHook(hook ActivityHook) {
+	if tm.activityLogger != nil {
+		tm.activityLogger.AddHook(hook)
+	}
+}
+
+// FlushActivityLogs flushes activity logs to persistence
+func (tm *DAG) FlushActivityLogs() error {
+	if tm.activityLogger != nil {
+		return tm.activityLogger.Flush()
+	}
+	return fmt.Errorf("activity logger not initialized")
+}
+
+// Enhanced Monitoring and Management Methods
+
+// ValidateDAG validates the DAG structure using the enhanced validator
 func (tm *DAG) ValidateDAG() error {
 	if tm.validator == nil {
 		return fmt.Errorf("validator not initialized")
@@ -961,42 +1288,42 @@ func (tm *DAG) ValidateDAG() error {
 	return tm.validator.ValidateStructure()
 }
 
-// StartMonitoring starts DAG monitoring
+// GetTopologicalOrder returns nodes in topological order
+func (tm *DAG) GetTopologicalOrder() ([]string, error) {
+	if tm.validator == nil {
+		return nil, fmt.Errorf("validator not initialized")
+	}
+	return tm.validator.GetTopologicalOrder()
+}
+
+// GetCriticalPath returns the critical path of the DAG
+func (tm *DAG) GetCriticalPath() ([]string, error) {
+	if tm.validator == nil {
+		return nil, fmt.Errorf("validator not initialized")
+	}
+	return tm.validator.GetCriticalPath()
+}
+
+// GetDAGStatistics returns comprehensive DAG statistics
+func (tm *DAG) GetDAGStatistics() map[string]interface{} {
+	if tm.validator == nil {
+		return map[string]interface{}{"error": "validator not initialized"}
+	}
+	return tm.validator.GetNodeStatistics()
+}
+
+// StartMonitoring starts the monitoring system
 func (tm *DAG) StartMonitoring(ctx context.Context) {
 	if tm.monitor != nil {
 		tm.monitor.Start(ctx)
 	}
-	if tm.cleanupManager != nil {
-		tm.cleanupManager.Start(ctx)
-	}
 }
 
-// StopMonitoring stops DAG monitoring
+// StopMonitoring stops the monitoring system
 func (tm *DAG) StopMonitoring() {
 	if tm.monitor != nil {
 		tm.monitor.Stop()
 	}
-	if tm.cleanupManager != nil {
-		tm.cleanupManager.Stop()
-	}
-	if tm.cache != nil {
-		tm.cache.Stop()
-	}
-	if tm.batchProcessor != nil {
-		tm.batchProcessor.Stop()
-	}
-}
-
-// SetRateLimit sets rate limit for a node
-func (tm *DAG) SetRateLimit(nodeID string, requestsPerSecond float64, burst int) {
-	if tm.rateLimiter != nil {
-		tm.rateLimiter.SetNodeLimit(nodeID, requestsPerSecond, burst)
-	}
-}
-
-// SetWebhookManager sets the webhook manager
-func (tm *DAG) SetWebhookManager(webhookManager *WebhookManager) {
-	tm.webhookManager = webhookManager
 }
 
 // GetMonitoringMetrics returns current monitoring metrics
@@ -1009,21 +1336,100 @@ func (tm *DAG) GetMonitoringMetrics() *MonitoringMetrics {
 
 // GetNodeStats returns statistics for a specific node
 func (tm *DAG) GetNodeStats(nodeID string) *NodeStats {
-	if tm.monitor != nil {
+	if tm.monitor != nil && tm.monitor.metrics != nil {
 		return tm.monitor.metrics.GetNodeStats(nodeID)
 	}
 	return nil
 }
 
-// OptimizePerformance runs performance optimization
-func (tm *DAG) OptimizePerformance() error {
-	if tm.performanceOptimizer != nil {
-		return tm.performanceOptimizer.OptimizePerformance()
+// SetAlertThresholds configures alert thresholds
+func (tm *DAG) SetAlertThresholds(thresholds *AlertThresholds) {
+	if tm.monitor != nil {
+		tm.monitor.SetAlertThresholds(thresholds)
 	}
-	return fmt.Errorf("performance optimizer not initialized")
 }
 
-// BeginTransaction starts a new transaction for task execution
+// AddAlertHandler adds an alert handler
+func (tm *DAG) AddAlertHandler(handler AlertHandler) {
+	if tm.monitor != nil {
+		tm.monitor.AddAlertHandler(handler)
+	}
+}
+
+// Configuration Management Methods
+
+// GetConfiguration returns current DAG configuration
+func (tm *DAG) GetConfiguration() *DAGConfig {
+	if tm.configManager != nil {
+		return tm.configManager.GetConfig()
+	}
+	return DefaultDAGConfig()
+}
+
+// UpdateConfiguration updates the DAG configuration
+func (tm *DAG) UpdateConfiguration(config *DAGConfig) error {
+	if tm.configManager != nil {
+		return tm.configManager.UpdateConfiguration(config)
+	}
+	return fmt.Errorf("config manager not initialized")
+}
+
+// AddConfigWatcher adds a configuration change watcher
+func (tm *DAG) AddConfigWatcher(watcher ConfigWatcher) {
+	if tm.configManager != nil {
+		tm.configManager.AddWatcher(watcher)
+	}
+}
+
+// Rate Limiting Methods
+
+// SetRateLimit sets rate limit for a specific node
+func (tm *DAG) SetRateLimit(nodeID string, requestsPerSecond float64, burst int) {
+	if tm.rateLimiter != nil {
+		tm.rateLimiter.SetNodeLimit(nodeID, requestsPerSecond, burst)
+	}
+}
+
+// CheckRateLimit checks if request is allowed for a node
+func (tm *DAG) CheckRateLimit(nodeID string) bool {
+	if tm.rateLimiter != nil {
+		return tm.rateLimiter.Allow(nodeID)
+	}
+	return true
+}
+
+// Retry and Circuit Breaker Methods
+
+// SetRetryConfig sets the retry configuration
+func (tm *DAG) SetRetryConfig(config *RetryConfig) {
+	if tm.retryManager != nil {
+		tm.retryManager.SetGlobalConfig(config)
+	}
+}
+
+// AddNodeWithRetry adds a node with specific retry configuration
+func (tm *DAG) AddNodeWithRetry(nodeType NodeType, name, nodeID string, handler mq.Processor, retryConfig *RetryConfig, startNode ...bool) *DAG {
+	tm.AddNode(nodeType, name, nodeID, handler, startNode...)
+	if tm.retryManager != nil {
+		tm.retryManager.SetNodeConfig(nodeID, retryConfig)
+	}
+	return tm
+}
+
+// GetCircuitBreakerStatus returns circuit breaker status for a node
+func (tm *DAG) GetCircuitBreakerStatus(nodeID string) CircuitBreakerState {
+	tm.circuitBreakersMu.RLock()
+	defer tm.circuitBreakersMu.RUnlock()
+
+	if cb, exists := tm.circuitBreakers[nodeID]; exists {
+		return cb.GetState()
+	}
+	return CircuitClosed
+}
+
+// Transaction Management Methods
+
+// BeginTransaction starts a new transaction
 func (tm *DAG) BeginTransaction(taskID string) *Transaction {
 	if tm.transactionManager != nil {
 		return tm.transactionManager.BeginTransaction(taskID)
@@ -1047,77 +1453,125 @@ func (tm *DAG) RollbackTransaction(txID string) error {
 	return fmt.Errorf("transaction manager not initialized")
 }
 
-// GetTopologicalOrder returns nodes in topological order
-func (tm *DAG) GetTopologicalOrder() ([]string, error) {
-	if tm.validator != nil {
-		return tm.validator.GetTopologicalOrder()
+// GetTransaction retrieves transaction details
+func (tm *DAG) GetTransaction(txID string) (*Transaction, error) {
+	if tm.transactionManager != nil {
+		return tm.transactionManager.GetTransaction(txID)
 	}
-	return nil, fmt.Errorf("validator not initialized")
+	return nil, fmt.Errorf("transaction manager not initialized")
 }
 
-// GetCriticalPath finds the longest path in the DAG
-func (tm *DAG) GetCriticalPath() ([]string, error) {
-	if tm.validator != nil {
-		return tm.validator.GetCriticalPath()
-	}
-	return nil, fmt.Errorf("validator not initialized")
-}
+// Batch Processing Methods
 
-// GetDAGStatistics returns comprehensive DAG statistics
-func (tm *DAG) GetDAGStatistics() map[string]interface{} {
-	if tm.validator != nil {
-		return tm.validator.GetNodeStatistics()
-	}
-	return make(map[string]interface{})
-}
-
-// SetRetryConfig sets retry configuration for the DAG
-func (tm *DAG) SetRetryConfig(config *RetryConfig) {
-	if tm.retryManager != nil {
-		tm.retryManager.config = config
+// SetBatchProcessingEnabled enables or disables batch processing
+func (tm *DAG) SetBatchProcessingEnabled(enabled bool) {
+	if tm.batchProcessor != nil && enabled {
+		// Configure batch processor with processing function
+		tm.batchProcessor.SetProcessFunc(func(tasks []*mq.Task) error {
+			// Process tasks in batch
+			for _, task := range tasks {
+				tm.ProcessTask(context.Background(), task)
+			}
+			return nil
+		})
 	}
 }
 
-// AddNodeWithRetry adds a node with retry capabilities
-func (tm *DAG) AddNodeWithRetry(nodeType NodeType, name, nodeID string, handler mq.Processor, retryConfig *RetryConfig, startNode ...bool) *DAG {
-	if tm.Error != nil {
-		return tm
-	}
+// Webhook Methods
 
-	// Wrap handler with retry logic if config provided
-	if retryConfig != nil {
-		handler = NewRetryableProcessor(handler, retryConfig, tm.Logger())
-	}
-
-	return tm.AddNode(nodeType, name, nodeID, handler, startNode...)
+// SetWebhookManager sets the webhook manager
+func (tm *DAG) SetWebhookManager(manager *WebhookManager) {
+	tm.webhookManager = manager
 }
 
-// SetAlertThresholds configures monitoring alert thresholds
-func (tm *DAG) SetAlertThresholds(thresholds *AlertThresholds) {
-	if tm.monitor != nil {
-		tm.monitor.SetAlertThresholds(thresholds)
+// AddWebhook adds a webhook configuration
+func (tm *DAG) AddWebhook(event string, config WebhookConfig) {
+	if tm.webhookManager != nil {
+		tm.webhookManager.AddWebhook(event, config)
 	}
 }
 
-// AddAlertHandler adds an alert handler for monitoring
-func (tm *DAG) AddAlertHandler(handler AlertHandler) {
-	if tm.monitor != nil {
-		tm.monitor.AddAlertHandler(handler)
+// Performance Optimization Methods
+
+// OptimizePerformance triggers performance optimization
+func (tm *DAG) OptimizePerformance() error {
+	if tm.performanceOptimizer != nil {
+		return tm.performanceOptimizer.OptimizePerformance()
+	}
+	return fmt.Errorf("performance optimizer not initialized")
+}
+
+// Cleanup Methods
+
+// StartCleanup starts the cleanup manager
+func (tm *DAG) StartCleanup(ctx context.Context) {
+	if tm.cleanupManager != nil {
+		tm.cleanupManager.Start(ctx)
 	}
 }
 
-// UpdateConfiguration updates the DAG configuration
-func (tm *DAG) UpdateConfiguration(config *DAGConfig) error {
-	if tm.configManager != nil {
-		return tm.configManager.UpdateConfig(config)
+// StopCleanup stops the cleanup manager
+func (tm *DAG) StopCleanup() {
+	if tm.cleanupManager != nil {
+		tm.cleanupManager.Stop()
 	}
-	return fmt.Errorf("config manager not initialized")
 }
 
-// GetConfiguration returns the current DAG configuration
-func (tm *DAG) GetConfiguration() *DAGConfig {
-	if tm.configManager != nil {
-		return tm.configManager.GetConfig()
+// Enhanced Stop method with proper cleanup
+func (tm *DAG) StopEnhanced(ctx context.Context) error {
+	// Stop monitoring
+	tm.StopMonitoring()
+
+	// Stop cleanup manager
+	tm.StopCleanup()
+
+	// Stop batch processor
+	if tm.batchProcessor != nil {
+		tm.batchProcessor.Stop()
 	}
-	return DefaultDAGConfig()
+
+	// Stop cache cleanup
+	if tm.cache != nil {
+		tm.cache.Stop()
+	}
+
+	// Flush activity logs
+	if tm.activityLogger != nil {
+		tm.activityLogger.Flush()
+	}
+
+	// Stop all task managers
+	tm.taskManager.ForEach(func(taskID string, manager *TaskManager) bool {
+		manager.Stop()
+		return true
+	})
+
+	// Clear all caches
+	tm.nextNodesCache = nil
+	tm.prevNodesCache = nil
+
+	// Stop underlying components
+	return tm.Stop(ctx)
+}
+
+// ActivityAlertHandler handles alerts by logging them as activities
+type ActivityAlertHandler struct {
+	activityLogger *ActivityLogger
+}
+
+func (h *ActivityAlertHandler) HandleAlert(alert Alert) error {
+	if h.activityLogger != nil {
+		h.activityLogger.Log(
+			ActivityLevelWarn,
+			ActivityTypeAlert,
+			alert.Message,
+			map[string]interface{}{
+				"alert_type":      alert.Type,
+				"alert_severity":  alert.Severity,
+				"alert_node_id":   alert.NodeID,
+				"alert_timestamp": alert.Timestamp,
+			},
+		)
+	}
+	return nil
 }

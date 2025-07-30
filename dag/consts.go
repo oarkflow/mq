@@ -32,6 +32,16 @@ type EdgeType int
 
 func (c EdgeType) IsValid() bool { return c >= Simple && c <= Iterator }
 
+func (c EdgeType) String() string {
+	switch c {
+	case Simple:
+		return "Simple"
+	case Iterator:
+		return "Iterator"
+	}
+	return "Simple"
+}
+
 const (
 	Simple EdgeType = iota
 	Iterator

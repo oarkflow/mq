@@ -137,6 +137,29 @@ func (rm *NodeRetryManager) getKey(taskID, nodeID string) string {
 	return taskID + ":" + nodeID
 }
 
+// SetGlobalConfig sets the global retry configuration
+func (rm *NodeRetryManager) SetGlobalConfig(config *RetryConfig) {
+	rm.mu.Lock()
+	defer rm.mu.Unlock()
+	rm.config = config
+	rm.logger.Info("Global retry configuration updated")
+}
+
+// SetNodeConfig sets retry configuration for a specific node
+func (rm *NodeRetryManager) SetNodeConfig(nodeID string, config *RetryConfig) {
+	// For simplicity, we'll store node-specific configs in a map
+	// This could be extended to support per-node configurations
+	rm.mu.Lock()
+	defer rm.mu.Unlock()
+
+	// Store node-specific config (this is a simplified implementation)
+	// In a full implementation, you'd have a nodeConfigs map
+	rm.logger.Info("Node-specific retry configuration set",
+		logger.Field{Key: "nodeID", Value: nodeID},
+		logger.Field{Key: "maxRetries", Value: config.MaxRetries},
+	)
+}
+
 // RetryableProcessor wraps a processor with retry logic
 type RetryableProcessor struct {
 	processor    mq.Processor

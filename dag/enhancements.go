@@ -72,20 +72,20 @@ func (bp *BatchProcessor) flushBatch() {
 		return
 	}
 
-	batch := make([]*mq.Task, len(bp.buffer))
-	copy(batch, bp.buffer)
-	bp.buffer = bp.buffer[:0] // Reset buffer
+	tasks := make([]*mq.Task, len(bp.buffer))
+	copy(tasks, bp.buffer)
+	bp.buffer = bp.buffer[:0] // Clear buffer
 	bp.bufferMu.Unlock()
 
 	if bp.processFunc != nil {
-		if err := bp.processFunc(batch); err != nil {
+		if err := bp.processFunc(tasks); err != nil {
 			bp.logger.Error("Batch processing failed",
-				logger.Field{Key: "batchSize", Value: len(batch)},
 				logger.Field{Key: "error", Value: err.Error()},
+				logger.Field{Key: "batch_size", Value: len(tasks)},
 			)
 		} else {
 			bp.logger.Info("Batch processed successfully",
-				logger.Field{Key: "batchSize", Value: len(batch)},
+				logger.Field{Key: "batch_size", Value: len(tasks)},
 			)
 		}
 	}
@@ -94,52 +94,73 @@ func (bp *BatchProcessor) flushBatch() {
 // Stop stops the batch processor
 func (bp *BatchProcessor) Stop() {
 	close(bp.stopCh)
-	bp.flushBatch() // Process remaining tasks
 	bp.wg.Wait()
+
+	// Flush remaining tasks
+	bp.flushBatch()
 }
 
 // TransactionManager handles transaction-like operations for DAG execution
 type TransactionManager struct {
-	dag                *DAG
-	activeTransactions map[string]*Transaction
-	mu                 sync.RWMutex
-	logger             logger.Logger
+	dag          *DAG
+	transactions map[string]*Transaction
+	savePoints   map[string][]SavePoint
+	mu           sync.RWMutex
+	logger       logger.Logger
 }
 
 // Transaction represents a transactional DAG execution
 type Transaction struct {
-	ID               string
-	TaskID           string
-	StartTime        time.Time
-	CompletedNodes   []string
-	SavePoints       map[string][]byte
-	Status           TransactionStatus
-	Context          context.Context
-	CancelFunc       context.CancelFunc
-	RollbackHandlers []RollbackHandler
+	ID         string                 `json:"id"`
+	TaskID     string                 `json:"task_id"`
+	Status     TransactionStatus      `json:"status"`
+	StartTime  time.Time              `json:"start_time"`
+	EndTime    time.Time              `json:"end_time,omitempty"`
+	Operations []TransactionOperation `json:"operations"`
+	SavePoints []SavePoint            `json:"save_points"`
+	Metadata   map[string]interface{} `json:"metadata,omitempty"`
 }
 
 // TransactionStatus represents the status of a transaction
-type TransactionStatus int
+type TransactionStatus string
 
 const (
-	TransactionActive TransactionStatus = iota
-	TransactionCommitted
-	TransactionRolledBack
-	TransactionFailed
+	TransactionStatusStarted    TransactionStatus = "started"
+	TransactionStatusCommitted  TransactionStatus = "committed"
+	TransactionStatusRolledBack TransactionStatus = "rolled_back"
+	TransactionStatusFailed     TransactionStatus = "failed"
 )
+
+// TransactionOperation represents an operation within a transaction
+type TransactionOperation struct {
+	ID              string                 `json:"id"`
+	Type            string                 `json:"type"`
+	NodeID          string                 `json:"node_id"`
+	Data            map[string]interface{} `json:"data"`
+	Timestamp       time.Time              `json:"timestamp"`
+	RollbackHandler RollbackHandler        `json:"-"`
+}
+
+// SavePoint represents a save point in a transaction
+type SavePoint struct {
+	ID        string                 `json:"id"`
+	Name      string                 `json:"name"`
+	Timestamp time.Time              `json:"timestamp"`
+	State     map[string]interface{} `json:"state"`
+}
 
 // RollbackHandler defines how to rollback operations
 type RollbackHandler interface {
-	Rollback(ctx context.Context, savePoint []byte) error
+	Rollback(operation TransactionOperation) error
 }
 
 // NewTransactionManager creates a new transaction manager
 func NewTransactionManager(dag *DAG, logger logger.Logger) *TransactionManager {
 	return &TransactionManager{
-		dag:                dag,
-		activeTransactions: make(map[string]*Transaction),
-		logger:             logger,
+		dag:          dag,
+		transactions: make(map[string]*Transaction),
+		savePoints:   make(map[string][]SavePoint),
+		logger:       logger,
 	}
 }
 
@@ -148,48 +169,70 @@ func (tm *TransactionManager) BeginTransaction(taskID string) *Transaction {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 
-	ctx, cancel := context.WithCancel(context.Background())
-
 	tx := &Transaction{
-		ID:               fmt.Sprintf("tx_%s_%d", taskID, time.Now().UnixNano()),
-		TaskID:           taskID,
-		StartTime:        time.Now(),
-		CompletedNodes:   []string{},
-		SavePoints:       make(map[string][]byte),
-		Status:           TransactionActive,
-		Context:          ctx,
-		CancelFunc:       cancel,
-		RollbackHandlers: []RollbackHandler{},
+		ID:         mq.NewID(),
+		TaskID:     taskID,
+		Status:     TransactionStatusStarted,
+		StartTime:  time.Now(),
+		Operations: make([]TransactionOperation, 0),
+		SavePoints: make([]SavePoint, 0),
+		Metadata:   make(map[string]interface{}),
 	}
 
-	tm.activeTransactions[tx.ID] = tx
+	tm.transactions[tx.ID] = tx
 
 	tm.logger.Info("Transaction started",
-		logger.Field{Key: "transactionID", Value: tx.ID},
-		logger.Field{Key: "taskID", Value: taskID},
+		logger.Field{Key: "transaction_id", Value: tx.ID},
+		logger.Field{Key: "task_id", Value: taskID},
 	)
 
 	return tx
 }
 
-// AddSavePoint adds a save point to the transaction
-func (tm *TransactionManager) AddSavePoint(txID, nodeID string, data []byte) error {
-	tm.mu.RLock()
-	tx, exists := tm.activeTransactions[txID]
-	tm.mu.RUnlock()
+// AddOperation adds an operation to a transaction
+func (tm *TransactionManager) AddOperation(txID string, operation TransactionOperation) error {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
 
+	tx, exists := tm.transactions[txID]
 	if !exists {
 		return fmt.Errorf("transaction %s not found", txID)
 	}
 
-	if tx.Status != TransactionActive {
+	if tx.Status != TransactionStatusStarted {
 		return fmt.Errorf("transaction %s is not active", txID)
 	}
 
-	tx.SavePoints[nodeID] = data
-	tm.logger.Info("Save point added",
-		logger.Field{Key: "transactionID", Value: txID},
-		logger.Field{Key: "nodeID", Value: nodeID},
+	operation.ID = mq.NewID()
+	operation.Timestamp = time.Now()
+	tx.Operations = append(tx.Operations, operation)
+
+	return nil
+}
+
+// AddSavePoint adds a save point to the transaction
+func (tm *TransactionManager) AddSavePoint(txID, name string, state map[string]interface{}) error {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+
+	tx, exists := tm.transactions[txID]
+	if !exists {
+		return fmt.Errorf("transaction %s not found", txID)
+	}
+
+	savePoint := SavePoint{
+		ID:        mq.NewID(),
+		Name:      name,
+		Timestamp: time.Now(),
+		State:     state,
+	}
+
+	tx.SavePoints = append(tx.SavePoints, savePoint)
+	tm.savePoints[txID] = tx.SavePoints
+
+	tm.logger.Info("Save point created",
+		logger.Field{Key: "transaction_id", Value: txID},
+		logger.Field{Key: "save_point_name", Value: name},
 	)
 
 	return nil
@@ -200,23 +243,25 @@ func (tm *TransactionManager) CommitTransaction(txID string) error {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 
-	tx, exists := tm.activeTransactions[txID]
+	tx, exists := tm.transactions[txID]
 	if !exists {
 		return fmt.Errorf("transaction %s not found", txID)
 	}
 
-	if tx.Status != TransactionActive {
+	if tx.Status != TransactionStatusStarted {
 		return fmt.Errorf("transaction %s is not active", txID)
 	}
 
-	tx.Status = TransactionCommitted
-	tx.CancelFunc()
-	delete(tm.activeTransactions, txID)
+	tx.Status = TransactionStatusCommitted
+	tx.EndTime = time.Now()
 
 	tm.logger.Info("Transaction committed",
-		logger.Field{Key: "transactionID", Value: txID},
-		logger.Field{Key: "duration", Value: time.Since(tx.StartTime)},
+		logger.Field{Key: "transaction_id", Value: txID},
+		logger.Field{Key: "operations_count", Value: len(tx.Operations)},
 	)
+
+	// Clean up save points
+	delete(tm.savePoints, txID)
 
 	return nil
 }
@@ -226,73 +271,109 @@ func (tm *TransactionManager) RollbackTransaction(txID string) error {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 
-	tx, exists := tm.activeTransactions[txID]
+	tx, exists := tm.transactions[txID]
 	if !exists {
 		return fmt.Errorf("transaction %s not found", txID)
 	}
 
-	if tx.Status != TransactionActive {
+	if tx.Status != TransactionStatusStarted {
 		return fmt.Errorf("transaction %s is not active", txID)
 	}
 
-	tx.Status = TransactionRolledBack
-	tx.CancelFunc()
-
-	// Execute rollback handlers in reverse order
-	for i := len(tx.RollbackHandlers) - 1; i >= 0; i-- {
-		handler := tx.RollbackHandlers[i]
-		if err := handler.Rollback(tx.Context, nil); err != nil {
-			tm.logger.Error("Rollback handler failed",
-				logger.Field{Key: "transactionID", Value: txID},
-				logger.Field{Key: "error", Value: err.Error()},
-			)
+	// Rollback operations in reverse order
+	for i := len(tx.Operations) - 1; i >= 0; i-- {
+		operation := tx.Operations[i]
+		if operation.RollbackHandler != nil {
+			if err := operation.RollbackHandler.Rollback(operation); err != nil {
+				tm.logger.Error("Failed to rollback operation",
+					logger.Field{Key: "transaction_id", Value: txID},
+					logger.Field{Key: "operation_id", Value: operation.ID},
+					logger.Field{Key: "error", Value: err.Error()},
+				)
+			}
 		}
 	}
 
-	delete(tm.activeTransactions, txID)
+	tx.Status = TransactionStatusRolledBack
+	tx.EndTime = time.Now()
 
 	tm.logger.Info("Transaction rolled back",
-		logger.Field{Key: "transactionID", Value: txID},
-		logger.Field{Key: "duration", Value: time.Since(tx.StartTime)},
+		logger.Field{Key: "transaction_id", Value: txID},
+		logger.Field{Key: "operations_count", Value: len(tx.Operations)},
 	)
+
+	// Clean up save points
+	delete(tm.savePoints, txID)
 
 	return nil
 }
 
+// GetTransaction retrieves a transaction by ID
+func (tm *TransactionManager) GetTransaction(txID string) (*Transaction, error) {
+	tm.mu.RLock()
+	defer tm.mu.RUnlock()
+
+	tx, exists := tm.transactions[txID]
+	if !exists {
+		return nil, fmt.Errorf("transaction %s not found", txID)
+	}
+
+	// Return a copy
+	txCopy := *tx
+	return &txCopy, nil
+}
+
 // CleanupManager handles cleanup of completed tasks and resources
 type CleanupManager struct {
-	dag               *DAG
-	cleanupInterval   time.Duration
-	retentionPeriod   time.Duration
-	maxCompletedTasks int
-	stopCh            chan struct{}
-	logger            logger.Logger
+	dag             *DAG
+	cleanupInterval time.Duration
+	retentionPeriod time.Duration
+	maxEntries      int
+	logger          logger.Logger
+	stopCh          chan struct{}
+	running         bool
+	mu              sync.RWMutex
 }
 
 // NewCleanupManager creates a new cleanup manager
-func NewCleanupManager(dag *DAG, cleanupInterval, retentionPeriod time.Duration, maxCompletedTasks int, logger logger.Logger) *CleanupManager {
+func NewCleanupManager(dag *DAG, cleanupInterval, retentionPeriod time.Duration, maxEntries int, logger logger.Logger) *CleanupManager {
 	return &CleanupManager{
-		dag:               dag,
-		cleanupInterval:   cleanupInterval,
-		retentionPeriod:   retentionPeriod,
-		maxCompletedTasks: maxCompletedTasks,
-		stopCh:            make(chan struct{}),
-		logger:            logger,
+		dag:             dag,
+		cleanupInterval: cleanupInterval,
+		retentionPeriod: retentionPeriod,
+		maxEntries:      maxEntries,
+		logger:          logger,
+		stopCh:          make(chan struct{}),
 	}
 }
 
 // Start begins the cleanup routine
 func (cm *CleanupManager) Start(ctx context.Context) {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+
+	if cm.running {
+		return
+	}
+
+	cm.running = true
 	go cm.cleanupRoutine(ctx)
-	cm.logger.Info("Cleanup manager started",
-		logger.Field{Key: "interval", Value: cm.cleanupInterval},
-		logger.Field{Key: "retention", Value: cm.retentionPeriod},
-	)
+
+	cm.logger.Info("Cleanup manager started")
 }
 
 // Stop stops the cleanup routine
 func (cm *CleanupManager) Stop() {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+
+	if !cm.running {
+		return
+	}
+
+	cm.running = false
 	close(cm.stopCh)
+
 	cm.logger.Info("Cleanup manager stopped")
 }
 
@@ -315,46 +396,56 @@ func (cm *CleanupManager) cleanupRoutine(ctx context.Context) {
 
 // performCleanup cleans up old tasks and resources
 func (cm *CleanupManager) performCleanup() {
-	cleaned := 0
-	cutoffTime := time.Now().Add(-cm.retentionPeriod)
+	cutoff := time.Now().Add(-cm.retentionPeriod)
 
 	// Clean up old task managers
-	var tasksToCleanup []string
-	cm.dag.taskManager.ForEach(func(taskID string, manager *TaskManager) bool {
-		if manager.createdAt.Before(cutoffTime) {
-			tasksToCleanup = append(tasksToCleanup, taskID)
+	var toDelete []string
+	cm.dag.taskManager.ForEach(func(taskID string, tm *TaskManager) bool {
+		if tm.createdAt.Before(cutoff) {
+			toDelete = append(toDelete, taskID)
 		}
 		return true
 	})
 
-	for _, taskID := range tasksToCleanup {
-		cm.dag.taskManager.Set(taskID, nil)
-		cleaned++
+	for _, taskID := range toDelete {
+		if tm, exists := cm.dag.taskManager.Get(taskID); exists {
+			tm.Stop()
+			cm.dag.taskManager.Del(taskID)
+		}
 	}
 
-	if cleaned > 0 {
+	// Clean up circuit breakers for removed nodes
+	cm.dag.circuitBreakersMu.Lock()
+	for nodeID := range cm.dag.circuitBreakers {
+		if _, exists := cm.dag.nodes.Get(nodeID); !exists {
+			delete(cm.dag.circuitBreakers, nodeID)
+		}
+	}
+	cm.dag.circuitBreakersMu.Unlock()
+
+	if len(toDelete) > 0 {
 		cm.logger.Info("Cleanup completed",
-			logger.Field{Key: "cleanedTasks", Value: cleaned},
-			logger.Field{Key: "cutoffTime", Value: cutoffTime},
+			logger.Field{Key: "cleaned_tasks", Value: len(toDelete)},
 		)
 	}
 }
 
 // WebhookManager handles webhook notifications
 type WebhookManager struct {
-	webhooks map[string][]WebhookConfig
-	client   HTTPClient
-	logger   logger.Logger
-	mu       sync.RWMutex
+	webhooks   map[string][]WebhookConfig
+	httpClient HTTPClient
+	logger     logger.Logger
+	mu         sync.RWMutex
 }
 
 // WebhookConfig defines webhook configuration
 type WebhookConfig struct {
-	URL        string
-	Headers    map[string]string
-	Timeout    time.Duration
-	RetryCount int
-	Events     []string // Which events to trigger on
+	URL        string            `json:"url"`
+	Headers    map[string]string `json:"headers"`
+	Method     string            `json:"method"`
+	RetryCount int               `json:"retry_count"`
+	Timeout    time.Duration     `json:"timeout"`
+	Events     []string          `json:"events"`
 }
 
 // HTTPClient interface for HTTP requests
@@ -364,30 +455,41 @@ type HTTPClient interface {
 
 // WebhookEvent represents an event to send via webhook
 type WebhookEvent struct {
-	Type      string      `json:"type"`
-	TaskID    string      `json:"task_id,omitempty"`
-	NodeID    string      `json:"node_id,omitempty"`
-	Timestamp time.Time   `json:"timestamp"`
-	Data      interface{} `json:"data,omitempty"`
+	Type      string                 `json:"type"`
+	TaskID    string                 `json:"task_id"`
+	NodeID    string                 `json:"node_id,omitempty"`
+	Timestamp time.Time              `json:"timestamp"`
+	Data      map[string]interface{} `json:"data"`
 }
 
 // NewWebhookManager creates a new webhook manager
-func NewWebhookManager(client HTTPClient, logger logger.Logger) *WebhookManager {
+func NewWebhookManager(httpClient HTTPClient, logger logger.Logger) *WebhookManager {
 	return &WebhookManager{
-		webhooks: make(map[string][]WebhookConfig),
-		client:   client,
-		logger:   logger,
+		webhooks:   make(map[string][]WebhookConfig),
+		httpClient: httpClient,
+		logger:     logger,
 	}
 }
 
 // AddWebhook adds a webhook configuration
-func (wm *WebhookManager) AddWebhook(eventType string, config WebhookConfig) {
+func (wm *WebhookManager) AddWebhook(event string, config WebhookConfig) {
 	wm.mu.Lock()
 	defer wm.mu.Unlock()
 
-	wm.webhooks[eventType] = append(wm.webhooks[eventType], config)
+	if config.Method == "" {
+		config.Method = "POST"
+	}
+	if config.RetryCount == 0 {
+		config.RetryCount = 3
+	}
+	if config.Timeout == 0 {
+		config.Timeout = 30 * time.Second
+	}
+
+	wm.webhooks[event] = append(wm.webhooks[event], config)
+
 	wm.logger.Info("Webhook added",
-		logger.Field{Key: "eventType", Value: eventType},
+		logger.Field{Key: "event", Value: event},
 		logger.Field{Key: "url", Value: config.URL},
 	)
 }
@@ -395,45 +497,65 @@ func (wm *WebhookManager) AddWebhook(eventType string, config WebhookConfig) {
 // TriggerWebhook sends webhook notifications for an event
 func (wm *WebhookManager) TriggerWebhook(event WebhookEvent) {
 	wm.mu.RLock()
-	configs := wm.webhooks[event.Type]
+	configs, exists := wm.webhooks[event.Type]
 	wm.mu.RUnlock()
 
-	if len(configs) == 0 {
+	if !exists {
 		return
 	}
 
-	data, err := json.Marshal(event)
+	for _, config := range configs {
+		// Check if this webhook should handle this event
+		if len(config.Events) > 0 {
+			found := false
+			for _, eventType := range config.Events {
+				if eventType == event.Type {
+					found = true
+					break
+				}
+			}
+			if !found {
+				continue
+			}
+		}
+
+		go wm.sendWebhook(config, event)
+	}
+}
+
+// sendWebhook sends a single webhook with retry logic
+func (wm *WebhookManager) sendWebhook(config WebhookConfig, event WebhookEvent) {
+	payload, err := json.Marshal(event)
 	if err != nil {
-		wm.logger.Error("Failed to marshal webhook event",
+		wm.logger.Error("Failed to marshal webhook payload",
 			logger.Field{Key: "error", Value: err.Error()},
 		)
 		return
 	}
 
-	for _, config := range configs {
-		go wm.sendWebhook(config, data)
-	}
-}
-
-// sendWebhook sends a single webhook with retry logic
-func (wm *WebhookManager) sendWebhook(config WebhookConfig, data []byte) {
-	for attempt := 0; attempt <= config.RetryCount; attempt++ {
-		err := wm.client.Post(config.URL, "application/json", data, config.Headers)
+	for attempt := 0; attempt < config.RetryCount; attempt++ {
+		err := wm.httpClient.Post(config.URL, "application/json", payload, config.Headers)
 		if err == nil {
 			wm.logger.Info("Webhook sent successfully",
 				logger.Field{Key: "url", Value: config.URL},
-				logger.Field{Key: "attempt", Value: attempt + 1},
+				logger.Field{Key: "event_type", Value: event.Type},
 			)
 			return
 		}
 
-		if attempt < config.RetryCount {
+		wm.logger.Warn("Webhook delivery failed",
+			logger.Field{Key: "url", Value: config.URL},
+			logger.Field{Key: "attempt", Value: attempt + 1},
+			logger.Field{Key: "error", Value: err.Error()},
+		)
+
+		if attempt < config.RetryCount-1 {
 			time.Sleep(time.Duration(attempt+1) * time.Second)
 		}
 	}
 
-	wm.logger.Error("Webhook failed after all retries",
+	wm.logger.Error("Webhook delivery failed after all retries",
 		logger.Field{Key: "url", Value: config.URL},
-		logger.Field{Key: "attempts", Value: config.RetryCount + 1},
+		logger.Field{Key: "event_type", Value: event.Type},
 	)
 }
