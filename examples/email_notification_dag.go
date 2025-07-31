@@ -11,6 +11,7 @@ import (
 	"github.com/oarkflow/json"
 
 	"github.com/oarkflow/mq/dag"
+	"github.com/oarkflow/mq/utils"
 
 	"github.com/oarkflow/jet"
 
@@ -160,7 +161,7 @@ func main() {
 </html>`
 
 	flow := dag.NewDAG("Email Notification System", "email-notification", func(taskID string, result mq.Result) {
-		fmt.Printf("Email notification workflow completed for task %s: %s\n", taskID, string(result.Payload))
+		fmt.Printf("Email notification workflow completed for task %s: %s\n", taskID, string(utils.RemoveRecursiveFromJSON(result.Payload, "html_content")))
 	}, mq.WithSyncMode(true))
 
 	// Add workflow nodes
