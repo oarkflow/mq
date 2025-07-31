@@ -2,7 +2,6 @@ package sio
 
 import (
 	"context"
-	"github.com/gorilla/websocket"
 	"io"
 	"log/slog"
 	"net/http"
@@ -12,6 +11,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/gorilla/websocket"
 )
 
 const ( //                        ASCII chars
@@ -23,8 +24,8 @@ const ( //                        ASCII chars
 )
 
 type event struct {
-	eventName    string
 	eventHandler func(*Socket, []byte)
+	eventName    string
 }
 
 // Config specifies parameters for upgrading an HTTP connection to a
@@ -32,13 +33,14 @@ type event struct {
 //
 // It is safe to call Config's methods concurrently.
 type Config struct {
-	HandshakeTimeout                time.Duration
-	ReadBufferSize, WriteBufferSize int
-	WriteBufferPool                 websocket.BufferPool
-	Subprotocols                    []string
-	Error                           func(w http.ResponseWriter, r *http.Request, status int, reason error)
-	CheckOrigin                     func(r *http.Request) bool
-	EnableCompression               bool
+	WriteBufferPool   websocket.BufferPool
+	Error             func(w http.ResponseWriter, r *http.Request, status int, reason error)
+	CheckOrigin       func(r *http.Request) bool
+	Subprotocols      []string
+	HandshakeTimeout  time.Duration
+	ReadBufferSize    int
+	WriteBufferSize   int
+	EnableCompression bool
 }
 
 // Server manages the coordination between
@@ -182,7 +184,7 @@ type EventHandler interface {
 // Any event functions registered with On, must be safe for concurrent use by multiple
 // go routines
 func (serv *Server) On(eventName string, handleFunc func(*Socket, []byte)) {
-	serv.events[eventName] = &event{eventName, handleFunc} // you think you can handle the func?
+	serv.events[eventName] = &event{eventName: eventName, eventHandler: handleFunc} // you think you can handle the func?
 }
 
 // OnEvent has the same functionality as On, but accepts

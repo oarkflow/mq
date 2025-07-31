@@ -23,10 +23,23 @@ func GetHandler(key string) func(string) mq.Processor {
 	return ops.Handlers[key]
 }
 
-func AvailableHandlers() []string {
-	var op []string
-	for opt := range ops.Handlers {
-		op = append(op, opt)
+type Handler struct {
+	Name string   `json:"name"`
+	Tags []string `json:"tags"`
+}
+
+func AvailableHandlers() []Handler {
+	var op []Handler
+	for opt, data := range ops.Handlers {
+		handler, ok := data("").(Processor)
+		if !ok {
+			continue
+		}
+		h := Handler{
+			Name: opt,
+			Tags: handler.GetTags(),
+		}
+		op = append(op, h)
 	}
 	return op
 }

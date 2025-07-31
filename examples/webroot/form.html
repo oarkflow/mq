@@ -4,24 +4,100 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>User Data Form</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f4f7fc;
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+            padding-top: 20px;
+        }
+        .container {
+            width: 80%;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 30px;
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+        form {
+            display: grid;
+            gap: 15px;
+        }
+        label {
+            font-size: 16px;
+            color: #333;
+        }
+        input, select {
+            width: 100%;
+            padding: 10px;
+            font-size: 16px;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+            box-sizing: border-box;
+        }
+        input:focus, select:focus {
+            border-color: #0066cc;
+            outline: none;
+        }
+        input[type="submit"] {
+            background-color: #0066cc;
+            color: white;
+            font-size: 16px;
+            cursor: pointer;
+            border: none;
+            padding: 12px;
+            border-radius: 4px;
+            transition: background-color 0.3s;
+        }
+        input[type="submit"]:hover {
+            background-color: #005bb5;
+        }
+        .footer {
+            text-align: center;
+            margin-top: 40px;
+            padding-bottom: 20px;
+            font-size: 14px;
+            color: #555;
+        }
+    </style>
 </head>
 <body>
 <h1>Enter Your Information</h1>
-<form action="/process?task_id={{task_id}}&next=true" method="POST">
-    <label for="email">Email:</label><br>
-    <input type="email" id="email" name="email" value="s.baniya.np@gmail.com" required><br><br>
+<div class="container" id="result">
+    <form action="{{base_uri}}/process?task_id={{task_id}}&next=true" method="POST">
+        <div>
+            <label for="email">Email:</label>
+            <input type="email" id="email" name="email" value="s.baniya.np@gmail.com" required>
+        </div>
 
-    <label for="age">Age:</label><br>
-    <input type="number" id="age" name="age" value="18" required><br><br>
+        <div>
+            <label for="age">Age:</label>
+            <input type="number" id="age" name="age" value="18" required>
+        </div>
 
-    <label for="gender">Gender:</label><br>
-    <select id="gender" name="gender" required>
-        <option value="male">Male</option>
-        <option value="female">Female</option>
-        <option value="other">Other</option>
-    </select><br><br>
+        <div>
+            <label for="gender">Gender:</label>
+            <select id="gender" name="gender" required>
+                <option value="male">Male</option>
+                <option value="female">Female</option>
+                <option value="other">Other</option>
+            </select>
+        </div>
 
-    <input type="submit" value="Submit">
-</form>
+        <div>
+            <input type="submit" value="Submit">
+        </div>
+    </form>
+</div>
+
+<div class="footer">
+    <p>&copy; 2024 Task Manager</p>
+</div>
 </body>
 </html>

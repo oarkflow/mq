@@ -6,52 +6,52 @@ import (
 )
 
 type hub struct {
-	sockets          map[string]*Socket
-	rooms            map[string]*room
-	shutdownCh       chan bool
+	multihomeBackend Adapter
+	joinRoomCh       chan *joinRequest
+	roomMsgCh        chan *RoomMsg
 	socketList       chan []*Socket
 	addCh            chan *Socket
 	delCh            chan *Socket
-	joinRoomCh       chan *joinRequest
+	sockets          map[string]*Socket
 	leaveRoomCh      chan *leaveRequest
-	roomMsgCh        chan *RoomMsg
-	broomcastCh      chan *RoomMsg // for passing data from the backend
+	shutdownCh       chan bool
+	broomcastCh      chan *RoomMsg
 	broadcastCh      chan *BroadcastMsg
 	bbroadcastCh     chan *BroadcastMsg
-	multihomeEnabled bool
-	multihomeBackend Adapter
+	rooms            map[string]*room
 	l                sync.RWMutex
+	multihomeEnabled bool
 }
 
 type room struct {
-	name    string
 	sockets map[string]*Socket
+	name    string
 	l       sync.RWMutex
 }
 
 type joinRequest struct {
-	roomName string
 	socket   *Socket
+	roomName string
 }
 
 type leaveRequest struct {
-	roomName string
 	socket   *Socket
+	roomName string
 }
 
 // RoomMsg represents an event to be dispatched to a room of sockets
 type RoomMsg struct {
-	RoomName  string
-	Except    []string
-	EventName string
 	Data      any
+	RoomName  string
+	EventName string
+	Except    []string
 }
 
 // BroadcastMsg represents an event to be dispatched to all Sockets on the Server
 type BroadcastMsg struct {
+	Data      any
 	EventName string
 	Except    []string
-	Data      any
 }
 
 func (h *hub) addSocket(s *Socket) {

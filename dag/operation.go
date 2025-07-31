@@ -13,15 +13,20 @@ import (
 	"github.com/oarkflow/dipper"
 	"github.com/oarkflow/errors"
 	"github.com/oarkflow/expr"
-	"github.com/oarkflow/xid"
 	"golang.org/x/exp/maps"
 
 	"github.com/oarkflow/mq"
 )
 
+type Debugger interface {
+	Debug(context.Context, *mq.Task)
+}
+
 type Processor interface {
 	mq.Processor
 	SetConfig(Payload)
+	SetTags(tag ...string)
+	GetTags() []string
 }
 
 type Condition interface {
@@ -52,13 +57,22 @@ type Payload struct {
 }
 
 type Operation struct {
-	ID              string   `json:"id"`
-	Type            string   `json:"type"`
-	Key             string   `json:"key"`
+	ID              string `json:"id"`
+	Key             string `json:"key"`
+	Payload         Payload
 	RequiredFields  []string `json:"required_fields"`
 	OptionalFields  []string `json:"optional_fields"`
 	GeneratedFields []string `json:"generated_fields"`
-	Payload         Payload
+	Type            NodeType `json:"type"`
+	Tags            []string `json:"tags"`
+}
+
+func (e *Operation) SetTags(tag ...string) {
+	e.Tags = append(e.Tags, tag...)
+}
+
+func (e *Operation) GetTags() []string {
+	return e.Tags
 }
 
 func (e *Operation) Consume(_ context.Context) error {
@@ -77,6 +91,36 @@ func (e *Operation) Stop(_ context.Context) error {
 	return nil
 }
 
+func (e *Operation) Debug(ctx context.Context, task *mq.Task) {
+	debug, canDebug := e.Payload.Data["debug"].(bool)
+	if !canDebug || !debug {
+		return
+	}
+	additionalData, _ := json.Marshal(e.Payload.Data)
+	fmt.Println("Operation ID: \n", e.ID)
+	fmt.Println("Operation Key: \n", e.Key)
+	fmt.Println("Operation Type: \n", e.Type)
+	fmt.Println("\t Operation Required Fields: \n", e.RequiredFields)
+	fmt.Println("\t Operation Optional Fields: \n", e.OptionalFields)
+	fmt.Println("\t Operation Generated Fields: \n", e.GeneratedFields)
+	fmt.Println("\t Operation Mapping: \n", e.GetMappedData(ctx, task))
+	fmt.Println("\t Operation Additional Data: \n", string(additionalData))
+}
+
+func (e *Operation) GetMappedData(ctx context.Context, task *mq.Task) map[string]any {
+	var row map[string]any
+	err := json.Unmarshal(task.Payload, &row)
+	if err != nil {
+		return nil
+	}
+	mapped := make(map[string]any)
+	for dest, src := range e.Payload.Mapping {
+		_, val := GetVal(ctx, src, row)
+		mapped[dest] = val
+	}
+	return mapped
+}
+
 func (e *Operation) Close() error {
 	return nil
 }
@@ -91,7 +135,7 @@ func (e *Operation) SetConfig(payload Payload) {
 }
 
 func (e *Operation) GetType() string {
-	return e.Type
+	return e.Type.String()
 }
 
 func (e *Operation) GetKey() string {
@@ -461,7 +505,7 @@ func init() {
 	})
 	expr.AddFunction("uniqueid", func(params ...interface{}) (interface{}, error) {
 		// create a new xid
-		return xid.New().String(), nil
+		return mq.NewID(), nil
 	})
 	expr.AddFunction("now", func(params ...interface{}) (interface{}, error) {
 		// get the current time in UTC

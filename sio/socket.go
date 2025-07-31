@@ -2,12 +2,13 @@ package sio
 
 import (
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/oarkflow/json"
 
 	"github.com/oarkflow/mq/internal/bpool"
 	"github.com/oarkflow/mq/storage"
@@ -22,18 +23,18 @@ var (
 
 // Socket represents a websocket connection
 type Socket struct {
+	context      storage.IMap[string, any]
 	l            *sync.RWMutex
-	id           string
 	ws           *websocket.Conn
-	closed       bool
 	serv         *Server
 	roomsl       *sync.RWMutex
 	request      *http.Request
-	context      storage.IMap[string, any]
 	rooms        map[string]bool
 	pingTicker   *time.Ticker
 	tickerDone   chan bool
+	id           string
 	pingInterval time.Duration
+	closed       bool
 }
 
 const (
@@ -139,7 +140,7 @@ func (s *Socket) GetRooms() []string {
 func (s *Socket) Join(roomName string) {
 	s.roomsl.Lock()
 	defer s.roomsl.Unlock()
-	s.serv.hub.joinRoom(&joinRequest{roomName, s})
+	s.serv.hub.joinRoom(&joinRequest{roomName: roomName, socket: s})
 	s.rooms[roomName] = true
 }
 
@@ -149,7 +150,7 @@ func (s *Socket) Join(roomName string) {
 func (s *Socket) Leave(roomName string) {
 	s.roomsl.Lock()
 	defer s.roomsl.Unlock()
-	s.serv.hub.leaveRoom(&leaveRequest{roomName, s})
+	s.serv.hub.leaveRoom(&leaveRequest{roomName: roomName, socket: s})
 	delete(s.rooms, roomName)
 }
 

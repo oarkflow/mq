@@ -2,28 +2,159 @@ package dag
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
-	"os"
-	"time"
+	"strings"
 
-	"github.com/oarkflow/mq/jsonparser"
-	"github.com/oarkflow/mq/sio"
+	"github.com/oarkflow/json"
+
+	"github.com/oarkflow/form"
 
 	"github.com/oarkflow/mq"
+	"github.com/oarkflow/mq/sio"
+
+	"github.com/oarkflow/json/jsonparser"
+
 	"github.com/oarkflow/mq/consts"
-	"github.com/oarkflow/mq/metrics"
 )
 
-type Request struct {
-	Payload   json.RawMessage `json:"payload"`
-	Interval  time.Duration   `json:"interval"`
-	Schedule  bool            `json:"schedule"`
-	Overlap   bool            `json:"overlap"`
-	Recurring bool            `json:"recurring"`
+func renderNotFound(w http.ResponseWriter) {
+	html := []byte(`
+<div>
+	<h1>task not found</h1>
+	<p><a href="/process">Back to home</a></p>
+</div>
+`)
+	w.Header().Set(consts.ContentType, consts.TypeHtml)
+	w.Write(html)
+}
+
+func (tm *DAG) render(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"message": "%s"}`, "unable to ready body"), http.StatusInternalServerError)
+		return
+	}
+	query := make(map[string]string)
+	queryParams := r.URL.Query()
+	for key, values := range queryParams {
+		if len(values) > 0 {
+			query[key] = values[0]
+		} else {
+			query[key] = ""
+		}
+	}
+	ctx, data, err := form.ParseBodyAsJSON(r.Context(), r.Header.Get("Content-Type"), body, query)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	accept := r.Header.Get("Accept")
+	userCtx := form.UserContext(ctx)
+	ctx = context.WithValue(ctx, "method", r.Method)
+	if r.Method == "GET" && userCtx.Get("task_id") != "" {
+		manager, ok := tm.taskManager.Get(userCtx.Get("task_id"))
+		if !ok || manager == nil {
+			if strings.Contains(accept, "text/html") || accept == "" {
+				renderNotFound(w)
+				return
+			}
+			http.Error(w, fmt.Sprintf(`{"message": "%s"}`, "task not found"), http.StatusInternalServerError)
+			return
+		}
+	}
+	result := tm.Process(ctx, data)
+	if result.Error != nil {
+		http.Error(w, fmt.Sprintf(`{"message": "%s"}`, result.Error.Error()), http.StatusInternalServerError)
+		return
+	}
+	contentType, ok := result.Ctx.Value(consts.ContentType).(string)
+	if !ok {
+		contentType = consts.TypeJson
+	}
+	switch contentType {
+	case consts.TypeHtml:
+		w.Header().Set(consts.ContentType, consts.TypeHtml)
+		data, err := jsonparser.GetString(result.Payload, "html_content")
+		if err != nil {
+			return
+		}
+		w.Write([]byte(data))
+	default:
+		if r.Method != "POST" {
+			http.Error(w, `{"message": "not allowed"}`, http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set(consts.ContentType, consts.TypeJson)
+		json.NewEncoder(w).Encode(result.Payload)
+	}
+}
+
+func (tm *DAG) taskStatusHandler(w http.ResponseWriter, r *http.Request) {
+	taskID := r.URL.Query().Get("taskID")
+	if taskID == "" {
+		http.Error(w, `{"message": "taskID is missing"}`, http.StatusBadRequest)
+		return
+	}
+	manager, ok := tm.taskManager.Get(taskID)
+	if !ok {
+		http.Error(w, `{"message": "Invalid TaskID"}`, http.StatusNotFound)
+		return
+	}
+	result := make(map[string]TaskState)
+	manager.taskStates.ForEach(func(key string, value *TaskState) bool {
+		key = strings.Split(key, Delimiter)[0]
+		nodeID := strings.Split(value.NodeID, Delimiter)[0]
+		rs := jsonparser.Delete(value.Result.Payload, "html_content")
+		status := value.Status
+		if status == mq.Processing {
+			status = mq.Completed
+		}
+		state := TaskState{
+			NodeID:    nodeID,
+			Status:    status,
+			UpdatedAt: value.UpdatedAt,
+			Result: mq.Result{
+				Payload: rs,
+				Error:   value.Result.Error,
+				Status:  status,
+			},
+		}
+		result[key] = state
+		return true
+	})
+	w.Header().Set(consts.ContentType, consts.TypeJson)
+	json.NewEncoder(w).Encode(result)
+}
+
+// New API endpoint to fetch metrics.
+func (tm *DAG) metricsHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set(consts.ContentType, consts.TypeJson)
+	json.NewEncoder(w).Encode(tm.metrics)
+}
+
+// New API endpoint to cancel a running task.
+func (tm *DAG) cancelTaskHandler(w http.ResponseWriter, r *http.Request) {
+	taskID := r.URL.Query().Get("taskID")
+	if taskID == "" {
+		http.Error(w, `{"message": "taskID is missing"}`, http.StatusBadRequest)
+		return
+	}
+	err := tm.CancelTask(taskID)
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"message": "%s"}`, err.Error()), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set(consts.ContentType, consts.TypeJson)
+	w.Write([]byte(`{"message": "task cancelled successfully"}`))
+}
+
+// New API endpoint to fetch full DAG status.
+func (tm *DAG) statusHandler(w http.ResponseWriter, r *http.Request) {
+	status := tm.GetStatus()
+	w.Header().Set(consts.ContentType, consts.TypeJson)
+	json.NewEncoder(w).Encode(status)
 }
 
 func (tm *DAG) SetupWS() *sio.Server {
@@ -34,176 +165,4 @@ func (tm *DAG) SetupWS() *sio.Server {
 	WsEvents(ws)
 	tm.Notifier = ws
 	return ws
-}
-
-func (tm *DAG) Handlers() {
-	metrics.HandleHTTP()
-	http.Handle("/", http.FileServer(http.Dir("webroot")))
-	http.Handle("/notify", tm.SetupWS())
-	http.HandleFunc("GET /render", tm.Render)
-	http.HandleFunc("POST /request", tm.Request)
-	http.HandleFunc("POST /publish", tm.Publish)
-	http.HandleFunc("POST /schedule", tm.Schedule)
-	http.HandleFunc("/pause-consumer/{id}", func(writer http.ResponseWriter, request *http.Request) {
-		id := request.PathValue("id")
-		if id != "" {
-			tm.PauseConsumer(request.Context(), id)
-		}
-	})
-	http.HandleFunc("/resume-consumer/{id}", func(writer http.ResponseWriter, request *http.Request) {
-		id := request.PathValue("id")
-		if id != "" {
-			tm.ResumeConsumer(request.Context(), id)
-		}
-	})
-	http.HandleFunc("/pause", func(w http.ResponseWriter, request *http.Request) {
-		err := tm.Pause(request.Context())
-		if err != nil {
-			http.Error(w, "Failed to pause", http.StatusBadRequest)
-			return
-		}
-		json.NewEncoder(w).Encode(map[string]string{"status": "paused"})
-	})
-	http.HandleFunc("/resume", func(w http.ResponseWriter, request *http.Request) {
-		err := tm.Resume(request.Context())
-		if err != nil {
-			http.Error(w, "Failed to resume", http.StatusBadRequest)
-			return
-		}
-		json.NewEncoder(w).Encode(map[string]string{"status": "resumed"})
-	})
-	http.HandleFunc("/stop", func(w http.ResponseWriter, request *http.Request) {
-		err := tm.Stop(request.Context())
-		if err != nil {
-			http.Error(w, "Failed to read request body", http.StatusBadRequest)
-			return
-		}
-		json.NewEncoder(w).Encode(map[string]string{"status": "stopped"})
-	})
-	http.HandleFunc("/close", func(w http.ResponseWriter, request *http.Request) {
-		err := tm.Close()
-		if err != nil {
-			http.Error(w, "Failed to read request body", http.StatusBadRequest)
-			return
-		}
-		json.NewEncoder(w).Encode(map[string]string{"status": "closed"})
-	})
-	http.HandleFunc("/dot", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/plain")
-		fmt.Fprintln(w, tm.ExportDOT())
-	})
-	http.HandleFunc("/ui", func(w http.ResponseWriter, r *http.Request) {
-		image := fmt.Sprintf("%s.svg", mq.NewID())
-		err := tm.SaveSVG(image)
-		if err != nil {
-			http.Error(w, "Failed to read request body", http.StatusBadRequest)
-			return
-		}
-		defer os.Remove(image)
-		svgBytes, err := os.ReadFile(image)
-		if err != nil {
-			http.Error(w, "Could not read SVG file", http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "image/svg+xml")
-		if _, err := w.Write(svgBytes); err != nil {
-			http.Error(w, "Could not write SVG response", http.StatusInternalServerError)
-			return
-		}
-	})
-}
-
-func (tm *DAG) request(w http.ResponseWriter, r *http.Request, async bool) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
-		return
-	}
-	var request Request
-	if r.Body != nil {
-		defer r.Body.Close()
-		var err error
-		payload, err := io.ReadAll(r.Body)
-		if err != nil {
-			http.Error(w, "Failed to read request body", http.StatusBadRequest)
-			return
-		}
-		err = json.Unmarshal(payload, &request)
-		if err != nil {
-			http.Error(w, "Failed to unmarshal body", http.StatusBadRequest)
-			return
-		}
-	} else {
-		http.Error(w, "Empty request body", http.StatusBadRequest)
-		return
-	}
-	ctx := r.Context()
-	if async {
-		ctx = mq.SetHeaders(ctx, map[string]string{consts.AwaitResponseKey: "true"})
-	}
-	var opts []mq.SchedulerOption
-	if request.Interval > 0 {
-		opts = append(opts, mq.WithInterval(request.Interval))
-	}
-	if request.Overlap {
-		opts = append(opts, mq.WithOverlap())
-	}
-	if request.Recurring {
-		opts = append(opts, mq.WithRecurring())
-	}
-	ctx = context.WithValue(ctx, "query_params", r.URL.Query())
-	var rs mq.Result
-	if request.Schedule {
-		rs = tm.ScheduleTask(ctx, request.Payload, opts...)
-	} else {
-		rs = tm.Process(ctx, request.Payload)
-	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(rs)
-}
-
-func (tm *DAG) Render(w http.ResponseWriter, r *http.Request) {
-	ctx := mq.SetHeaders(r.Context(), map[string]string{consts.AwaitResponseKey: "true", "request_type": "render"})
-	ctx = context.WithValue(ctx, "query_params", r.URL.Query())
-	rs := tm.Process(ctx, nil)
-	content, err := jsonparser.GetString(rs.Payload, "html_content")
-	if err != nil {
-		http.Error(w, "Failed to read request body", http.StatusBadRequest)
-		return
-	}
-	w.Header().Set("Content-Type", consts.TypeHtml)
-	w.Write([]byte(content))
-}
-
-func (tm *DAG) Request(w http.ResponseWriter, r *http.Request) {
-	tm.request(w, r, true)
-}
-
-func (tm *DAG) Publish(w http.ResponseWriter, r *http.Request) {
-	tm.request(w, r, false)
-}
-
-func (tm *DAG) Schedule(w http.ResponseWriter, r *http.Request) {
-	tm.request(w, r, false)
-}
-
-func GetTaskID(ctx context.Context) string {
-	if queryParams := ctx.Value("query_params"); queryParams != nil {
-		if params, ok := queryParams.(url.Values); ok {
-			if id := params.Get("taskID"); id != "" {
-				return id
-			}
-		}
-	}
-	return ""
-}
-
-func CanNextNode(ctx context.Context) string {
-	if queryParams := ctx.Value("query_params"); queryParams != nil {
-		if params, ok := queryParams.(url.Values); ok {
-			if id := params.Get("next"); id != "" {
-				return id
-			}
-		}
-	}
-	return ""
 }

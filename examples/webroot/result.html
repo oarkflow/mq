@@ -15,16 +15,17 @@
         h1 {
             text-align: center;
             color: #333;
-            padding-top: 20px;
+            padding-top: 30px;
         }
 
         .container {
-            width: 80%;
+            width: 90%;
+            max-width: 900px;
             margin: 0 auto;
-            padding: 20px;
+            padding: 30px;
             background-color: white;
             border-radius: 8px;
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
         }
 
         table {
@@ -34,30 +35,49 @@
         }
 
         table th, table td {
-            padding: 10px;
+            padding: 15px;
             border: 1px solid #ddd;
             text-align: left;
+            vertical-align: top;
         }
 
         table th {
             background-color: #f1f1f1;
             color: #333;
+            font-weight: bold;
+        }
+
+        table tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+
+        table td pre {
+            background-color: #f5f5f5;
+            padding: 10px;
+            border-radius: 4px;
+            overflow: auto;
+            white-space: pre-wrap;
+            word-wrap: break-word;
         }
 
         .status-pending {
             color: orange;
+            font-weight: bold;
         }
 
         .status-processing {
             color: blue;
+            font-weight: bold;
         }
 
         .status-completed {
             color: green;
+            font-weight: bold;
         }
 
         .status-failed {
             color: red;
+            font-weight: bold;
         }
 
         .node-result {
@@ -66,13 +86,53 @@
 
         .node-result h2 {
             color: #333;
+            margin-bottom: 20px;
         }
 
         .footer {
             text-align: center;
             margin-top: 40px;
             padding-bottom: 20px;
+            font-size: 14px;
+            color: #555;
         }
+
+        .footer a {
+            text-decoration: none;
+            color: #0066cc;
+        }
+
+        .footer a:hover {
+            text-decoration: underline;
+        }
+
+        .error-message {
+            color: red;
+            font-size: 18px;
+            margin-top: 20px;
+        }
+
+        .success-message {
+            color: green;
+            font-size: 18px;
+            margin-top: 20px;
+        }
+
+        .go-back {
+            display: inline-block;
+            margin-top: 10px;
+            padding: 10px 20px;
+            background-color: #0066cc;
+            color: white;
+            border-radius: 5px;
+            text-decoration: none;
+            font-weight: bold;
+        }
+
+        .go-back:hover {
+            background-color: #005bb5;
+        }
+
     </style>
 </head>
 <body>
@@ -96,29 +156,30 @@
     // Fetch the task result
     const taskID = new URLSearchParams(window.location.search).get('task_id'); // Get taskID from URL
     if (taskID) {
-        fetch(`/task/status?taskID=${taskID}`)
+        fetch(`{{base_uri}}/task/status?taskID=${taskID}`)
             .then(response => response.json())
             .then(data => {
                 if(data?.message) {
                     document.getElementById('result').innerHTML = `
-                        <p>Error loading task result. ${data.message}</p> <br> <a href="/form">Go back</a>`;
+                        <p class="error-message">Error loading task result: ${data.message}</p>
+                        <a href="/form" class="go-back">Go back</a>`;
                 } else {
                     const container = document.getElementById('result');
                     let htmlContent = '';
                     htmlContent += `
-                        <h2>Final Task Result <a href="/form">Go back</a></h2>
+                        <h2 style="display: flex; justify-content: space-between"><span>Final Task Result</span><span><a href="/process">Go Back</a></span></h2>
                         <table>
                             <tr>
                                 <th>Task ID</th>
                                 <th>Status</th>
                                 <th>UpdatedAt</th>
-                                <th>Result Data</th>
+                                <th>Result</th>
                             </tr>
                             <tr>
                                 <td>${taskID}</td>
                                 <td class="${getStatusClass(data.Result.Status)}">${data.Result.Status}</td>
                                 <td>${formatDate(data.Result.UpdatedAt)}</td>
-                                <td><pre>${JSON.stringify(data.Result.Result.Data, null, 2)}</pre></td>
+                                <td><pre>${JSON.stringify(data.Result.Result.payload, null, 2)}</pre></td>
                             </tr>
                         </table>
                     `;
@@ -141,7 +202,7 @@
                                     <td>${node.NodeID}</td>
                                     <td class="${getStatusClass(node.Status)}">${node.Status}</td>
                                     <td>${formatDate(node.UpdatedAt)}</td>
-                                    <td><pre>${JSON.stringify(node.Result.Data, null, 2)}</pre></td>
+                                    <td><pre>${JSON.stringify(node.Result.payload, null, 2)}</pre></td>
                                 </tr>
                             `;
                         }
@@ -152,10 +213,10 @@
             })
             .catch(error => {
                 console.log(error)
-                document.getElementById('result').innerHTML = '<p>Error loading task result.</p>';
+                document.getElementById('result').innerHTML = '<p class="error-message">Error loading task result.</p>';
             });
     } else {
-        document.getElementById('result').innerHTML = '<p>Task ID not provided.</p>';
+        document.getElementById('result').innerHTML = '<p class="error-message">Task ID not provided.</p>';
     }
 
     function getStatusClass(status) {
@@ -173,5 +234,6 @@
         }
     }
 </script>
+
 </body>
 </html>

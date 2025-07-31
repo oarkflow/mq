@@ -7,9 +7,10 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"sync"
 
 	"github.com/oarkflow/errors"
-	"github.com/oarkflow/xid"
+	"github.com/oarkflow/xid/wuid"
 
 	"github.com/oarkflow/mq/consts"
 	"github.com/oarkflow/mq/storage"
@@ -89,7 +90,7 @@ func GetPublisherID(ctx context.Context) (string, bool) {
 }
 
 func NewID() string {
-	return xid.New().String()
+	return wuid.New().String()
 }
 
 func createTLSConnection(addr, certPath, keyPath string, caPath ...string) (net.Conn, error) {
@@ -120,12 +121,35 @@ func createTLSConnection(addr, certPath, keyPath string, caPath ...string) (net.
 	return conn, nil
 }
 
+// Global connection pool
+var connPool sync.Map
+
+// Modified GetConnection: reuse existing connection if valid.
 func GetConnection(addr string, config TLSConfig) (net.Conn, error) {
-	if config.UseTLS {
-		return createTLSConnection(addr, config.CertPath, config.KeyPath, config.CAPath)
-	} else {
-		return net.Dial("tcp", addr)
+	key := fmt.Sprintf("%s_%t", addr, config.UseTLS)
+	// Check if a connection exists and reuse it if not closed.
+	if c, ok := connPool.Load(key); ok {
+		conn := c.(net.Conn)
+		if !IsClosed(conn) {
+			return conn, nil
+		}
+		// If closed, delete the stale connection.
+		connPool.Delete(key)
 	}
+
+	var conn net.Conn
+	var err error
+	if config.UseTLS {
+		conn, err = createTLSConnection(addr, config.CertPath, config.KeyPath, config.CAPath)
+	} else {
+		conn, err = net.Dial("tcp", addr)
+	}
+	if err != nil {
+		return nil, err
+	}
+	// Store the new connection in the pool.
+	connPool.Store(key, conn)
+	return conn, nil
 }
 
 func WrapError(err error, msg, op string) error {

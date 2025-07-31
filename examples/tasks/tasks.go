@@ -2,33 +2,39 @@ package tasks
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 
+	"github.com/oarkflow/json"
+
+	v2 "github.com/oarkflow/mq/dag"
+
 	"github.com/oarkflow/mq"
-	"github.com/oarkflow/mq/dag"
 )
 
-type Node1 struct{ dag.Operation }
+type Node1 struct{ v2.Operation }
 
 func (t *Node1) ProcessTask(_ context.Context, task *mq.Task) mq.Result {
 	fmt.Println("Node 1", string(task.Payload))
 	return mq.Result{Payload: task.Payload, TaskID: task.ID}
 }
 
-type Node2 struct{ dag.Operation }
+type Node2 struct{ v2.Operation }
 
 func (t *Node2) ProcessTask(_ context.Context, task *mq.Task) mq.Result {
 	fmt.Println("Node 2", string(task.Payload))
 	return mq.Result{Payload: task.Payload, TaskID: task.ID}
 }
 
-type Node3 struct{ dag.Operation }
+type Node3 struct{ v2.Operation }
 
 func (t *Node3) ProcessTask(_ context.Context, task *mq.Task) mq.Result {
 	var user map[string]any
-	_ = json.Unmarshal(task.Payload, &user)
+	fmt.Println(string(task.Payload))
+	err := json.Unmarshal(task.Payload, &user)
+	if err != nil {
+		panic(err)
+	}
 	age := int(user["age"].(float64))
 	status := "FAIL"
 	if age > 20 {
@@ -36,10 +42,10 @@ func (t *Node3) ProcessTask(_ context.Context, task *mq.Task) mq.Result {
 	}
 	user["status"] = status
 	resultPayload, _ := json.Marshal(user)
-	return mq.Result{Payload: resultPayload, Status: status}
+	return mq.Result{Payload: resultPayload, ConditionStatus: status}
 }
 
-type Node4 struct{ dag.Operation }
+type Node4 struct{ v2.Operation }
 
 func (t *Node4) ProcessTask(_ context.Context, task *mq.Task) mq.Result {
 	var user map[string]any
@@ -49,7 +55,7 @@ func (t *Node4) ProcessTask(_ context.Context, task *mq.Task) mq.Result {
 	return mq.Result{Payload: resultPayload}
 }
 
-type Node5 struct{ dag.Operation }
+type Node5 struct{ v2.Operation }
 
 func (t *Node5) ProcessTask(_ context.Context, task *mq.Task) mq.Result {
 	var user map[string]any
@@ -59,7 +65,7 @@ func (t *Node5) ProcessTask(_ context.Context, task *mq.Task) mq.Result {
 	return mq.Result{Payload: resultPayload}
 }
 
-type Node6 struct{ dag.Operation }
+type Node6 struct{ v2.Operation }
 
 func (t *Node6) ProcessTask(_ context.Context, task *mq.Task) mq.Result {
 	var user map[string]any
@@ -68,7 +74,7 @@ func (t *Node6) ProcessTask(_ context.Context, task *mq.Task) mq.Result {
 	return mq.Result{Payload: resultPayload}
 }
 
-type Node7 struct{ dag.Operation }
+type Node7 struct{ v2.Operation }
 
 func (t *Node7) ProcessTask(_ context.Context, task *mq.Task) mq.Result {
 	var user map[string]any
@@ -78,7 +84,7 @@ func (t *Node7) ProcessTask(_ context.Context, task *mq.Task) mq.Result {
 	return mq.Result{Payload: resultPayload}
 }
 
-type Node8 struct{ dag.Operation }
+type Node8 struct{ v2.Operation }
 
 func (t *Node8) ProcessTask(_ context.Context, task *mq.Task) mq.Result {
 	var user map[string]any

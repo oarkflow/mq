@@ -1,26 +1,45 @@
 package dag
 
-type NodeStatus int
+import "time"
 
-func (c NodeStatus) IsValid() bool { return c >= Pending && c <= Failed }
+const (
+	Delimiter          = "___"
+	ContextIndex       = "index"
+	DefaultChannelSize = 1000
+	RetryInterval      = 5 * time.Second
+)
 
-func (c NodeStatus) String() string {
+type NodeType int
+
+func (c NodeType) IsValid() bool { return c >= Function && c <= Page }
+
+func (c NodeType) String() string {
 	switch c {
-	case Pending:
-		return "Pending"
-	case Processing:
-		return "Processing"
-	case Completed:
-		return "Completed"
-	case Failed:
-		return "Failed"
+	case Function:
+		return "Function"
+	case Page:
+		return "Page"
 	}
-	return ""
+	return "Function"
 }
 
 const (
-	Pending NodeStatus = iota
-	Processing
-	Completed
-	Failed
+	Function NodeType = iota
+	Page
+)
+
+type EdgeType int
+
+func (c EdgeType) IsValid() bool { return c >= Simple && c <= Iterator }
+
+const (
+	Simple EdgeType = iota
+	Iterator
+)
+
+type Direction string
+
+const (
+	TB Direction = "TB"
+	LR Direction = "LR"
 )

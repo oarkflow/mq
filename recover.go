@@ -5,8 +5,6 @@ import (
 	"log"
 	"runtime"
 	"runtime/debug"
-
-	"github.com/oarkflow/mq/metrics"
 )
 
 func RecoverPanic(labelGenerator func() string) {
@@ -20,8 +18,6 @@ func RecoverPanic(labelGenerator func() string) {
 			}
 		}
 		log.Printf("[PANIC] - recovered from panic in %s (%s:%d): %v\nStack trace: %s", funcName, file, line, r, debug.Stack())
-		label := labelGenerator()
-		metrics.TasksErrors.WithLabelValues(label).Inc()
 	}
 }
 

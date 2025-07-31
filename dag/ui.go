@@ -9,25 +9,24 @@ import (
 
 func (tm *DAG) PrintGraph() {
 	fmt.Println("DAG Graph structure:")
-	for _, node := range tm.nodes {
-		fmt.Printf("Node: %s (%s) -> ", node.Name, node.Key)
-		if conditions, ok := tm.conditions[FromNode(node.Key)]; ok {
+	tm.nodes.ForEach(func(_ string, node *Node) bool {
+		fmt.Printf("Node: %s (%s) -> ", node.Label, node.ID)
+		if conditions, ok := tm.conditions[node.ID]; ok {
 			var c []string
 			for when, then := range conditions {
-				if target, ok := tm.nodes[string(then)]; ok {
-					c = append(c, fmt.Sprintf("If [%s] Then %s (%s)", when, target.Name, target.Key))
+				if target, ok := tm.nodes.Get(then); ok {
+					c = append(c, fmt.Sprintf("If [%s] Then %s (%s)", when, target.Label, target.ID))
 				}
 			}
 			fmt.Println(strings.Join(c, ", "))
 		}
 		var edges []string
-		for _, edge := range node.Edges {
-			for _, target := range edge.To {
-				edges = append(edges, fmt.Sprintf("%s (%s)", target.Name, target.Key))
-			}
+		for _, target := range node.Edges {
+			edges = append(edges, fmt.Sprintf("%s (%s)", target.To.Label, target.To.ID))
 		}
 		fmt.Println(strings.Join(edges, ", "))
-	}
+		return true
+	})
 }
 
 func (tm *DAG) ClassifyEdges(startNodes ...string) (string, bool, error) {
@@ -40,11 +39,11 @@ func (tm *DAG) ClassifyEdges(startNodes ...string) (string, bool, error) {
 	discoveryTime := make(map[string]int)
 	finishedTime := make(map[string]int)
 	timeVal := 0
-	inRecursionStack := make(map[string]bool) // track nodes in the recursion stack for cycle detection
+	inRecursionStack := make(map[string]bool)
 	if startNode == "" {
 		firstNode := tm.findStartNode()
 		if firstNode != nil {
-			startNode = firstNode.Key
+			startNode = firstNode.ID
 		}
 	}
 	if startNode == "" {
@@ -59,27 +58,25 @@ func (tm *DAG) ClassifyEdges(startNodes ...string) (string, bool, error) {
 
 func (tm *DAG) dfs(v string, visited map[string]bool, discoveryTime, finishedTime map[string]int, timeVal *int, inRecursionStack map[string]bool, builder *strings.Builder) (bool, error) {
 	visited[v] = true
-	inRecursionStack[v] = true // mark node as part of recursion stack
+	inRecursionStack[v] = true
 	*timeVal++
 	discoveryTime[v] = *timeVal
-	node := tm.nodes[v]
+	node, _ := tm.nodes.Get(v)
 	hasCycle := false
 	var err error
 	for _, edge := range node.Edges {
-		for _, adj := range edge.To {
-			if !visited[adj.Key] {
-				builder.WriteString(fmt.Sprintf("Traversing Edge: %s -> %s\n", v, adj.Key))
-				hasCycle, err := tm.dfs(adj.Key, visited, discoveryTime, finishedTime, timeVal, inRecursionStack, builder)
-				if err != nil {
-					return true, err
-				}
-				if hasCycle {
-					return true, nil
-				}
-			} else if inRecursionStack[adj.Key] {
-				cycleMsg := fmt.Sprintf("Cycle detected: %s -> %s\n", v, adj.Key)
-				return true, fmt.Errorf(cycleMsg)
+		if !visited[edge.To.ID] {
+			builder.WriteString(fmt.Sprintf("Traversing Edge: %s -> %s\n", v, edge.To.ID))
+			hasCycle, err := tm.dfs(edge.To.ID, visited, discoveryTime, finishedTime, timeVal, inRecursionStack, builder)
+			if err != nil {
+				return true, err
 			}
+			if hasCycle {
+				return true, nil
+			}
+		} else if inRecursionStack[edge.To.ID] {
+			cycleMsg := fmt.Sprintf("Cycle detected: %s -> %s\n", v, edge.To.ID)
+			return true, fmt.Errorf(cycleMsg)
 		}
 	}
 	hasCycle, err = tm.handleConditionalEdges(v, visited, discoveryTime, finishedTime, timeVal, inRecursionStack, builder)
@@ -88,25 +85,25 @@ func (tm *DAG) dfs(v string, visited map[string]bool, discoveryTime, finishedTim
 	}
 	*timeVal++
 	finishedTime[v] = *timeVal
-	inRecursionStack[v] = false // remove from recursion stack after finishing processing
+	inRecursionStack[v] = false
 	return hasCycle, nil
 }
 
 func (tm *DAG) handleConditionalEdges(v string, visited map[string]bool, discoveryTime, finishedTime map[string]int, time *int, inRecursionStack map[string]bool, builder *strings.Builder) (bool, error) {
-	node := tm.nodes[v]
-	for when, then := range tm.conditions[FromNode(node.Key)] {
-		if targetNode, ok := tm.nodes[string(then)]; ok {
-			if !visited[targetNode.Key] {
-				builder.WriteString(fmt.Sprintf("Traversing Conditional Edge [%s]: %s -> %s\n", when, v, targetNode.Key))
-				hasCycle, err := tm.dfs(targetNode.Key, visited, discoveryTime, finishedTime, time, inRecursionStack, builder)
+	node, _ := tm.nodes.Get(v)
+	for when, then := range tm.conditions[node.ID] {
+		if targetNode, ok := tm.nodes.Get(then); ok {
+			if !visited[targetNode.ID] {
+				builder.WriteString(fmt.Sprintf("Traversing Conditional Edge [%s]: %s -> %s\n", when, v, targetNode.ID))
+				hasCycle, err := tm.dfs(targetNode.ID, visited, discoveryTime, finishedTime, time, inRecursionStack, builder)
 				if err != nil {
 					return true, err
 				}
 				if hasCycle {
 					return true, nil
 				}
-			} else if inRecursionStack[targetNode.Key] {
-				cycleMsg := fmt.Sprintf("Cycle detected in Conditional Edge [%s]: %s -> %s\n", when, v, targetNode.Key)
+			} else if inRecursionStack[targetNode.ID] {
+				cycleMsg := fmt.Sprintf("Cycle detected in Conditional Edge [%s]: %s -> %s\n", when, v, targetNode.ID)
 				return true, fmt.Errorf(cycleMsg)
 			}
 		}
@@ -114,8 +111,8 @@ func (tm *DAG) handleConditionalEdges(v string, visited map[string]bool, discove
 	return false, nil
 }
 
-func (tm *DAG) SaveDOTFile(filename string) error {
-	dotContent := tm.ExportDOT()
+func (tm *DAG) SaveDOTFile(filename string, direction ...Direction) error {
+	dotContent := tm.ExportDOT(direction...)
 	return os.WriteFile(filename, []byte(dotContent), 0644)
 }
 
@@ -142,102 +139,123 @@ func (tm *DAG) saveImage(fileName string, arg string) error {
 	return nil
 }
 
-func (tm *DAG) ExportDOT() string {
+// Refactored ExportDOT for a modern, enterprise look.
+func (tm *DAG) ExportDOT(direction ...Direction) string {
+	rankDir := TB
+	if len(direction) > 0 && direction[0] != "" {
+		rankDir = direction[0]
+	}
 	var sb strings.Builder
+	// Graph properties with a clean background and smooth layout
 	sb.WriteString(fmt.Sprintf(`digraph "%s" {`, tm.name))
 	sb.WriteString("\n")
-	sb.WriteString(fmt.Sprintf(`  label="%s";`, tm.name))
+	sb.WriteString(`  graph [layout=dot, splines=polyline, overlap=false, bgcolor="#FAFAFA", fontname="Helvetica", fontsize=12];`)
 	sb.WriteString("\n")
-	sb.WriteString(`  labelloc="t";`)
+	// Nodes get a sophisticated gradient fill, drop shadow effect simulated via penwidth and color, and rounded borders.
+	sb.WriteString(`  node [shape=box, style="filled,rounded", gradientangle=135, fontname="Helvetica", fontsize=10, penwidth=2, color="#2C3E50", fillcolor="#FFFFFF"];`)
 	sb.WriteString("\n")
-	sb.WriteString(`  fontsize=20;`)
+	// Edges with smooth curves and subtle colors.
+	sb.WriteString(`  edge [fontname="Helvetica", fontsize=9, color="#7F8C8D", arrowsize=0.8, style=solid];`)
 	sb.WriteString("\n")
-	sb.WriteString(`  node [shape=box, style="rounded,filled", fillcolor="lightgray", fontname="Arial", margin="0.2,0.1"];`)
+	sb.WriteString(fmt.Sprintf(`  rankdir=%s;`, rankDir))
 	sb.WriteString("\n")
-	sb.WriteString(`  edge [fontname="Arial", fontsize=12, arrowsize=0.8];`)
-	sb.WriteString("\n")
-	sb.WriteString(`  size="10,10";`)
-	sb.WriteString("\n")
-	sb.WriteString(`  ratio="fill";`)
-	sb.WriteString("\n")
+	// Render nodes with advanced styling
 	sortedNodes := tm.TopologicalSort()
 	for _, nodeKey := range sortedNodes {
-		node := tm.nodes[nodeKey]
-		nodeColor := "lightblue"
-		sb.WriteString(fmt.Sprintf(`  "%s" [label=" %s", fillcolor="%s", id="node_%s"];`, node.Key, node.Name, nodeColor, node.Key))
-		sb.WriteString("\n")
+		node, _ := tm.nodes.Get(nodeKey)
+		renderNode(&sb, node, "  ")
 	}
+	// Render normal edges with enhanced styling.
 	for _, nodeKey := range sortedNodes {
-		node := tm.nodes[nodeKey]
-		for _, edge := range node.Edges {
-			var edgeStyle string
-			switch edge.Type {
-			case Iterator:
-				edgeStyle = "dashed"
-			default:
-				edgeStyle = "solid"
-			}
-			edgeColor := "black"
-			for _, to := range edge.To {
-				sb.WriteString(fmt.Sprintf(`  "%s" -> "%s" [label=" %s", color="%s", style=%s, fontsize=10, arrowsize=0.6];`, node.Key, to.Key, edge.Label, edgeColor, edgeStyle))
-				sb.WriteString("\n")
+		node, _ := tm.nodes.Get(nodeKey)
+		renderEdges(&sb, node, "  ")
+	}
+	// Render subgraphs for sub-DAGs with a distinct dashed border.
+	for _, nodeKey := range sortedNodes {
+		node, _ := tm.nodes.Get(nodeKey)
+		if node.processor != nil {
+			if subDAG, ok := isDAGNode(node); ok && subDAG.consumerTopic != "" {
+				sb.WriteString(fmt.Sprintf("  subgraph cluster_%s {\n", subDAG.name))
+				sb.WriteString(fmt.Sprintf("    label = \"Sub-DAG: %s\";\n", subDAG.name))
+				sb.WriteString("    style = dashed;\n")
+				sb.WriteString("    color = \"#A6ACAF\";\n")
+				for _, subNodeKey := range subDAG.TopologicalSort() {
+					subNode, _ := subDAG.nodes.Get(subNodeKey)
+					renderNode(&sb, subNode, "    ", subDAG.name+"_")
+				}
+				for _, subNodeKey := range subDAG.TopologicalSort() {
+					subNode, _ := subDAG.nodes.Get(subNodeKey)
+					renderEdges(&sb, subNode, "    ", subDAG.name+"_")
+				}
+				sb.WriteString("  }\n")
+				if startNodeKey := subDAG.TopologicalSort()[0]; startNodeKey != "" {
+					sb.WriteString(fmt.Sprintf("  \"%s\" -> \"%s%s\" [label=\"Subconnect\", color=\"#16A085\", style=bold, fontsize=10];\n", nodeKey, subDAG.name+"_", startNodeKey))
+				}
 			}
 		}
 	}
+	// Render conditional edges with dotted style.
 	for fromNodeKey, conditions := range tm.conditions {
 		for when, then := range conditions {
-			if toNode, ok := tm.nodes[string(then)]; ok {
-				sb.WriteString(fmt.Sprintf(`  "%s" -> "%s" [label=" %s", color="purple", style=dotted, fontsize=10, arrowsize=0.6];`, fromNodeKey, toNode.Key, when))
-				sb.WriteString("\n")
+			if toNode, ok := tm.nodes.Get(then); ok {
+				sb.WriteString(fmt.Sprintf("  \"%s\" -> \"%s\" [label=\"%s\", color=\"#8E44AD\", style=dotted, fontsize=9, arrowsize=0.6];\n", fromNodeKey, toNode.ID, when))
 			}
 		}
 	}
-	for _, nodeKey := range sortedNodes {
-		node := tm.nodes[nodeKey]
-		if node.processor != nil {
-			subDAG, _ := isDAGNode(node)
-			if subDAG != nil {
-				sb.WriteString(fmt.Sprintf(`  subgraph "cluster_%s" {`, subDAG.name))
-				sb.WriteString("\n")
-				sb.WriteString(fmt.Sprintf(`    label=" %s";`, subDAG.name))
-				sb.WriteString("\n")
-				sb.WriteString(`    style=dashed;`)
-				sb.WriteString("\n")
-				sb.WriteString(`    bgcolor="lightgray";`)
-				sb.WriteString("\n")
-				sb.WriteString(`    node [shape=rectangle, style="filled", fillcolor="lightblue", fontname="Arial", margin="0.2,0.1"];`)
-				sb.WriteString("\n")
-				for subNodeKey, subNode := range subDAG.nodes {
-					sb.WriteString(fmt.Sprintf(`    "%s" [label=" %s"];`, subNodeKey, subNode.Name))
-					sb.WriteString("\n")
-				}
-				for subNodeKey, subNode := range subDAG.nodes {
-					for _, edge := range subNode.Edges {
-						for _, to := range edge.To {
-							sb.WriteString(fmt.Sprintf(`    "%s" -> "%s" [label=" %s", color="black", style=solid, arrowsize=0.6];`, subNodeKey, to.Key, edge.Label))
-							sb.WriteString("\n")
-						}
-					}
-				}
-				sb.WriteString(`  }`)
-				sb.WriteString("\n")
-				sb.WriteString(fmt.Sprintf(`  "%s" -> "%s" [label=" %s", color="black", style=solid, arrowsize=0.6];`, node.Key, subDAG.startNode, subDAG.name))
-				sb.WriteString("\n")
-			}
-		}
-	}
-	sb.WriteString(`}`)
-	sb.WriteString("\n")
+	sb.WriteString("}\n")
 	return sb.String()
+}
+
+// Enhanced renderNode with a modern professional style.
+func renderNode(sb *strings.Builder, node *Node, indent string, prefix ...string) {
+	prefixedID := fmt.Sprintf("%s%s", strings.Join(prefix, ""), node.ID)
+	labelSuffix := ""
+	nodeFill := "#F0F3F4" // Default light tone
+	switch node.NodeType {
+	case Function:
+		nodeFill = "#D4EFDF" // soft green
+		labelSuffix = " ƒ(x)"
+	case Page:
+		nodeFill = "#FADBD8" // soft red
+		labelSuffix = " 📄"
+	default:
+		nodeFill = "#F0F3F4"
+	}
+	// Apply gradient simulation and enhanced border styling.
+	sb.WriteString(fmt.Sprintf("%s\"%s\" [label=\"%s%s\", fontcolor=\"#2C3E50\", fillcolor=\"%s\", style=\"filled,rounded\", penwidth=2, gradientangle=135];\n",
+		indent, prefixedID, node.Label, labelSuffix, nodeFill))
+}
+
+// Refined renderEdges with modern aesthetics.
+func renderEdges(sb *strings.Builder, node *Node, indent string, prefix ...string) {
+	prefixedID := fmt.Sprintf("%s%s", strings.Join(prefix, ""), node.ID)
+	for _, edge := range node.Edges {
+		edgeStyle := "solid"
+		edgeColor := "#7F8C8D"
+		labelSuffix := ""
+		switch edge.Type {
+		case Iterator:
+			edgeStyle = "dashed"
+			edgeColor = "#5DADE2"
+			labelSuffix = " [Iter]"
+		case Simple:
+			edgeStyle = "solid"
+			edgeColor = "#7F8C8D"
+		}
+		toPrefixedID := fmt.Sprintf("%s%s", strings.Join(prefix, ""), edge.To.ID)
+		sb.WriteString(fmt.Sprintf("%s\"%s\" -> \"%s\" [label=\"%s%s\", color=\"%s\", style=\"%s\", penwidth=1];\n",
+			indent, prefixedID, toPrefixedID, edge.Label, labelSuffix, edgeColor, edgeStyle))
+	}
 }
 
 func (tm *DAG) TopologicalSort() (stack []string) {
 	visited := make(map[string]bool)
-	for _, node := range tm.nodes {
-		if !visited[node.Key] {
-			tm.topologicalSortUtil(node.Key, visited, &stack)
+	tm.nodes.ForEach(func(_ string, node *Node) bool {
+		if !visited[node.ID] {
+			tm.topologicalSortUtil(node.ID, visited, &stack)
 		}
-	}
+		return true
+	})
 	for i, j := 0, len(stack)-1; i < j; i, j = i+1, j-1 {
 		stack[i], stack[j] = stack[j], stack[i]
 	}
@@ -246,13 +264,23 @@ func (tm *DAG) TopologicalSort() (stack []string) {
 
 func (tm *DAG) topologicalSortUtil(v string, visited map[string]bool, stack *[]string) {
 	visited[v] = true
-	node := tm.nodes[v]
+	node, ok := tm.nodes.Get(v)
+	if !ok {
+		fmt.Println("Not found", v)
+	}
 	for _, edge := range node.Edges {
-		for _, to := range edge.To {
-			if !visited[to.Key] {
-				tm.topologicalSortUtil(to.Key, visited, stack)
-			}
+		if !visited[edge.To.ID] {
+			tm.topologicalSortUtil(edge.To.ID, visited, stack)
 		}
 	}
 	*stack = append(*stack, v)
+}
+
+func isDAGNode(node *Node) (*DAG, bool) {
+	switch node := node.processor.(type) {
+	case *DAG:
+		return node, true
+	default:
+		return nil, false
+	}
 }

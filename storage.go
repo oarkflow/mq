@@ -20,18 +20,29 @@ type MemoryTaskStorage struct {
 	tasks      PriorityQueue
 	taskLock   sync.Mutex
 	expiryTime time.Duration
+	dedup      map[string]*QueueTask
 }
 
 func NewMemoryTaskStorage(expiryTime time.Duration) *MemoryTaskStorage {
 	return &MemoryTaskStorage{
 		tasks:      make(PriorityQueue, 0),
 		expiryTime: expiryTime,
+		dedup:      make(map[string]*QueueTask),
 	}
 }
 
 func (m *MemoryTaskStorage) SaveTask(task *QueueTask) error {
 	m.taskLock.Lock()
 	defer m.taskLock.Unlock()
+	if key := task.payload.DedupKey; key != "" {
+		if existing, ok := m.dedup[key]; ok {
+			if existing.payload.CreatedAt.Add(m.expiryTime).After(time.Now()) {
+				return fmt.Errorf("duplicate task with dedup key: %s", key)
+			}
+			delete(m.dedup, key)
+		}
+		m.dedup[key] = task
+	}
 	heap.Push(&m.tasks, task)
 	return nil
 }
@@ -52,6 +63,9 @@ func (m *MemoryTaskStorage) DeleteTask(taskID string) error {
 	defer m.taskLock.Unlock()
 	for i, task := range m.tasks {
 		if task.payload.ID == taskID {
+			if key := task.payload.DedupKey; key != "" {
+				delete(m.dedup, key)
+			}
 			heap.Remove(&m.tasks, i)
 			return nil
 		}
@@ -81,6 +95,9 @@ func (m *MemoryTaskStorage) FetchNextTask() (*QueueTask, error) {
 		m.DeleteTask(task.payload.ID)
 		return m.FetchNextTask()
 	}
+	if key := task.payload.DedupKey; key != "" {
+		delete(m.dedup, key)
+	}
 	return task, nil
 }
 
@@ -91,6 +108,9 @@ func (m *MemoryTaskStorage) CleanupExpiredTasks() error {
 	for i := 0; i < len(m.tasks); i++ {
 		task := m.tasks[i]
 		if task.payload.CreatedAt.Add(m.expiryTime).Before(time.Now()) {
+			if key := task.payload.DedupKey; key != "" {
+				delete(m.dedup, key)
+			}
 			heap.Remove(&m.tasks, i)
 			i-- // Adjust index after removal
 		}
