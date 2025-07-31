@@ -10,7 +10,7 @@ import (
 	"sync"
 
 	"github.com/oarkflow/errors"
-	"github.com/oarkflow/xid"
+	"github.com/oarkflow/xid/wuid"
 
 	"github.com/oarkflow/mq/consts"
 	"github.com/oarkflow/mq/storage"
@@ -90,7 +90,7 @@ func GetPublisherID(ctx context.Context) (string, bool) {
 }
 
 func NewID() string {
-	return xid.New().String()
+	return wuid.New().String()
 }
 
 func createTLSConnection(addr, certPath, keyPath string, caPath ...string) (net.Conn, error) {
