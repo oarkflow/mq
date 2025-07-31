@@ -152,7 +152,10 @@ func (c *Consumer) Metrics() Metrics {
 
 func (c *Consumer) subscribe(ctx context.Context, queue string) error {
 	headers := HeadersWithConsumerID(ctx, c.id)
-	msg := codec.NewMessage(consts.SUBSCRIBE, utils.ToByte("{}"), queue, headers)
+	msg, err := codec.NewMessage(consts.SUBSCRIBE, utils.ToByte("{}"), queue, headers)
+	if err != nil {
+		return fmt.Errorf("error creating subscribe message: %v", err)
+	}
 	if err := c.send(ctx, c.conn, msg); err != nil {
 		return fmt.Errorf("error while trying to subscribe: %v", err)
 	}
@@ -207,7 +210,14 @@ func (c *Consumer) OnMessage(ctx context.Context, msg *codec.Message, conn net.C
 func (c *Consumer) sendMessageAck(ctx context.Context, msg *codec.Message, conn net.Conn) {
 	headers := HeadersWithConsumerIDAndQueue(ctx, c.id, msg.Queue)
 	taskID, _ := jsonparser.GetString(msg.Payload, "id")
-	reply := codec.NewMessage(consts.MESSAGE_ACK, utils.ToByte(fmt.Sprintf(`{"id":"%s"}`, taskID)), msg.Queue, headers)
+	reply, err := codec.NewMessage(consts.MESSAGE_ACK, utils.ToByte(fmt.Sprintf(`{"id":"%s"}`, taskID)), msg.Queue, headers)
+	if err != nil {
+		c.logger.Error("Failed to create MESSAGE_ACK",
+			logger.Field{Key: "queue", Value: msg.Queue},
+			logger.Field{Key: "task_id", Value: taskID},
+			logger.Field{Key: "error", Value: err.Error()})
+		return
+	}
 
 	// Send with timeout to avoid blocking
 	sendCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -375,7 +385,14 @@ func (c *Consumer) OnResponse(ctx context.Context, result Result) error {
 			}
 		}
 		bt, _ := json.Marshal(result)
-		reply := codec.NewMessage(consts.MESSAGE_RESPONSE, bt, result.Topic, headers)
+		reply, err := codec.NewMessage(consts.MESSAGE_RESPONSE, bt, result.Topic, headers)
+		if err != nil {
+			c.logger.Error("Failed to create MESSAGE_RESPONSE",
+				logger.Field{Key: "topic", Value: result.Topic},
+				logger.Field{Key: "task_id", Value: result.TaskID},
+				logger.Field{Key: "error", Value: err.Error()})
+			return
+		}
 
 		sendCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -395,7 +412,14 @@ func (c *Consumer) sendDenyMessage(ctx context.Context, taskID, queue string, er
 	// Send deny message asynchronously to avoid blocking
 	go func() {
 		headers := HeadersWithConsumerID(ctx, c.id)
-		reply := codec.NewMessage(consts.MESSAGE_DENY, utils.ToByte(fmt.Sprintf(`{"id":"%s", "error":"%s"}`, taskID, err.Error())), queue, headers)
+		reply, err := codec.NewMessage(consts.MESSAGE_DENY, utils.ToByte(fmt.Sprintf(`{"id":"%s", "error":"%s"}`, taskID, err.Error())), queue, headers)
+		if err != nil {
+			c.logger.Error("Failed to create MESSAGE_DENY",
+				logger.Field{Key: "queue", Value: queue},
+				logger.Field{Key: "task_id", Value: taskID},
+				logger.Field{Key: "error", Value: err.Error()})
+			return
+		}
 
 		sendCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -820,7 +844,10 @@ func (c *Consumer) operate(ctx context.Context, cmd consts.CMD, poolOperation fu
 
 func (c *Consumer) sendOpsMessage(ctx context.Context, cmd consts.CMD) error {
 	headers := HeadersWithConsumerID(ctx, c.id)
-	msg := codec.NewMessage(cmd, nil, c.queue, headers)
+	msg, err := codec.NewMessage(cmd, nil, c.queue, headers)
+	if err != nil {
+		return fmt.Errorf("error creating operation message: %v", err)
+	}
 	return c.send(ctx, c.conn, msg)
 }
 

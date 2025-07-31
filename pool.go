@@ -478,6 +478,7 @@ func (wp *Pool) processNextBatch() {
 	if len(tasks) > 0 {
 		for _, task := range tasks {
 			if task != nil && !wp.gracefulShutdown {
+				wp.taskCompletionNotifier.Add(1)
 				wp.handleTask(task)
 			}
 		}
@@ -487,6 +488,8 @@ func (wp *Pool) processNextBatch() {
 func (wp *Pool) handleTask(task *QueueTask) {
 	if task == nil || task.payload == nil {
 		wp.logger.Warn().Msg("Received nil task or payload")
+		// Only call Done if Add was called (which is now only for actual tasks)
+		wp.taskCompletionNotifier.Done()
 		return
 	}
 
@@ -802,9 +805,6 @@ func (wp *Pool) EnqueueTask(ctx context.Context, payload *Task, priority int) er
 	wp.taskAvailableCond.L.Lock()
 	wp.taskAvailableCond.Signal()
 	wp.taskAvailableCond.L.Unlock()
-
-	// Track pending task
-	wp.taskCompletionNotifier.Add(1)
 
 	// Update metrics
 	atomic.AddInt64(&wp.metrics.TotalScheduled, 1)

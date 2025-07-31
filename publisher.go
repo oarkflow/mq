@@ -7,11 +7,11 @@ import (
 	"net"
 	"sync"
 	"time"
-	
+
 	"github.com/oarkflow/json"
-	
+
 	"github.com/oarkflow/json/jsonparser"
-	
+
 	"github.com/oarkflow/mq/codec"
 	"github.com/oarkflow/mq/consts"
 	"github.com/oarkflow/mq/utils"
@@ -111,11 +111,14 @@ func (p *Publisher) send(ctx context.Context, queue string, task Task, conn net.
 	if err != nil {
 		return err
 	}
-	msg := codec.NewMessage(command, payload, queue, headers)
+	msg, err := codec.NewMessage(command, payload, queue, headers)
+	if err != nil {
+		return err
+	}
 	if err := codec.SendMessage(ctx, conn, msg); err != nil {
 		return err
 	}
-	
+
 	return p.waitForAck(ctx, conn)
 }
 

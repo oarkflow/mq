@@ -688,7 +688,10 @@ func (b *Broker) Publish(ctx context.Context, task *Task, queue string) error {
 	if err != nil {
 		return err
 	}
-	msg := codec.NewMessage(consts.PUBLISH, payload, queue, headers.AsMap())
+	msg, err := codec.NewMessage(consts.PUBLISH, payload, queue, headers.AsMap())
+	if err != nil {
+		return fmt.Errorf("failed to create PUBLISH message: %w", err)
+	}
 	b.broadcastToConsumers(msg)
 	return nil
 }
@@ -698,7 +701,11 @@ func (b *Broker) PublishHandler(ctx context.Context, conn net.Conn, msg *codec.M
 	taskID, _ := jsonparser.GetString(msg.Payload, "id")
 	log.Printf("BROKER - PUBLISH ~> received from %s on %s for Task %s", pub.id, msg.Queue, taskID)
 
-	ack := codec.NewMessage(consts.PUBLISH_ACK, utils.ToByte(fmt.Sprintf(`{"id":"%s"}`, taskID)), msg.Queue, msg.Headers)
+	ack, err := codec.NewMessage(consts.PUBLISH_ACK, utils.ToByte(fmt.Sprintf(`{"id":"%s"}`, taskID)), msg.Queue, msg.Headers)
+	if err != nil {
+		log.Printf("Error creating PUBLISH_ACK message: %v\n", err)
+		return
+	}
 	if err := b.send(ctx, conn, ack); err != nil {
 		log.Printf("Error sending PUBLISH_ACK: %v\n", err)
 	}
@@ -713,7 +720,11 @@ func (b *Broker) PublishHandler(ctx context.Context, conn net.Conn, msg *codec.M
 
 func (b *Broker) SubscribeHandler(ctx context.Context, conn net.Conn, msg *codec.Message) {
 	consumerID := b.AddConsumer(ctx, msg.Queue, conn)
-	ack := codec.NewMessage(consts.SUBSCRIBE_ACK, nil, msg.Queue, msg.Headers)
+	ack, err := codec.NewMessage(consts.SUBSCRIBE_ACK, nil, msg.Queue, msg.Headers)
+	if err != nil {
+		log.Printf("Error creating SUBSCRIBE_ACK message: %v\n", err)
+		return
+	}
 	if err := b.send(ctx, conn, ack); err != nil {
 		log.Printf("Error sending SUBSCRIBE_ACK: %v\n", err)
 	}
@@ -894,8 +905,12 @@ func (b *Broker) handleConsumer(
 	fn := func(queue *Queue) {
 		con, ok := queue.consumers.Get(consumerID)
 		if ok {
-			ack := codec.NewMessage(cmd, payload, queue.name, map[string]string{consts.ConsumerKey: consumerID})
-			err := b.send(ctx, con.conn, ack)
+			ack, err := codec.NewMessage(cmd, payload, queue.name, map[string]string{consts.ConsumerKey: consumerID})
+			if err != nil {
+				log.Printf("Error creating message for consumer %s: %v", consumerID, err)
+				return
+			}
+			err = b.send(ctx, con.conn, ack)
 			if err == nil {
 				con.state = state
 			}
@@ -921,7 +936,11 @@ func (b *Broker) UpdateConsumer(ctx context.Context, consumerID string, config D
 	fn := func(queue *Queue) error {
 		con, ok := queue.consumers.Get(consumerID)
 		if ok {
-			ack := codec.NewMessage(consts.CONSUMER_UPDATE, payload, queue.name, map[string]string{consts.ConsumerKey: consumerID})
+			ack, err := codec.NewMessage(consts.CONSUMER_UPDATE, payload, queue.name, map[string]string{consts.ConsumerKey: consumerID})
+			if err != nil {
+				log.Printf("Error creating message for consumer %s: %v", consumerID, err)
+				return err
+			}
 			return b.send(ctx, con.conn, ack)
 		}
 		return nil
