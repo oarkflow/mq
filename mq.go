@@ -339,9 +339,18 @@ type QueuedTask struct {
 }
 
 type consumer struct {
-	conn  net.Conn
-	id    string
-	state consts.ConsumerState
+	conn    net.Conn
+	id      string
+	state   consts.ConsumerState
+	queue   string
+	pool    *Pool
+	metrics *ConsumerMetrics
+}
+
+type ConsumerMetrics struct {
+	ProcessedTasks int64
+	ErrorCount     int64
+	LastActivity   time.Time
 }
 
 type publisher struct {
@@ -679,7 +688,10 @@ func (b *Broker) Publish(ctx context.Context, task *Task, queue string) error {
 	if err != nil {
 		return err
 	}
-	msg := codec.NewMessage(consts.PUBLISH, payload, queue, headers.AsMap())
+	msg, err := codec.NewMessage(consts.PUBLISH, payload, queue, headers.AsMap())
+	if err != nil {
+		return fmt.Errorf("failed to create PUBLISH message: %w", err)
+	}
 	b.broadcastToConsumers(msg)
 	return nil
 }
@@ -689,7 +701,11 @@ func (b *Broker) PublishHandler(ctx context.Context, conn net.Conn, msg *codec.M
 	taskID, _ := jsonparser.GetString(msg.Payload, "id")
 	log.Printf("BROKER - PUBLISH ~> received from %s on %s for Task %s", pub.id, msg.Queue, taskID)
 
-	ack := codec.NewMessage(consts.PUBLISH_ACK, utils.ToByte(fmt.Sprintf(`{"id":"%s"}`, taskID)), msg.Queue, msg.Headers)
+	ack, err := codec.NewMessage(consts.PUBLISH_ACK, utils.ToByte(fmt.Sprintf(`{"id":"%s"}`, taskID)), msg.Queue, msg.Headers)
+	if err != nil {
+		log.Printf("Error creating PUBLISH_ACK message: %v\n", err)
+		return
+	}
 	if err := b.send(ctx, conn, ack); err != nil {
 		log.Printf("Error sending PUBLISH_ACK: %v\n", err)
 	}
@@ -704,7 +720,11 @@ func (b *Broker) PublishHandler(ctx context.Context, conn net.Conn, msg *codec.M
 
 func (b *Broker) SubscribeHandler(ctx context.Context, conn net.Conn, msg *codec.Message) {
 	consumerID := b.AddConsumer(ctx, msg.Queue, conn)
-	ack := codec.NewMessage(consts.SUBSCRIBE_ACK, nil, msg.Queue, msg.Headers)
+	ack, err := codec.NewMessage(consts.SUBSCRIBE_ACK, nil, msg.Queue, msg.Headers)
+	if err != nil {
+		log.Printf("Error creating SUBSCRIBE_ACK message: %v\n", err)
+		return
+	}
 	if err := b.send(ctx, conn, ack); err != nil {
 		log.Printf("Error sending SUBSCRIBE_ACK: %v\n", err)
 	}
@@ -818,11 +838,39 @@ func (b *Broker) AddConsumer(ctx context.Context, queueName string, conn net.Con
 	if !ok {
 		q = b.NewQueue(queueName)
 	}
-	con := &consumer{id: consumerID, conn: conn}
+
+	// Create consumer with proper initialization
+	con := &consumer{
+		id:    consumerID,
+		conn:  conn,
+		state: consts.ConsumerStateActive,
+		queue: queueName,
+		pool:  nil, // Pool will be set when consumer connects
+		metrics: &ConsumerMetrics{
+			ProcessedTasks: 0,
+			ErrorCount:     0,
+			LastActivity:   time.Now(),
+		},
+	}
+
 	b.consumers.Set(consumerID, con)
 	q.consumers.Set(consumerID, con)
 	log.Printf("BROKER - SUBSCRIBE ~> %s on %s", consumerID, queueName)
 	return consumerID
+}
+
+func (b *Broker) UpdateConsumerPool(consumerID string, pool *Pool) {
+	if con, exists := b.consumers.Get(consumerID); exists {
+		con.pool = pool
+	}
+}
+
+func (b *Broker) UpdateConsumerMetrics(consumerID string, processedTasks, errorCount int64) {
+	if con, exists := b.consumers.Get(consumerID); exists && con.metrics != nil {
+		con.metrics.ProcessedTasks = processedTasks
+		con.metrics.ErrorCount = errorCount
+		con.metrics.LastActivity = time.Now()
+	}
 }
 
 func (b *Broker) RemoveConsumer(consumerID string, queues ...string) {
@@ -857,8 +905,12 @@ func (b *Broker) handleConsumer(
 	fn := func(queue *Queue) {
 		con, ok := queue.consumers.Get(consumerID)
 		if ok {
-			ack := codec.NewMessage(cmd, payload, queue.name, map[string]string{consts.ConsumerKey: consumerID})
-			err := b.send(ctx, con.conn, ack)
+			ack, err := codec.NewMessage(cmd, payload, queue.name, map[string]string{consts.ConsumerKey: consumerID})
+			if err != nil {
+				log.Printf("Error creating message for consumer %s: %v", consumerID, err)
+				return
+			}
+			err = b.send(ctx, con.conn, ack)
 			if err == nil {
 				con.state = state
 			}
@@ -884,7 +936,11 @@ func (b *Broker) UpdateConsumer(ctx context.Context, consumerID string, config D
 	fn := func(queue *Queue) error {
 		con, ok := queue.consumers.Get(consumerID)
 		if ok {
-			ack := codec.NewMessage(consts.CONSUMER_UPDATE, payload, queue.name, map[string]string{consts.ConsumerKey: consumerID})
+			ack, err := codec.NewMessage(consts.CONSUMER_UPDATE, payload, queue.name, map[string]string{consts.ConsumerKey: consumerID})
+			if err != nil {
+				log.Printf("Error creating message for consumer %s: %v", consumerID, err)
+				return err
+			}
 			return b.send(ctx, con.conn, ack)
 		}
 		return nil
@@ -1708,4 +1764,95 @@ func (cb *EnhancedCircuitBreaker) Call(fn func() error) error {
 // InMemoryMessageStore implements MessageStore in memory
 type InMemoryMessageStore struct {
 	messages storage.IMap[string, *StoredMessage]
+}
+
+func (b *Broker) GetConsumers() []*AdminConsumerMetrics {
+	consumers := []*AdminConsumerMetrics{}
+	b.consumers.ForEach(func(id string, con *consumer) bool {
+		// Get status based on consumer state
+		status := "active"
+		switch con.state {
+		case consts.ConsumerStateActive:
+			status = "active"
+		case consts.ConsumerStatePaused:
+			status = "paused"
+		case consts.ConsumerStateStopped:
+			status = "stopped"
+		}
+
+		// Handle cases where pool might be nil
+		maxConcurrentTasks := 0
+		taskTimeout := 0
+		maxRetries := 0
+
+		if con.pool != nil {
+			config := con.pool.GetCurrentConfig()
+			maxConcurrentTasks = config.NumberOfWorkers
+			taskTimeout = int(config.Timeout.Seconds())
+			maxRetries = config.MaxRetries
+		}
+
+		// Ensure metrics is not nil
+		processedTasks := int64(0)
+		errorCount := int64(0)
+		lastActivity := time.Now()
+
+		if con.metrics != nil {
+			processedTasks = con.metrics.ProcessedTasks
+			errorCount = con.metrics.ErrorCount
+			lastActivity = con.metrics.LastActivity
+		}
+
+		consumers = append(consumers, &AdminConsumerMetrics{
+			ID:                 id,
+			Queue:              con.queue,
+			Status:             status,
+			ProcessedTasks:     processedTasks,
+			ErrorCount:         errorCount,
+			LastActivity:       lastActivity,
+			MaxConcurrentTasks: maxConcurrentTasks,
+			TaskTimeout:        taskTimeout,
+			MaxRetries:         maxRetries,
+		})
+		return true
+	})
+	return consumers
+}
+
+func (b *Broker) GetPools() []*AdminPoolMetrics {
+	pools := []*AdminPoolMetrics{}
+	b.queues.ForEach(func(name string, queue *Queue) bool {
+		// Initialize default values
+		workers := 0
+		queueSize := 0
+		activeTasks := 0
+		maxMemoryLoad := int64(0)
+		lastActivity := time.Now()
+
+		// Get metrics from queue if available
+		if queue.metrics != nil {
+			workers = queue.metrics.WorkerCount
+			queueSize = queue.metrics.QueueDepth
+			activeTasks = queue.metrics.ActiveTasks
+			maxMemoryLoad = queue.metrics.MaxMemoryLoad
+			lastActivity = queue.metrics.LastActivity
+		}
+
+		// If metrics are empty, try to get some basic info from the queue
+		if queueSize == 0 && queue.tasks != nil {
+			queueSize = len(queue.tasks)
+		}
+
+		pools = append(pools, &AdminPoolMetrics{
+			ID:            name,
+			Workers:       workers,
+			QueueSize:     queueSize,
+			ActiveTasks:   activeTasks,
+			Status:        "running", // Default status
+			MaxMemoryLoad: maxMemoryLoad,
+			LastActivity:  lastActivity,
+		})
+		return true
+	})
+	return pools
 }

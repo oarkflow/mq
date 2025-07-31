@@ -305,21 +305,40 @@ func (tm *TaskManager) processNode(exec *task) {
 	tm.handleNext(exec.ctx, node, state, result)
 }
 
+// logNodeExecution logs node execution details
 func (tm *TaskManager) logNodeExecution(exec *task, pureNodeID string, result mq.Result, latency time.Duration) {
+	success := result.Error == nil
+
+	// Log to DAG activity logger if available
+	if tm.dag.activityLogger != nil {
+		ctx := context.WithValue(exec.ctx, "task_id", exec.taskID)
+		ctx = context.WithValue(ctx, "node_id", pureNodeID)
+		ctx = context.WithValue(ctx, "duration", latency)
+		if result.Error != nil {
+			ctx = context.WithValue(ctx, "error", result.Error)
+		}
+
+		tm.dag.activityLogger.LogNodeExecution(ctx, exec.taskID, pureNodeID, result, latency)
+	}
+
+	// Update monitoring metrics
+	if tm.dag.monitor != nil {
+		tm.dag.monitor.metrics.RecordNodeExecution(pureNodeID, latency, success)
+	}
+
+	// Log to standard logger
 	fields := []logger.Field{
-		{Key: "nodeID", Value: exec.nodeID},
-		{Key: "pureNodeID", Value: pureNodeID},
+		{Key: "nodeID", Value: pureNodeID},
 		{Key: "taskID", Value: exec.taskID},
-		{Key: "latency", Value: latency.String()},
+		{Key: "duration", Value: latency.String()},
+		{Key: "success", Value: success},
 	}
 
 	if result.Error != nil {
 		fields = append(fields, logger.Field{Key: "error", Value: result.Error.Error()})
-		fields = append(fields, logger.Field{Key: "status", Value: mq.Failed})
 		tm.dag.Logger().Error("Node execution failed", fields...)
 	} else {
-		fields = append(fields, logger.Field{Key: "status", Value: mq.Completed})
-		tm.dag.Logger().Info("Node executed successfully", fields...)
+		tm.dag.Logger().Info("Node execution completed", fields...)
 	}
 }
 
@@ -583,7 +602,16 @@ func (tm *TaskManager) Resume() {
 	}
 }
 
+// Stop gracefully stops the task manager
 func (tm *TaskManager) Stop() {
 	close(tm.stopCh)
 	tm.wg.Wait()
+
+	// Clean up resources
+	tm.taskStates.Clear()
+	tm.parentNodes.Clear()
+	tm.childNodes.Clear()
+	tm.deferredTasks.Clear()
+	tm.currentNodePayload.Clear()
+	tm.currentNodeResult.Clear()
 }

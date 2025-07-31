@@ -37,20 +37,23 @@ type Processor interface {
 }
 
 type Consumer struct {
-	conn         net.Conn
-	handler      Handler
-	pool         *Pool
-	opts         *Options
-	id           string
-	queue        string
-	pIDs         storage.IMap[string, bool]
-	connMutex    sync.RWMutex
-	isConnected  int32 // atomic flag
-	isShutdown   int32 // atomic flag
-	shutdown     chan struct{}
-	reconnectCh  chan struct{}
-	healthTicker *time.Ticker
-	logger       logger.Logger
+	conn                 net.Conn
+	handler              Handler
+	pool                 *Pool
+	opts                 *Options
+	id                   string
+	queue                string
+	pIDs                 storage.IMap[string, bool]
+	connMutex            sync.RWMutex
+	isConnected          int32 // atomic flag
+	isShutdown           int32 // atomic flag
+	shutdown             chan struct{}
+	reconnectCh          chan struct{}
+	healthTicker         *time.Ticker
+	logger               logger.Logger
+	reconnectAttempts    int32      // track consecutive reconnection attempts
+	lastReconnectAttempt time.Time  // track when last reconnect was attempted
+	reconnectMutex       sync.Mutex // protect reconnection attempt tracking
 }
 
 func NewConsumer(id string, queue string, handler Handler, opts ...Option) *Consumer {
@@ -149,7 +152,10 @@ func (c *Consumer) Metrics() Metrics {
 
 func (c *Consumer) subscribe(ctx context.Context, queue string) error {
 	headers := HeadersWithConsumerID(ctx, c.id)
-	msg := codec.NewMessage(consts.SUBSCRIBE, utils.ToByte("{}"), queue, headers)
+	msg, err := codec.NewMessage(consts.SUBSCRIBE, utils.ToByte("{}"), queue, headers)
+	if err != nil {
+		return fmt.Errorf("error creating subscribe message: %v", err)
+	}
 	if err := c.send(ctx, c.conn, msg); err != nil {
 		return fmt.Errorf("error while trying to subscribe: %v", err)
 	}
@@ -204,7 +210,14 @@ func (c *Consumer) OnMessage(ctx context.Context, msg *codec.Message, conn net.C
 func (c *Consumer) sendMessageAck(ctx context.Context, msg *codec.Message, conn net.Conn) {
 	headers := HeadersWithConsumerIDAndQueue(ctx, c.id, msg.Queue)
 	taskID, _ := jsonparser.GetString(msg.Payload, "id")
-	reply := codec.NewMessage(consts.MESSAGE_ACK, utils.ToByte(fmt.Sprintf(`{"id":"%s"}`, taskID)), msg.Queue, headers)
+	reply, err := codec.NewMessage(consts.MESSAGE_ACK, utils.ToByte(fmt.Sprintf(`{"id":"%s"}`, taskID)), msg.Queue, headers)
+	if err != nil {
+		c.logger.Error("Failed to create MESSAGE_ACK",
+			logger.Field{Key: "queue", Value: msg.Queue},
+			logger.Field{Key: "task_id", Value: taskID},
+			logger.Field{Key: "error", Value: err.Error()})
+		return
+	}
 
 	// Send with timeout to avoid blocking
 	sendCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -372,7 +385,14 @@ func (c *Consumer) OnResponse(ctx context.Context, result Result) error {
 			}
 		}
 		bt, _ := json.Marshal(result)
-		reply := codec.NewMessage(consts.MESSAGE_RESPONSE, bt, result.Topic, headers)
+		reply, err := codec.NewMessage(consts.MESSAGE_RESPONSE, bt, result.Topic, headers)
+		if err != nil {
+			c.logger.Error("Failed to create MESSAGE_RESPONSE",
+				logger.Field{Key: "topic", Value: result.Topic},
+				logger.Field{Key: "task_id", Value: result.TaskID},
+				logger.Field{Key: "error", Value: err.Error()})
+			return
+		}
 
 		sendCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -392,7 +412,14 @@ func (c *Consumer) sendDenyMessage(ctx context.Context, taskID, queue string, er
 	// Send deny message asynchronously to avoid blocking
 	go func() {
 		headers := HeadersWithConsumerID(ctx, c.id)
-		reply := codec.NewMessage(consts.MESSAGE_DENY, utils.ToByte(fmt.Sprintf(`{"id":"%s", "error":"%s"}`, taskID, err.Error())), queue, headers)
+		reply, err := codec.NewMessage(consts.MESSAGE_DENY, utils.ToByte(fmt.Sprintf(`{"id":"%s", "error":"%s"}`, taskID, err.Error())), queue, headers)
+		if err != nil {
+			c.logger.Error("Failed to create MESSAGE_DENY",
+				logger.Field{Key: "queue", Value: queue},
+				logger.Field{Key: "task_id", Value: taskID},
+				logger.Field{Key: "error", Value: err.Error()})
+			return
+		}
 
 		sendCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -587,9 +614,11 @@ func (c *Consumer) Consume(ctx context.Context) error {
 			c.logger.Info("Reconnection triggered",
 				logger.Field{Key: "consumer_id", Value: c.id})
 			if err := c.handleReconnection(ctx); err != nil {
-				c.logger.Error("Reconnection failed",
+				c.logger.Error("Reconnection failed, will retry based on backoff policy",
 					logger.Field{Key: "consumer_id", Value: c.id},
 					logger.Field{Key: "error", Value: err.Error()})
+				// The handleReconnection method now implements its own backoff,
+				// so we don't need to do anything here except continue the loop
 			}
 
 		default:
@@ -635,10 +664,76 @@ func (c *Consumer) processWithTimeout(ctx context.Context) error {
 	}
 
 	// Read message without timeout - consumer should be long-running background service
-	return c.readMessage(ctx, conn)
+	err := c.readMessage(ctx, conn)
+
+	// If message was processed successfully, reset reconnection attempts
+	if err == nil {
+		if atomic.LoadInt32(&c.reconnectAttempts) > 0 {
+			atomic.StoreInt32(&c.reconnectAttempts, 0)
+			c.logger.Debug("Reset reconnection attempts after successful message processing",
+				logger.Field{Key: "consumer_id", Value: c.id})
+		}
+	}
+
+	return err
 }
 
 func (c *Consumer) handleReconnection(ctx context.Context) error {
+	c.reconnectMutex.Lock()
+	defer c.reconnectMutex.Unlock()
+
+	// Increment reconnection attempts
+	attempts := atomic.AddInt32(&c.reconnectAttempts, 1)
+
+	// Calculate backoff based on consecutive attempts
+	backoffDelay := utils.CalculateJitter(
+		c.opts.initialDelay*time.Duration(1<<minInt(int(attempts-1), 6)), // Cap exponential growth at 2^6
+		c.opts.jitterPercent,
+	)
+
+	// Cap maximum backoff
+	if backoffDelay > c.opts.maxBackoff {
+		backoffDelay = c.opts.maxBackoff
+	}
+
+	// If we've been reconnecting too frequently, implement circuit breaker logic
+	timeSinceLastAttempt := time.Since(c.lastReconnectAttempt)
+	if attempts > 1 && timeSinceLastAttempt < backoffDelay {
+		remainingWait := backoffDelay - timeSinceLastAttempt
+		c.logger.Warn("Throttling reconnection attempt",
+			logger.Field{Key: "consumer_id", Value: c.id},
+			logger.Field{Key: "consecutive_attempts", Value: int(attempts)},
+			logger.Field{Key: "wait_duration", Value: remainingWait.String()})
+
+		// Wait with context cancellation support
+		select {
+		case <-time.After(remainingWait):
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-c.shutdown:
+			return fmt.Errorf("consumer is shutdown")
+		}
+	}
+
+	c.lastReconnectAttempt = time.Now()
+
+	// If we've exceeded reasonable attempts, implement longer backoff
+	if attempts > int32(c.opts.maxRetries*2) {
+		longBackoff := 5 * time.Minute // Long circuit breaker period
+		c.logger.Warn("Too many consecutive reconnection attempts, entering long backoff",
+			logger.Field{Key: "consumer_id", Value: c.id},
+			logger.Field{Key: "consecutive_attempts", Value: int(attempts)},
+			logger.Field{Key: "backoff_duration", Value: longBackoff.String()})
+
+		select {
+		case <-time.After(longBackoff):
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-c.shutdown:
+			return fmt.Errorf("consumer is shutdown")
+		}
+	}
+
 	// Mark as disconnected
 	atomic.StoreInt32(&c.isConnected, 0)
 
@@ -650,48 +745,42 @@ func (c *Consumer) handleReconnection(ctx context.Context) error {
 	}
 	c.connMutex.Unlock()
 
-	// Attempt reconnection with exponential backoff
-	backoff := c.opts.initialDelay
-	maxRetries := c.opts.maxRetries
+	c.logger.Info("Attempting reconnection",
+		logger.Field{Key: "consumer_id", Value: c.id},
+		logger.Field{Key: "attempt", Value: int(attempts)},
+		logger.Field{Key: "backoff_delay", Value: backoffDelay.String()})
 
-	for attempt := 1; attempt <= maxRetries; attempt++ {
-		if atomic.LoadInt32(&c.isShutdown) == 1 {
-			return fmt.Errorf("consumer is shutdown")
-		}
-
-		if err := c.attemptConnect(); err != nil {
-			if attempt == maxRetries {
-				return fmt.Errorf("failed to reconnect after %d attempts: %w", maxRetries, err)
-			}
-
-			sleepDuration := utils.CalculateJitter(backoff, c.opts.jitterPercent)
-			c.logger.Warn("Reconnection attempt failed, retrying",
-				logger.Field{Key: "consumer_id", Value: c.id},
-				logger.Field{Key: "attempt", Value: fmt.Sprintf("%d/%d", attempt, maxRetries)},
-				logger.Field{Key: "retry_in", Value: sleepDuration.String()})
-
-			time.Sleep(sleepDuration)
-			backoff *= 2
-			if backoff > c.opts.maxBackoff {
-				backoff = c.opts.maxBackoff
-			}
-			continue
-		}
-
-		// Reconnection successful, resubscribe
-		if err := c.subscribe(ctx, c.queue); err != nil {
-			c.logger.Error("Failed to resubscribe after reconnection",
-				logger.Field{Key: "consumer_id", Value: c.id},
-				logger.Field{Key: "error", Value: err.Error()})
-			continue
-		}
-
-		c.logger.Info("Successfully reconnected and resubscribed",
-			logger.Field{Key: "consumer_id", Value: c.id})
-		return nil
+	// Attempt reconnection
+	if err := c.attemptConnect(); err != nil {
+		c.logger.Error("Reconnection failed",
+			logger.Field{Key: "consumer_id", Value: c.id},
+			logger.Field{Key: "attempt", Value: int(attempts)},
+			logger.Field{Key: "error", Value: err.Error()})
+		return fmt.Errorf("failed to reconnect (attempt %d): %w", attempts, err)
 	}
 
-	return fmt.Errorf("failed to reconnect")
+	// Reconnection successful, try to resubscribe
+	if err := c.subscribe(ctx, c.queue); err != nil {
+		c.logger.Error("Failed to resubscribe after reconnection",
+			logger.Field{Key: "consumer_id", Value: c.id},
+			logger.Field{Key: "error", Value: err.Error()})
+		return fmt.Errorf("failed to resubscribe after reconnection: %w", err)
+	}
+
+	// Reset reconnection attempts on successful reconnection
+	atomic.StoreInt32(&c.reconnectAttempts, 0)
+
+	c.logger.Info("Successfully reconnected and resubscribed",
+		logger.Field{Key: "consumer_id", Value: c.id})
+	return nil
+}
+
+// Helper function to get minimum of two integers
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func isConnectionError(err error) bool {
@@ -755,7 +844,10 @@ func (c *Consumer) operate(ctx context.Context, cmd consts.CMD, poolOperation fu
 
 func (c *Consumer) sendOpsMessage(ctx context.Context, cmd consts.CMD) error {
 	headers := HeadersWithConsumerID(ctx, c.id)
-	msg := codec.NewMessage(cmd, nil, c.queue, headers)
+	msg, err := codec.NewMessage(cmd, nil, c.queue, headers)
+	if err != nil {
+		return fmt.Errorf("error creating operation message: %v", err)
+	}
 	return c.send(ctx, c.conn, msg)
 }
 

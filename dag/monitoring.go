@@ -71,17 +71,9 @@ func (m *MonitoringMetrics) RecordTaskCompletion(taskID string, status mq.Status
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if startTime, exists := m.ActiveTasks[taskID]; exists {
-		duration := time.Since(startTime)
-		m.TotalExecutionTime += duration
-		m.LastTaskCompletedAt = time.Now()
-		delete(m.ActiveTasks, taskID)
-		m.TasksInProgress--
-
-		// Update average execution time
-		if m.TasksCompleted > 0 {
-			m.AverageExecutionTime = m.TotalExecutionTime / time.Duration(m.TasksCompleted+1)
-		}
+	m.TasksInProgress--
+	if m.TasksInProgress < 0 {
+		m.TasksInProgress = 0
 	}
 
 	switch status {
@@ -92,6 +84,9 @@ func (m *MonitoringMetrics) RecordTaskCompletion(taskID string, status mq.Status
 	case mq.Cancelled:
 		m.TasksCancelled++
 	}
+
+	m.LastTaskCompletedAt = time.Now()
+	delete(m.ActiveTasks, taskID)
 }
 
 // RecordNodeExecution records node execution metrics
@@ -131,11 +126,27 @@ func (m *MonitoringMetrics) RecordNodeExecution(nodeID string, duration time.Dur
 
 	// Legacy tracking
 	m.NodesExecuted[nodeID]++
-	if len(m.NodeExecutionTimes[nodeID]) > 100 {
-		// Keep only last 100 execution times
-		m.NodeExecutionTimes[nodeID] = m.NodeExecutionTimes[nodeID][1:]
-	}
 	m.NodeExecutionTimes[nodeID] = append(m.NodeExecutionTimes[nodeID], duration)
+
+	// Keep only last 100 execution times per node to prevent memory bloat
+	if len(m.NodeExecutionTimes[nodeID]) > 100 {
+		m.NodeExecutionTimes[nodeID] = m.NodeExecutionTimes[nodeID][len(m.NodeExecutionTimes[nodeID])-100:]
+	}
+
+	// Calculate average execution time
+	var totalDuration time.Duration
+	var totalExecutions int64
+	for _, durations := range m.NodeExecutionTimes {
+		for _, d := range durations {
+			totalDuration += d
+			totalExecutions++
+		}
+	}
+	if totalExecutions > 0 {
+		m.AverageExecutionTime = totalDuration / time.Duration(totalExecutions)
+	}
+
+	m.TotalExecutionTime += duration
 }
 
 // RecordNodeStart records when a node starts processing
@@ -145,6 +156,10 @@ func (m *MonitoringMetrics) RecordNodeStart(nodeID string) {
 
 	if stats, exists := m.NodeProcessingStats[nodeID]; exists {
 		stats.CurrentlyRunning++
+	} else {
+		m.NodeProcessingStats[nodeID] = &NodeStats{
+			CurrentlyRunning: 1,
+		}
 	}
 }
 
@@ -153,8 +168,11 @@ func (m *MonitoringMetrics) RecordNodeEnd(nodeID string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if stats, exists := m.NodeProcessingStats[nodeID]; exists && stats.CurrentlyRunning > 0 {
+	if stats, exists := m.NodeProcessingStats[nodeID]; exists {
 		stats.CurrentlyRunning--
+		if stats.CurrentlyRunning < 0 {
+			stats.CurrentlyRunning = 0
+		}
 	}
 }
 
@@ -190,24 +208,14 @@ func (m *MonitoringMetrics) GetSnapshot() *MonitoringMetrics {
 	for k, v := range m.ActiveTasks {
 		snapshot.ActiveTasks[k] = v
 	}
-	for k, v := range m.NodeExecutionTimes {
-		snapshot.NodeExecutionTimes[k] = make([]time.Duration, len(v))
-		copy(snapshot.NodeExecutionTimes[k], v)
-	}
 	for k, v := range m.NodeProcessingStats {
-		snapshot.NodeProcessingStats[k] = &NodeStats{
-			ExecutionCount:   v.ExecutionCount,
-			SuccessCount:     v.SuccessCount,
-			FailureCount:     v.FailureCount,
-			TotalDuration:    v.TotalDuration,
-			AverageDuration:  v.AverageDuration,
-			MinDuration:      v.MinDuration,
-			MaxDuration:      v.MaxDuration,
-			LastExecuted:     v.LastExecuted,
-			LastSuccess:      v.LastSuccess,
-			LastFailure:      v.LastFailure,
-			CurrentlyRunning: v.CurrentlyRunning,
-		}
+		statsCopy := *v
+		snapshot.NodeProcessingStats[k] = &statsCopy
+	}
+	for k, v := range m.NodeExecutionTimes {
+		timesCopy := make([]time.Duration, len(v))
+		copy(timesCopy, v)
+		snapshot.NodeExecutionTimes[k] = timesCopy
 	}
 
 	return snapshot
@@ -219,45 +227,32 @@ func (m *MonitoringMetrics) GetNodeStats(nodeID string) *NodeStats {
 	defer m.mu.RUnlock()
 
 	if stats, exists := m.NodeProcessingStats[nodeID]; exists {
-		// Return a copy
-		return &NodeStats{
-			ExecutionCount:   stats.ExecutionCount,
-			SuccessCount:     stats.SuccessCount,
-			FailureCount:     stats.FailureCount,
-			TotalDuration:    stats.TotalDuration,
-			AverageDuration:  stats.AverageDuration,
-			MinDuration:      stats.MinDuration,
-			MaxDuration:      stats.MaxDuration,
-			LastExecuted:     stats.LastExecuted,
-			LastSuccess:      stats.LastSuccess,
-			LastFailure:      stats.LastFailure,
-			CurrentlyRunning: stats.CurrentlyRunning,
-		}
+		statsCopy := *stats
+		return &statsCopy
 	}
 	return nil
 }
 
 // Monitor provides comprehensive monitoring capabilities for DAG
 type Monitor struct {
-	dag              *DAG
-	metrics          *MonitoringMetrics
-	logger           logger.Logger
-	alertThresholds  *AlertThresholds
-	webhookURL       string
-	alertHandlers    []AlertHandler
-	monitoringActive bool
-	stopCh           chan struct{}
-	mu               sync.RWMutex
+	dag        *DAG
+	metrics    *MonitoringMetrics
+	logger     logger.Logger
+	thresholds *AlertThresholds
+	handlers   []AlertHandler
+	stopCh     chan struct{}
+	running    bool
+	mu         sync.RWMutex
 }
 
 // AlertThresholds defines thresholds for alerting
 type AlertThresholds struct {
-	MaxFailureRate      float64       // Maximum allowed failure rate (0.0 - 1.0)
-	MaxExecutionTime    time.Duration // Maximum allowed execution time
-	MaxTasksInProgress  int64         // Maximum allowed concurrent tasks
-	MinSuccessRate      float64       // Minimum required success rate
-	MaxNodeFailures     int64         // Maximum failures per node
-	HealthCheckInterval time.Duration // How often to check health
+	MaxFailureRate      float64       `json:"max_failure_rate"`
+	MaxExecutionTime    time.Duration `json:"max_execution_time"`
+	MaxTasksInProgress  int64         `json:"max_tasks_in_progress"`
+	MinSuccessRate      float64       `json:"min_success_rate"`
+	MaxNodeFailures     int64         `json:"max_node_failures"`
+	HealthCheckInterval time.Duration `json:"health_check_interval"`
 }
 
 // AlertHandler defines interface for handling alerts
@@ -267,14 +262,36 @@ type AlertHandler interface {
 
 // Alert represents a monitoring alert
 type Alert struct {
-	Type      string
-	Severity  string
-	Message   string
-	NodeID    string
-	TaskID    string
-	Timestamp time.Time
-	Metrics   map[string]interface{}
+	ID          string                 `json:"id"`
+	Timestamp   time.Time              `json:"timestamp"`
+	Severity    AlertSeverity          `json:"severity"`
+	Type        AlertType              `json:"type"`
+	Message     string                 `json:"message"`
+	Details     map[string]interface{} `json:"details"`
+	NodeID      string                 `json:"node_id,omitempty"`
+	TaskID      string                 `json:"task_id,omitempty"`
+	Threshold   interface{}            `json:"threshold,omitempty"`
+	ActualValue interface{}            `json:"actual_value,omitempty"`
 }
+
+type AlertSeverity string
+
+const (
+	AlertSeverityInfo     AlertSeverity = "info"
+	AlertSeverityWarning  AlertSeverity = "warning"
+	AlertSeverityCritical AlertSeverity = "critical"
+)
+
+type AlertType string
+
+const (
+	AlertTypeFailureRate    AlertType = "failure_rate"
+	AlertTypeExecutionTime  AlertType = "execution_time"
+	AlertTypeTaskLoad       AlertType = "task_load"
+	AlertTypeNodeFailures   AlertType = "node_failures"
+	AlertTypeCircuitBreaker AlertType = "circuit_breaker"
+	AlertTypeHealthCheck    AlertType = "health_check"
+)
 
 // NewMonitor creates a new DAG monitor
 func NewMonitor(dag *DAG, logger logger.Logger) *Monitor {
@@ -282,29 +299,29 @@ func NewMonitor(dag *DAG, logger logger.Logger) *Monitor {
 		dag:     dag,
 		metrics: NewMonitoringMetrics(),
 		logger:  logger,
-		alertThresholds: &AlertThresholds{
-			MaxFailureRate:      0.1, // 10% failure rate
+		thresholds: &AlertThresholds{
+			MaxFailureRate:      0.1, // 10%
 			MaxExecutionTime:    5 * time.Minute,
 			MaxTasksInProgress:  1000,
-			MinSuccessRate:      0.9, // 90% success rate
+			MinSuccessRate:      0.9, // 90%
 			MaxNodeFailures:     10,
 			HealthCheckInterval: 30 * time.Second,
 		},
-		stopCh: make(chan struct{}),
+		handlers: make([]AlertHandler, 0),
+		stopCh:   make(chan struct{}),
 	}
 }
 
 // Start begins monitoring
 func (m *Monitor) Start(ctx context.Context) {
 	m.mu.Lock()
-	if m.monitoringActive {
-		m.mu.Unlock()
+	defer m.mu.Unlock()
+
+	if m.running {
 		return
 	}
-	m.monitoringActive = true
-	m.mu.Unlock()
 
-	// Start health check routine
+	m.running = true
 	go m.healthCheckRoutine(ctx)
 
 	m.logger.Info("DAG monitoring started")
@@ -315,12 +332,13 @@ func (m *Monitor) Stop() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if !m.monitoringActive {
+	if !m.running {
 		return
 	}
 
+	m.running = false
 	close(m.stopCh)
-	m.monitoringActive = false
+
 	m.logger.Info("DAG monitoring stopped")
 }
 
@@ -328,14 +346,14 @@ func (m *Monitor) Stop() {
 func (m *Monitor) SetAlertThresholds(thresholds *AlertThresholds) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.alertThresholds = thresholds
+	m.thresholds = thresholds
 }
 
 // AddAlertHandler adds an alert handler
 func (m *Monitor) AddAlertHandler(handler AlertHandler) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.alertHandlers = append(m.alertHandlers, handler)
+	m.handlers = append(m.handlers, handler)
 }
 
 // GetMetrics returns current metrics
@@ -345,7 +363,7 @@ func (m *Monitor) GetMetrics() *MonitoringMetrics {
 
 // healthCheckRoutine performs periodic health checks
 func (m *Monitor) healthCheckRoutine(ctx context.Context) {
-	ticker := time.NewTicker(m.alertThresholds.HealthCheckInterval)
+	ticker := time.NewTicker(m.thresholds.HealthCheckInterval)
 	defer ticker.Stop()
 
 	for {
@@ -362,50 +380,57 @@ func (m *Monitor) healthCheckRoutine(ctx context.Context) {
 
 // performHealthCheck checks system health and triggers alerts
 func (m *Monitor) performHealthCheck() {
-	snapshot := m.metrics.GetSnapshot()
+	metrics := m.GetMetrics()
 
 	// Check failure rate
-	if snapshot.TasksTotal > 0 {
-		failureRate := float64(snapshot.TasksFailed) / float64(snapshot.TasksTotal)
-		if failureRate > m.alertThresholds.MaxFailureRate {
+	if metrics.TasksTotal > 0 {
+		failureRate := float64(metrics.TasksFailed) / float64(metrics.TasksTotal)
+		if failureRate > m.thresholds.MaxFailureRate {
 			m.triggerAlert(Alert{
-				Type:      "high_failure_rate",
-				Severity:  "warning",
-				Message:   fmt.Sprintf("High failure rate: %.2f%%", failureRate*100),
-				Timestamp: time.Now(),
-				Metrics: map[string]interface{}{
-					"failure_rate": failureRate,
-					"total_tasks":  snapshot.TasksTotal,
-					"failed_tasks": snapshot.TasksFailed,
+				ID:          mq.NewID(),
+				Timestamp:   time.Now(),
+				Severity:    AlertSeverityCritical,
+				Type:        AlertTypeFailureRate,
+				Message:     "High failure rate detected",
+				Threshold:   m.thresholds.MaxFailureRate,
+				ActualValue: failureRate,
+				Details: map[string]interface{}{
+					"failed_tasks": metrics.TasksFailed,
+					"total_tasks":  metrics.TasksTotal,
 				},
 			})
 		}
 	}
 
-	// Check tasks in progress
-	if snapshot.TasksInProgress > m.alertThresholds.MaxTasksInProgress {
+	// Check task load
+	if metrics.TasksInProgress > m.thresholds.MaxTasksInProgress {
 		m.triggerAlert(Alert{
-			Type:      "high_task_load",
-			Severity:  "warning",
-			Message:   fmt.Sprintf("High number of tasks in progress: %d", snapshot.TasksInProgress),
-			Timestamp: time.Now(),
-			Metrics: map[string]interface{}{
-				"tasks_in_progress": snapshot.TasksInProgress,
-				"threshold":         m.alertThresholds.MaxTasksInProgress,
+			ID:          mq.NewID(),
+			Timestamp:   time.Now(),
+			Severity:    AlertSeverityWarning,
+			Type:        AlertTypeTaskLoad,
+			Message:     "High task load detected",
+			Threshold:   m.thresholds.MaxTasksInProgress,
+			ActualValue: metrics.TasksInProgress,
+			Details: map[string]interface{}{
+				"tasks_in_progress": metrics.TasksInProgress,
 			},
 		})
 	}
 
 	// Check node failures
-	for nodeID, failures := range snapshot.NodeFailures {
-		if failures > m.alertThresholds.MaxNodeFailures {
+	for nodeID, failures := range metrics.NodeFailures {
+		if failures > m.thresholds.MaxNodeFailures {
 			m.triggerAlert(Alert{
-				Type:      "node_failures",
-				Severity:  "error",
-				Message:   fmt.Sprintf("Node %s has %d failures", nodeID, failures),
-				NodeID:    nodeID,
-				Timestamp: time.Now(),
-				Metrics: map[string]interface{}{
+				ID:          mq.NewID(),
+				Timestamp:   time.Now(),
+				Severity:    AlertSeverityCritical,
+				Type:        AlertTypeNodeFailures,
+				Message:     fmt.Sprintf("Node %s has too many failures", nodeID),
+				NodeID:      nodeID,
+				Threshold:   m.thresholds.MaxNodeFailures,
+				ActualValue: failures,
+				Details: map[string]interface{}{
 					"node_id":  nodeID,
 					"failures": failures,
 				},
@@ -414,15 +439,17 @@ func (m *Monitor) performHealthCheck() {
 	}
 
 	// Check execution time
-	if snapshot.AverageExecutionTime > m.alertThresholds.MaxExecutionTime {
+	if metrics.AverageExecutionTime > m.thresholds.MaxExecutionTime {
 		m.triggerAlert(Alert{
-			Type:      "slow_execution",
-			Severity:  "warning",
-			Message:   fmt.Sprintf("Average execution time is high: %v", snapshot.AverageExecutionTime),
-			Timestamp: time.Now(),
-			Metrics: map[string]interface{}{
-				"average_execution_time": snapshot.AverageExecutionTime,
-				"threshold":              m.alertThresholds.MaxExecutionTime,
+			ID:          mq.NewID(),
+			Timestamp:   time.Now(),
+			Severity:    AlertSeverityWarning,
+			Type:        AlertTypeExecutionTime,
+			Message:     "Average execution time is too high",
+			Threshold:   m.thresholds.MaxExecutionTime,
+			ActualValue: metrics.AverageExecutionTime,
+			Details: map[string]interface{}{
+				"average_execution_time": metrics.AverageExecutionTime.String(),
 			},
 		})
 	}
@@ -431,16 +458,20 @@ func (m *Monitor) performHealthCheck() {
 // triggerAlert sends alerts to all registered handlers
 func (m *Monitor) triggerAlert(alert Alert) {
 	m.logger.Warn("Alert triggered",
-		logger.Field{Key: "type", Value: alert.Type},
-		logger.Field{Key: "severity", Value: alert.Severity},
+		logger.Field{Key: "alert_id", Value: alert.ID},
+		logger.Field{Key: "type", Value: string(alert.Type)},
+		logger.Field{Key: "severity", Value: string(alert.Severity)},
 		logger.Field{Key: "message", Value: alert.Message},
 	)
 
-	for _, handler := range m.alertHandlers {
-		if err := handler.HandleAlert(alert); err != nil {
-			m.logger.Error("Alert handler failed",
-				logger.Field{Key: "error", Value: err.Error()},
-			)
-		}
+	for _, handler := range m.handlers {
+		go func(h AlertHandler, a Alert) {
+			if err := h.HandleAlert(a); err != nil {
+				m.logger.Error("Alert handler error",
+					logger.Field{Key: "error", Value: err.Error()},
+					logger.Field{Key: "alert_id", Value: a.ID},
+				)
+			}
+		}(handler, alert)
 	}
 }
