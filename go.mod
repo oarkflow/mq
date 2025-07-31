@@ -13,7 +13,7 @@ require (
 	github.com/oarkflow/jet v0.0.4
 	github.com/oarkflow/json v0.0.21
 	github.com/oarkflow/log v1.0.79
-	github.com/oarkflow/xid v1.2.5
+	github.com/oarkflow/xid v1.2.8
 	github.com/prometheus/client_golang v1.21.1
 	golang.org/x/exp v0.0.0-20250305212735-054e65f0b394
 	golang.org/x/time v0.11.0

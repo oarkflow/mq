@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/oarkflow/log"
-	"github.com/oarkflow/xid"
 
 	"github.com/oarkflow/mq/storage"
 	"github.com/oarkflow/mq/storage/memory"
@@ -585,7 +584,7 @@ func (s *Scheduler) AddTask(ctx context.Context, payload *Task, opts ...Schedule
 	}
 	stop := make(chan struct{})
 	newTask := &ScheduledTask{
-		id:      xid.New().String(),
+		id:      NewID(),
 		ctx:     ctx,
 		handler: options.Handler,
 		payload: payload,

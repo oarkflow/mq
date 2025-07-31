@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -18,13 +19,153 @@ import (
 )
 
 func main() {
+	contactFormSchema := map[string]any{
+		"properties": map[string]any{
+			"first_name": map[string]any{
+				"type":  "string",
+				"title": "👤 First Name",
+				"order": 1,
+				"ui": map[string]any{
+					"control": "input",
+					"class":   "form-group",
+					"name":    "first_name",
+				},
+			},
+			"last_name": map[string]any{
+				"type":  "string",
+				"title": "👤 Last Name",
+				"order": 2,
+				"ui": map[string]any{
+					"control": "input",
+					"class":   "form-group",
+					"name":    "last_name",
+				},
+			},
+			"email": map[string]any{
+				"type":  "email",
+				"title": "📧 Email Address",
+				"order": 3,
+				"ui": map[string]any{
+					"control": "input",
+					"class":   "form-group",
+					"name":    "email",
+				},
+			},
+			"user_type": map[string]any{
+				"type":  "string",
+				"title": "👥 User Type",
+				"order": 4,
+				"ui": map[string]any{
+					"control": "select",
+					"class":   "form-group",
+					"name":    "user_type",
+					"options": []any{"new", "premium", "standard"},
+				},
+			},
+			"priority": map[string]any{
+				"type":  "string",
+				"title": "🚨 Priority Level",
+				"order": 5,
+				"ui": map[string]any{
+					"control": "select",
+					"class":   "form-group",
+					"name":    "priority",
+					"options": []any{"low", "medium", "high", "urgent"},
+				},
+			},
+			"subject": map[string]any{
+				"type":  "string",
+				"title": "📋 Subject",
+				"order": 6,
+				"ui": map[string]any{
+					"control": "input",
+					"class":   "form-group",
+					"name":    "subject",
+				},
+			},
+			"message": map[string]any{
+				"type":  "textarea",
+				"title": "💬 Message",
+				"order": 7,
+				"ui": map[string]any{
+					"control": "textarea",
+					"class":   "form-group",
+					"name":    "message",
+				},
+			},
+		},
+		"required": []any{"first_name", "last_name", "email", "user_type", "priority", "subject", "message"},
+	}
+
+	contactFormLayout := `
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Contact Us - Email Notification System</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 700px; margin: 50px auto; padding: 20px; background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); color: white; min-height: 100vh; }
+        .form-container { background: rgba(255, 255, 255, 0.1); padding: 40px; border-radius: 20px; backdrop-filter: blur(15px); box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4); border: 1px solid rgba(255, 255, 255, 0.2); }
+        h1 { text-align: center; margin-bottom: 10px; text-shadow: 2px 2px 4px rgba(0,0,0,0.3); font-size: 2.2em; }
+        .subtitle { text-align: center; margin-bottom: 30px; opacity: 0.9; font-size: 1.1em; }
+        .form-group { margin-bottom: 25px; }
+        label { display: block; margin-bottom: 8px; font-weight: 600; text-shadow: 1px 1px 2px rgba(0,0,0,0.3); font-size: 1.1em; }
+        input, textarea, select { width: 100%; padding: 15px; border: none; border-radius: 10px; font-size: 16px; background: rgba(255, 255, 255, 0.2); color: white; backdrop-filter: blur(5px); transition: all 0.3s ease; border: 1px solid rgba(255, 255, 255, 0.3); }
+        input:focus, textarea:focus, select:focus { outline: none; background: rgba(255, 255, 255, 0.3); border: 1px solid rgba(255, 255, 255, 0.6); transform: translateY(-2px); box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2); }
+        input::placeholder, textarea::placeholder { color: rgba(255, 255, 255, 0.7); }
+        textarea { height: 120px; resize: vertical; }
+        select { cursor: pointer; }
+        select option { background: #2a5298; color: white; }
+        .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        @media (max-width: 600px) { .form-row { grid-template-columns: 1fr; } }
+        button { background: linear-gradient(45deg, #FF6B6B, #4ECDC4); color: white; padding: 18px 40px; border: none; border-radius: 30px; cursor: pointer; font-size: 18px; font-weight: bold; width: 100%; transition: all 0.3s ease; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3); text-transform: uppercase; letter-spacing: 1px; }
+        button:hover { transform: translateY(-3px); box-shadow: 0 8px 25px rgba(0, 0, 0, 0.4); }
+        .info-box { background: rgba(255, 255, 255, 0.15); padding: 20px; border-radius: 12px; margin-bottom: 25px; text-align: center; border-left: 4px solid #4ECDC4; }
+        .feature-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin: 20px 0; }
+        .feature-item { background: rgba(255, 255, 255, 0.1); padding: 15px; border-radius: 8px; text-align: center; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <div class="form-container">
+        <h1>📧 Contact Us</h1>
+        <div class="subtitle">Advanced Email Notification System with DAG Workflow</div>
+
+        <div class="info-box">
+            <p><strong>🔄 Smart Routing:</strong> Our system automatically routes your message based on your user type and preferences.</p>
+        </div>
+
+        <div class="feature-list">
+            <div class="feature-item">
+                <strong>📱 Instant Notifications</strong><br>
+                Real-time email delivery
+            </div>
+            <div class="feature-item">
+                <strong>🎯 Smart Targeting</strong><br>
+                User-specific content
+            </div>
+            <div class="feature-item">
+                <strong>🔒 Secure Processing</strong><br>
+                Enterprise-grade security
+            </div>
+        </div>
+
+        <form method="post" action="/process?task_id={{task_id}}&next=true">
+            <div class="form-row">
+                {{form_fields}}
+            </div>
+
+            <button type="submit">🚀 Send Message</button>
+        </form>
+    </div>
+</body>
+</html>`
+
 	flow := dag.NewDAG("Email Notification System", "email-notification", func(taskID string, result mq.Result) {
 		fmt.Printf("Email notification workflow completed for task %s: %s\n", taskID, string(result.Payload))
-	})
+	}, mq.WithSyncMode(true))
 
 	// Add workflow nodes
 	// Note: Page nodes have no timeout by default, allowing users unlimited time for form input
-	flow.AddNode(dag.Page, "Contact Form", "ContactForm", &ContactFormNode{}, true)
+	flow.AddNode(dag.Page, "Contact Form", "ContactForm", &ConfigurableFormNode{Schema: contactFormSchema, HTMLLayout: contactFormLayout}, true)
 	flow.AddNode(dag.Function, "Validate Contact Data", "ValidateContact", &ValidateContactNode{})
 	flow.AddNode(dag.Function, "Check User Type", "CheckUserType", &CheckUserTypeNode{})
 	flow.AddNode(dag.Function, "Send Welcome Email", "SendWelcomeEmail", &SendWelcomeEmailNode{})
@@ -67,243 +208,51 @@ func main() {
 	flow.Start(context.Background(), "0.0.0.0:8084")
 }
 
-// ContactFormNode - Contact form with validation
-type ContactFormNode struct {
+// ConfigurableFormNode - Page node with JSONSchema-based fields and custom HTML layout
+// Usage: Pass JSONSchema and HTML layout to the node for dynamic form rendering and validation
+
+type ConfigurableFormNode struct {
 	dag.Operation
+	Schema           map[string]any // JSONSchema for fields and requirements
+	HTMLLayout       string         // HTML layout template with placeholders for fields
+	fieldsCache      []fieldInfo    // Cached field order and definitions
+	cacheInitialized bool           // Whether cache is initialized
 }
 
-func (c *ContactFormNode) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
-	// Check if this is a form submission
+// fieldInfo caches field metadata for rendering
+type fieldInfo struct {
+	name         string
+	order        int
+	def          map[string]any
+	definedIndex int // fallback to definition order
+}
+
+func (c *ConfigurableFormNode) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 	var inputData map[string]any
 	if task.Payload != nil && len(task.Payload) > 0 {
 		if err := json.Unmarshal(task.Payload, &inputData); err == nil {
-			// If we have valid input data, pass it through for validation
+			// Validate input against schema requirements
+			validationErrors := validateAgainstSchema(inputData, c.Schema)
+			if len(validationErrors) > 0 {
+				inputData["validation_error"] = validationErrors[0] // Show first error
+				bt, _ := json.Marshal(inputData)
+				return mq.Result{Payload: bt, Ctx: ctx, ConditionStatus: "invalid"}
+			}
 			return mq.Result{Payload: task.Payload, Ctx: ctx}
 		}
 	}
 
-	// Otherwise, show the form
-	htmlTemplate := `
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Contact Us - Email Notification System</title>
-    <style>
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            max-width: 700px;
-            margin: 50px auto;
-            padding: 20px;
-            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
-            color: white;
-            min-height: 100vh;
-        }
-        .form-container {
-            background: rgba(255, 255, 255, 0.1);
-            padding: 40px;
-            border-radius: 20px;
-            backdrop-filter: blur(15px);
-            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-        }
-        h1 {
-            text-align: center;
-            margin-bottom: 10px;
-            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
-            font-size: 2.2em;
-        }
-        .subtitle {
-            text-align: center;
-            margin-bottom: 30px;
-            opacity: 0.9;
-            font-size: 1.1em;
-        }
-        .form-group {
-            margin-bottom: 25px;
-        }
-        label {
-            display: block;
-            margin-bottom: 8px;
-            font-weight: 600;
-            text-shadow: 1px 1px 2px rgba(0,0,0,0.3);
-            font-size: 1.1em;
-        }
-        input, textarea, select {
-            width: 100%;
-            padding: 15px;
-            border: none;
-            border-radius: 10px;
-            font-size: 16px;
-            background: rgba(255, 255, 255, 0.2);
-            color: white;
-            backdrop-filter: blur(5px);
-            transition: all 0.3s ease;
-            border: 1px solid rgba(255, 255, 255, 0.3);
-        }
-        input:focus, textarea:focus, select:focus {
-            outline: none;
-            background: rgba(255, 255, 255, 0.3);
-            border: 1px solid rgba(255, 255, 255, 0.6);
-            transform: translateY(-2px);
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
-        }
-        input::placeholder, textarea::placeholder {
-            color: rgba(255, 255, 255, 0.7);
-        }
-        textarea {
-            height: 120px;
-            resize: vertical;
-        }
-        select {
-            cursor: pointer;
-        }
-        select option {
-            background: #2a5298;
-            color: white;
-        }
-        .form-row {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 20px;
-        }
-        @media (max-width: 600px) {
-            .form-row {
-                grid-template-columns: 1fr;
-            }
-        }
-        button {
-            background: linear-gradient(45deg, #FF6B6B, #4ECDC4);
-            color: white;
-            padding: 18px 40px;
-            border: none;
-            border-radius: 30px;
-            cursor: pointer;
-            font-size: 18px;
-            font-weight: bold;
-            width: 100%;
-            transition: all 0.3s ease;
-            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
-            text-transform: uppercase;
-            letter-spacing: 1px;
-        }
-        button:hover {
-            transform: translateY(-3px);
-            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.4);
-        }
-        .info-box {
-            background: rgba(255, 255, 255, 0.15);
-            padding: 20px;
-            border-radius: 12px;
-            margin-bottom: 25px;
-            text-align: center;
-            border-left: 4px solid #4ECDC4;
-        }
-        .feature-list {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 15px;
-            margin: 20px 0;
-        }
-        .feature-item {
-            background: rgba(255, 255, 255, 0.1);
-            padding: 15px;
-            border-radius: 8px;
-            text-align: center;
-            font-size: 14px;
-        }
-    </style>
-</head>
-<body>
-    <div class="form-container">
-        <h1>📧 Contact Us</h1>
-        <div class="subtitle">Advanced Email Notification System with DAG Workflow</div>
+	// Initialize cache if not done
+	if !c.cacheInitialized {
+		c.fieldsCache = parseFieldsFromSchema(c.Schema)
+		c.cacheInitialized = true
+	}
 
-        <div class="info-box">
-            <p><strong>🔄 Smart Routing:</strong> Our system automatically routes your message based on your user type and preferences.</p>
-        </div>
-
-        <div class="feature-list">
-            <div class="feature-item">
-                <strong>📱 Instant Notifications</strong><br>
-                Real-time email delivery
-            </div>
-            <div class="feature-item">
-                <strong>🎯 Smart Targeting</strong><br>
-                User-specific content
-            </div>
-            <div class="feature-item">
-                <strong>🔒 Secure Processing</strong><br>
-                Enterprise-grade security
-            </div>
-        </div>
-
-        <form method="post" action="/process?task_id={{task_id}}&next=true">
-            <div class="form-row">
-                <div class="form-group">
-                    <label for="first_name">👤 First Name:</label>
-                    <input type="text" id="first_name" name="first_name"
-                           placeholder="Enter your first name"
-                           required>
-                </div>
-                <div class="form-group">
-                    <label for="last_name">👤 Last Name:</label>
-                    <input type="text" id="last_name" name="last_name"
-                           placeholder="Enter your last name"
-                           required>
-                </div>
-            </div>
-
-            <div class="form-group">
-                <label for="email">📧 Email Address:</label>
-                <input type="email" id="email" name="email"
-                       placeholder="your.email@example.com"
-                       required>
-            </div>
-
-            <div class="form-row">
-                <div class="form-group">
-                    <label for="user_type">👥 User Type:</label>
-                    <select id="user_type" name="user_type" required>
-                        <option value="">Select your type</option>
-                        <option value="new">🆕 New User</option>
-                        <option value="standard">⭐ Standard User</option>
-                        <option value="premium">💎 Premium User</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label for="priority">🚨 Priority Level:</label>
-                    <select id="priority" name="priority" required>
-                        <option value="">Select priority</option>
-                        <option value="low">🟢 Low</option>
-                        <option value="medium">🟡 Medium</option>
-                        <option value="high">🔴 High</option>
-                        <option value="urgent">⚡ Urgent</option>
-                    </select>
-                </div>
-            </div>
-
-            <div class="form-group">
-                <label for="subject">📋 Subject:</label>
-                <input type="text" id="subject" name="subject"
-                       placeholder="Brief description of your inquiry"
-                       required maxlength="100">
-            </div>
-
-            <div class="form-group">
-                <label for="message">💬 Message:</label>
-                <textarea id="message" name="message"
-                         placeholder="Please provide detailed information about your request..."
-                         required maxlength="1000"></textarea>
-            </div>
-
-            <button type="submit">🚀 Send Message</button>
-        </form>
-    </div>
-</body>
-</html>`
-
+	// Render form fields from cached field order
+	formFieldsHTML := renderFieldsFromCache(c.fieldsCache)
 	parser := jet.NewWithMemory(jet.WithDelims("{{", "}}"))
-	rs, err := parser.ParseTemplate(htmlTemplate, map[string]any{
+	layout := strings.Replace(c.HTMLLayout, "{{form_fields}}", formFieldsHTML, 1)
+	rs, err := parser.ParseTemplate(layout, map[string]any{
 		"task_id": ctx.Value("task_id"),
 	})
 	if err != nil {
@@ -317,6 +266,119 @@ func (c *ContactFormNode) ProcessTask(ctx context.Context, task *mq.Task) mq.Res
 	}
 	bt, _ := json.Marshal(data)
 	return mq.Result{Payload: bt, Ctx: ctx}
+}
+
+// validateAgainstSchema checks inputData against JSONSchema requirements
+func validateAgainstSchema(inputData map[string]any, schema map[string]any) []string {
+	var errors []string
+	if _, ok := schema["properties"].(map[string]any); ok {
+		if required, ok := schema["required"].([]any); ok {
+			for _, field := range required {
+				fname := field.(string)
+				if val, exists := inputData[fname]; !exists || val == "" {
+					errors = append(errors, fname+" is required")
+				}
+			}
+		}
+		// Add more validation as needed (type, format, etc.)
+	}
+	return errors
+}
+
+// parseFieldsFromSchema extracts and sorts fields from schema, preserving order
+func parseFieldsFromSchema(schema map[string]any) []fieldInfo {
+	var fields []fieldInfo
+	if props, ok := schema["properties"].(map[string]any); ok {
+		keyOrder := make([]string, 0, len(props))
+		for k := range props {
+			keyOrder = append(keyOrder, k)
+		}
+		for idx, name := range keyOrder {
+			field := props[name].(map[string]any)
+			order := -1
+			if o, ok := field["order"].(int); ok {
+				order = o
+			} else if o, ok := field["order"].(float64); ok {
+				order = int(o)
+			}
+			fields = append(fields, fieldInfo{name: name, order: order, def: field, definedIndex: idx})
+		}
+		if len(fields) > 1 {
+			sort.SliceStable(fields, func(i, j int) bool {
+				if fields[i].order != -1 && fields[j].order != -1 {
+					return fields[i].order < fields[j].order
+				} else if fields[i].order != -1 {
+					return true
+				} else if fields[j].order != -1 {
+					return false
+				}
+				return fields[i].definedIndex < fields[j].definedIndex
+			})
+		}
+	}
+	return fields
+}
+
+// renderFieldsFromCache generates HTML for form fields from cached field order
+func renderFieldsFromCache(fields []fieldInfo) string {
+	var html strings.Builder
+	for _, f := range fields {
+		label := f.name
+		if l, ok := f.def["title"].(string); ok {
+			label = l
+		}
+		// UI config
+		ui := map[string]any{}
+		if uiRaw, ok := f.def["ui"].(map[string]any); ok {
+			ui = uiRaw
+		}
+		// Control type
+		controlType := "input"
+		if ct, ok := ui["control"].(string); ok {
+			controlType = ct
+		}
+		// CSS classes
+		classes := "form-group"
+		if cls, ok := ui["class"].(string); ok {
+			classes = cls
+		}
+		// Name attribute
+		nameAttr := f.name
+		if n, ok := ui["name"].(string); ok {
+			nameAttr = n
+		}
+		// Type
+		typeStr := "text"
+		if t, ok := f.def["type"].(string); ok {
+			switch t {
+			case "string":
+				typeStr = "text"
+			case "email":
+				typeStr = "email"
+			case "number":
+				typeStr = "number"
+			case "textarea":
+				typeStr = "textarea"
+			}
+		}
+		// Render control
+		if controlType == "textarea" || typeStr == "textarea" {
+			html.WriteString(fmt.Sprintf(`<div class="%s"><label for="%s">%s:</label><textarea id="%s" name="%s" placeholder="%s"></textarea></div>`, classes, nameAttr, label, nameAttr, nameAttr, label))
+		} else if controlType == "select" {
+			// Optionally support select with options in ui["options"]
+			optionsHTML := ""
+			if opts, ok := ui["options"].([]any); ok {
+				for _, opt := range opts {
+					optStr := fmt.Sprintf("%v", opt)
+					optionsHTML += fmt.Sprintf(`<option value="%s">%s</option>`, optStr, optStr)
+				}
+			}
+			html.WriteString(fmt.Sprintf(`<div class="%s"><label for="%s">%s:</label><select id="%s" name="%s">%s</select></div>`, classes, nameAttr, label, nameAttr, nameAttr, optionsHTML))
+		} else {
+			html.WriteString(fmt.Sprintf(`<div class="%s"><label for="%s">%s:</label><input type="%s" id="%s" name="%s" placeholder="%s"></div>`, classes, nameAttr, label, typeStr, nameAttr, nameAttr, label))
+		}
+	}
+	return html.String()
 }
 
 // ValidateContactNode - Validates contact form data

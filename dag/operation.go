@@ -13,7 +13,6 @@ import (
 	"github.com/oarkflow/dipper"
 	"github.com/oarkflow/errors"
 	"github.com/oarkflow/expr"
-	"github.com/oarkflow/xid"
 	"golang.org/x/exp/maps"
 
 	"github.com/oarkflow/mq"
@@ -506,7 +505,7 @@ func init() {
 	})
 	expr.AddFunction("uniqueid", func(params ...interface{}) (interface{}, error) {
 		// create a new xid
-		return xid.New().String(), nil
+		return mq.NewID(), nil
 	})
 	expr.AddFunction("now", func(params ...interface{}) (interface{}, error) {
 		// get the current time in UTC
