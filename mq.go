@@ -745,52 +745,104 @@ func (b *Broker) Start(ctx context.Context) error {
 	if b.opts.tlsConfig.UseTLS {
 		cert, err := tls.LoadX509KeyPair(b.opts.tlsConfig.CertPath, b.opts.tlsConfig.KeyPath)
 		if err != nil {
-			return fmt.Errorf("failed to load TLS certificates: %v", err)
+			return WrapError(err, "failed to load TLS certificates for broker", "BROKER_TLS_CERT_ERROR")
 		}
 		tlsConfig := &tls.Config{
 			Certificates: []tls.Certificate{cert},
 		}
 		listener, err = tls.Listen("tcp", b.opts.brokerAddr, tlsConfig)
 		if err != nil {
-			return fmt.Errorf("failed to start TLS listener: %v", err)
+			return WrapError(err, "TLS broker failed to listen on "+b.opts.brokerAddr, "BROKER_TLS_LISTEN_ERROR")
 		}
-		log.Println("BROKER - RUNNING_TLS ~> started on", b.opts.brokerAddr)
 	} else {
 		listener, err = net.Listen("tcp", b.opts.brokerAddr)
 		if err != nil {
-			return fmt.Errorf("failed to start TCP listener: %v", err)
+			return WrapError(err, "broker failed to listen on "+b.opts.brokerAddr, "BROKER_LISTEN_ERROR")
 		}
-		log.Println("BROKER - RUNNING ~> started on", b.opts.brokerAddr)
 	}
 	b.listener = listener
 	defer b.Close()
 	const maxConcurrentConnections = 100
 	sem := make(chan struct{}, maxConcurrentConnections)
 	for {
-		conn, err := listener.Accept()
-		if err != nil {
-			b.OnError(ctx, conn, err)
-			time.Sleep(50 * time.Millisecond)
-			continue
-		}
-		sem <- struct{}{}
-		go func(c net.Conn) {
-			defer func() {
-				<-sem
-				c.Close()
-			}()
-			for {
-				err := b.readMessage(ctx, c)
-				if err != nil {
-					if netErr, ok := err.(net.Error); ok && netErr.Temporary() {
-						log.Println("Temporary network error, retrying:", netErr)
-						continue
-					}
-					log.Println("Connection closed due to error:", err)
-					break
+		select {
+		case <-ctx.Done():
+			log.Printf("BROKER - Shutdown signal received")
+			return ctx.Err()
+		default:
+			conn, err := listener.Accept()
+			if err != nil {
+				if atomic.LoadInt32(&b.isShutdown) == 1 {
+					return nil
 				}
+				log.Printf("BROKER - Error accepting connection: %v", err)
+				continue
 			}
-		}(conn)
+
+			// Configure connection for broker-consumer communication with NO timeouts
+			if tcpConn, ok := conn.(*net.TCPConn); ok {
+				// Enable TCP keep-alive for all connections
+				tcpConn.SetKeepAlive(true)
+				tcpConn.SetKeepAlivePeriod(30 * time.Second)
+
+				// NEVER set any deadlines for broker-consumer connections
+				// These connections must remain open indefinitely for persistent communication
+				// DO NOT call: tcpConn.SetReadDeadline() or tcpConn.SetWriteDeadline()
+
+				log.Printf("BROKER - TCP keep-alive enabled for connection from %s (NO timeouts)", conn.RemoteAddr())
+			}
+
+			sem <- struct{}{}
+			go func() {
+				defer func() { <-sem }()
+				defer conn.Close()
+				b.handleConnection(ctx, conn)
+			}()
+		}
+	}
+}
+
+// handleConnection handles a single connection with NO timeouts for persistent broker-consumer communication
+func (b *Broker) handleConnection(ctx context.Context, conn net.Conn) {
+	defer func() {
+		if r := recover(); r != nil {
+			b.logger.Error("Connection handler panic",
+				logger.Field{Key: "panic", Value: fmt.Sprintf("%v", r)},
+				logger.Field{Key: "remote_addr", Value: conn.RemoteAddr().String()})
+		}
+		conn.Close()
+	}()
+
+	// CRITICAL: Never set any timeouts on broker-consumer connections
+	// These connections must remain open indefinitely for persistent communication
+
+	for {
+		select {
+		case <-ctx.Done():
+			b.logger.Debug("Context cancelled, closing connection",
+				logger.Field{Key: "remote_addr", Value: conn.RemoteAddr().String()})
+			return
+		default:
+			// Read message WITHOUT any timeout - this is crucial for persistent connections
+			if err := b.readMessage(ctx, conn); err != nil {
+				if err.Error() == "EOF" || strings.Contains(err.Error(), "closed network connection") {
+					b.logger.Debug("Connection closed by client",
+						logger.Field{Key: "remote_addr", Value: conn.RemoteAddr().String()})
+					return
+				}
+				// Don't return on timeout errors - they should not occur since we don't set timeouts
+				if strings.Contains(err.Error(), "timeout") {
+					b.logger.Warn("Unexpected timeout on connection (should not happen)",
+						logger.Field{Key: "remote_addr", Value: conn.RemoteAddr().String()},
+						logger.Field{Key: "error", Value: err.Error()})
+					continue
+				}
+				b.logger.Error("Connection error",
+					logger.Field{Key: "remote_addr", Value: conn.RemoteAddr().String()},
+					logger.Field{Key: "error", Value: err.Error()})
+				return
+			}
+		}
 	}
 }
 
@@ -1500,7 +1552,9 @@ func (b *Broker) startEnhancedBroker(ctx context.Context) error {
 func (b *Broker) handleEnhancedConnection(ctx context.Context, conn net.Conn) {
 	defer func() {
 		if r := recover(); r != nil {
-			b.logger.Error("Connection handler panic", logger.Field{Key: "panic", Value: fmt.Sprintf("%v", r)})
+			b.logger.Error("Connection handler panic",
+				logger.Field{Key: "panic", Value: fmt.Sprintf("%v", r)},
+				logger.Field{Key: "remote_addr", Value: conn.RemoteAddr().String()})
 		}
 		conn.Close()
 	}()

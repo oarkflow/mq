@@ -593,10 +593,10 @@ func DefaultProductionConfig() *ProductionConfig {
 			Address:              "localhost",
 			Port:                 8080,
 			MaxConnections:       1000,
-			ConnectionTimeout:    30 * time.Second,
-			ReadTimeout:          30 * time.Second,
-			WriteTimeout:         30 * time.Second,
-			IdleTimeout:          5 * time.Minute,
+			ConnectionTimeout:    0, // NO timeout for broker-consumer connections
+			ReadTimeout:          0, // NO read timeout - consumers need persistent connections
+			WriteTimeout:         0, // NO write timeout - allow unlimited time for large messages
+			IdleTimeout:          0, // NO idle timeout - keep connections alive indefinitely
 			KeepAlive:            true,
 			KeepAlivePeriod:      30 * time.Second,
 			MaxQueueDepth:        10000,

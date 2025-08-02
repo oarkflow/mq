@@ -652,8 +652,9 @@ func (c *Consumer) Consume(ctx context.Context) error {
 	}
 }
 
+// processWithTimeout processes messages WITHOUT I/O timeouts for persistent broker connections
 func (c *Consumer) processWithTimeout(ctx context.Context) error {
-	// Consumer should wait indefinitely for messages from broker - no I/O timeout
+	// Consumer should wait indefinitely for messages from broker - NO I/O timeout
 	// Only individual task processing should have timeouts, not the consumer connection
 	c.connMutex.RLock()
 	conn := c.conn
@@ -663,7 +664,9 @@ func (c *Consumer) processWithTimeout(ctx context.Context) error {
 		return fmt.Errorf("no connection available")
 	}
 
-	// Read message without timeout - consumer should be long-running background service
+	// CRITICAL: Never set any connection timeouts for broker-consumer communication
+	// The consumer must maintain a persistent connection to the broker indefinitely
+	// Read message without ANY timeout - consumer should be long-running background service
 	err := c.readMessage(ctx, conn)
 
 	// If message was processed successfully, reset reconnection attempts
