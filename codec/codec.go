@@ -252,7 +252,7 @@ func (c *Codec) SendMessage(ctx context.Context, conn net.Conn, msg *Message) er
 	return c.sendRawMessage(ctx, conn, msg)
 }
 
-// sendRawMessage handles the actual sending of a message or fragment WITHOUT timeouts
+// sendRawMessage handles the actual sending of a message or fragment WITHOUT any timeouts
 func (c *Codec) sendRawMessage(ctx context.Context, conn net.Conn, msg *Message) error {
 	// Serialize message
 	data, err := msg.Serialize()
@@ -283,21 +283,9 @@ func (c *Codec) sendRawMessage(ctx context.Context, conn net.Conn, msg *Message)
 	binary.BigEndian.PutUint32(buffer.B[:4], uint32(len(data)))
 	copy(buffer.B[4:], data)
 
-	// CRITICAL: DO NOT set any write deadlines for broker-consumer connections
+	// CRITICAL: NEVER set any write deadlines for broker-consumer connections
 	// These connections must remain open indefinitely for persistent communication
-	// Only set timeout if explicitly configured AND not zero (for backward compatibility)
-	if c.config.WriteTimeout > 0 {
-		deadline := time.Now().Add(c.config.WriteTimeout)
-		if ctxDeadline, ok := ctx.Deadline(); ok && ctxDeadline.Before(deadline) {
-			deadline = ctxDeadline
-		}
-
-		if err := conn.SetWriteDeadline(deadline); err != nil {
-			c.incrementErrors()
-			return fmt.Errorf("failed to set write deadline: %w", err)
-		}
-		defer conn.SetWriteDeadline(time.Time{})
-	}
+	// Completely removed all timeout/deadline logic to prevent I/O timeouts
 
 	// Write with buffering
 	writer := bufio.NewWriter(conn)
@@ -322,7 +310,7 @@ func (c *Codec) sendRawMessage(ctx context.Context, conn net.Conn, msg *Message)
 	return nil
 }
 
-// ReadMessage reads a message WITHOUT timeouts for persistent broker-consumer connections
+// ReadMessage reads a message WITHOUT any timeouts for persistent broker-consumer connections
 func (c *Codec) ReadMessage(ctx context.Context, conn net.Conn) (*Message, error) {
 	// Check context cancellation before proceeding
 	if err := ctx.Err(); err != nil {
@@ -330,21 +318,9 @@ func (c *Codec) ReadMessage(ctx context.Context, conn net.Conn) (*Message, error
 		return nil, fmt.Errorf("context ended before read: %w", err)
 	}
 
-	// CRITICAL: DO NOT set any read deadlines for broker-consumer connections
+	// CRITICAL: NEVER set any read deadlines for broker-consumer connections
 	// These connections must remain open indefinitely for persistent communication
-	// Only set timeout if explicitly configured AND not zero (for backward compatibility)
-	if c.config.ReadTimeout > 0 {
-		deadline := time.Now().Add(c.config.ReadTimeout)
-		if ctxDeadline, ok := ctx.Deadline(); ok && ctxDeadline.Before(deadline) {
-			deadline = ctxDeadline
-		}
-
-		if err := conn.SetReadDeadline(deadline); err != nil {
-			c.incrementErrors()
-			return nil, fmt.Errorf("failed to set read deadline: %w", err)
-		}
-		defer conn.SetReadDeadline(time.Time{})
-	}
+	// Completely removed all timeout/deadline logic to prevent I/O timeouts
 
 	// Read length prefix
 	lengthBytes := make([]byte, 4)

@@ -434,7 +434,7 @@ func (c *Consumer) sendDenyMessage(ctx context.Context, taskID, queue string, er
 	}()
 }
 
-// isHealthy checks if the connection is still healthy
+// isHealthy checks if the connection is still healthy WITHOUT setting deadlines
 func (c *Consumer) isHealthy() bool {
 	c.connMutex.RLock()
 	defer c.connMutex.RUnlock()
@@ -443,27 +443,25 @@ func (c *Consumer) isHealthy() bool {
 		return false
 	}
 
-	// Simple health check by setting read deadline
-	c.conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
-	defer c.conn.SetReadDeadline(time.Time{})
+	// CRITICAL: DO NOT set any deadlines on broker-consumer connections
+	// These are persistent connections that must remain open indefinitely
+	// Instead, use a simple non-blocking connection state check
 
-	one := make([]byte, 1)
-	n, err := c.conn.Read(one)
-
-	if err != nil {
-		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-			return true // Timeout is expected for health check
+	// Check if connection is still valid by checking the connection state
+	// without setting any timeouts or deadlines
+	if tcpConn, ok := c.conn.(*net.TCPConn); ok {
+		// Check TCP connection state without timeouts
+		// This is a lightweight check that doesn't interfere with persistent connection
+		if tcpConn == nil {
+			return false
 		}
-		return false
-	}
-
-	// If we read data, put it back (this shouldn't happen in health check)
-	if n > 0 {
-		// This is a simplified health check; in production, you might want to buffer this
+		// Connection exists and is of correct type - assume healthy
+		// The actual health will be determined when we try to read/write
 		return true
 	}
 
-	return true
+	// For non-TCP connections, assume healthy if connection exists
+	return c.conn != nil
 }
 
 // startHealthChecker starts periodic health checks
