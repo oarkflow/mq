@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Advanced Template</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="form.css">
+    <style>
+        .form-container {
+            padding: 20px;
+            border: 1px solid #ccc;
+            background-color: #f9f9f9;
+        }
+    </style>
+</head>
+
+<body class="bg-gray-200">
+    <div class="form-container rounded-lg">
+        <h1 class="text-xl font-bold mb-4">Form Fields</h1>
+        <div class="grid grid-cols-3 gap-3">
+            {{form_fields}}
+        </div>
+    </div>
+</body>
+
+</html>
