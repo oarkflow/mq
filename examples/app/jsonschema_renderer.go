@@ -54,19 +54,29 @@ func (r *JSONSchemaRenderer) interpolateTemplate(templateStr string) string {
 		return templateStr
 	}
 
-	// Create a template and execute it with the template data
+	// Simple string replacement approach as fallback
+	result := templateStr
+	for key, value := range r.TemplateData {
+		placeholder := fmt.Sprintf("{{%s}}", key)
+		if valueStr, ok := value.(string); ok {
+			result = bytes.NewBufferString(result).String()
+			result = fmt.Sprintf("%s", bytes.ReplaceAll([]byte(result), []byte(placeholder), []byte(valueStr)))
+		}
+	}
+
+	// Try Go template parsing as well
 	tmpl, err := template.New("interpolate").Parse(templateStr)
 	if err != nil {
-		return templateStr // Return original if parsing fails
+		return result // Return string replacement result if template parsing fails
 	}
 
-	var result bytes.Buffer
-	err = tmpl.Execute(&result, r.TemplateData)
+	var templateResult bytes.Buffer
+	err = tmpl.Execute(&templateResult, r.TemplateData)
 	if err != nil {
-		return templateStr // Return original if execution fails
+		return result // Return string replacement result if execution fails
 	}
 
-	return result.String()
+	return templateResult.String()
 }
 
 // RenderFields generates HTML for fields based on the JSONSchema
