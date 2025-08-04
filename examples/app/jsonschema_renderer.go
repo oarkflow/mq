@@ -14,6 +14,12 @@ type FieldInfo struct {
 	Definition map[string]interface{}
 }
 
+// GroupInfo represents metadata for a group extracted from JSONSchema
+type GroupInfo struct {
+	Title  string
+	Fields []FieldInfo
+}
+
 // JSONSchemaRenderer is responsible for rendering HTML fields based on JSONSchema
 type JSONSchemaRenderer struct {
 	Schema     map[string]interface{}
@@ -30,28 +36,38 @@ func NewJSONSchemaRenderer(schema map[string]interface{}, htmlLayout string) *JS
 
 // RenderFields generates HTML for fields based on the JSONSchema
 func (r *JSONSchemaRenderer) RenderFields() (string, error) {
-	fields := parseFieldsFromSchema(r.Schema)
-	requiredFields := make(map[string]bool)
-	if requiredList, ok := r.Schema["required"].([]interface{}); ok {
-		for _, field := range requiredList {
-			if fieldName, ok := field.(string); ok {
-				requiredFields[fieldName] = true
-			}
+	groups := parseGroupsFromSchema(r.Schema)
+
+	var groupHTML bytes.Buffer
+	var fieldHTML bytes.Buffer
+	for _, group := range groups {
+		groupHTML.WriteString(renderGroup(group))
+		for _, field := range group.Fields {
+			fieldHTML.WriteString(renderField(field))
 		}
 	}
+	formConfig := r.Schema["form"].(map[string]interface{})
+	formAttributes := fmt.Sprintf(
+		`class="%s" action="%s" method="%s" enctype="%s"`,
+		formConfig["class"],
+		formConfig["action"],
+		formConfig["method"],
+		formConfig["enctype"],
+	)
 
-	sort.Slice(fields, func(i, j int) bool {
-		return fields[i].Order < fields[j].Order
-	})
-
-	var fieldHTML bytes.Buffer
-	for _, field := range fields {
-		fieldHTML.WriteString(renderField(field, requiredFields))
-	}
-
+	buttonsHTML := renderButtons(formConfig)
 	tmpl, err := template.New("layout").Funcs(template.FuncMap{
 		"form_fields": func() template.HTML {
 			return template.HTML(fieldHTML.String())
+		},
+		"form_groups": func() template.HTML {
+			return template.HTML(groupHTML.String())
+		},
+		"form_buttons": func() template.HTML {
+			return template.HTML(buttonsHTML)
+		},
+		"form_attributes": func() template.HTML {
+			return template.HTML(formAttributes)
 		},
 	}).Parse(r.HTMLLayout)
 	if err != nil {
@@ -64,40 +80,62 @@ func (r *JSONSchemaRenderer) RenderFields() (string, error) {
 		return "", fmt.Errorf("failed to execute HTML template: %w", err)
 	}
 
-	return fmt.Sprintf(`<form>%s</form>`, renderedHTML.String()), nil
+	return renderedHTML.String(), nil
 }
 
-// parseFieldsFromSchema extracts and sorts fields from schema
-func parseFieldsFromSchema(schema map[string]interface{}) []FieldInfo {
+// parseGroupsFromSchema extracts and sorts groups and fields from schema
+func parseGroupsFromSchema(schema map[string]interface{}) []GroupInfo {
+	formConfig, ok := schema["form"].(map[string]interface{})
+	if !ok {
+		return nil
+	}
+
 	properties, ok := schema["properties"].(map[string]interface{})
 	if !ok {
 		return nil
 	}
 
-	var fields []FieldInfo
-	for name, definition := range properties {
-		order := 0
-		if defMap, ok := definition.(map[string]interface{}); ok {
-			if ord, exists := defMap["order"].(float64); exists {
-				order = int(ord) // Ensure consistent type for sorting
+	var groups []GroupInfo
+	for _, group := range formConfig["groups"].([]interface{}) {
+		groupMap := group.(map[string]interface{})
+		var fields []FieldInfo
+		for _, fieldName := range groupMap["fields"].([]interface{}) {
+			fieldDef := properties[fieldName.(string)].(map[string]interface{})
+			order := 0
+			if ord, exists := fieldDef["order"].(int); exists {
+				order = ord
 			}
 			fields = append(fields, FieldInfo{
-				Name:       name,
+				Name:       fieldName.(string),
 				Order:      order,
-				Definition: defMap,
+				Definition: fieldDef,
 			})
 		}
+		sort.Slice(fields, func(i, j int) bool {
+			return fields[i].Order < fields[j].Order
+		})
+		groups = append(groups, GroupInfo{
+			Title:  groupMap["title"].(string),
+			Fields: fields,
+		})
 	}
 
-	sort.Slice(fields, func(i, j int) bool {
-		return fields[i].Order < fields[j].Order
-	})
+	return groups
+}
 
-	return fields
+// renderGroup generates HTML for a single group
+func renderGroup(group GroupInfo) string {
+	var groupHTML bytes.Buffer
+	groupHTML.WriteString(fmt.Sprintf(`<fieldset><legend>%s</legend>`, group.Title))
+	for _, field := range group.Fields {
+		groupHTML.WriteString(renderField(field))
+	}
+	groupHTML.WriteString(`</fieldset>`)
+	return groupHTML.String()
 }
 
 // renderField generates HTML for a single field
-func renderField(field FieldInfo, requiredFields map[string]bool) string {
+func renderField(field FieldInfo) string {
 	ui, ok := field.Definition["ui"].(map[string]interface{})
 	if !ok {
 		return ""
@@ -109,7 +147,16 @@ func renderField(field FieldInfo, requiredFields map[string]bool) string {
 	title, _ := field.Definition["title"].(string)
 	placeholder, _ := field.Definition["placeholder"].(string)
 
-	isRequired := requiredFields[name]
+	isRequired := false
+	if requiredFields, ok := field.Definition["required"].([]interface{}); ok {
+		for _, rf := range requiredFields {
+			if rf == name {
+				isRequired = true
+				break
+			}
+		}
+	}
+
 	required := ""
 	if isRequired {
 		required = "required"
@@ -145,4 +192,16 @@ func renderField(field FieldInfo, requiredFields map[string]bool) string {
 	default:
 		return ""
 	}
+}
+
+// renderButtons generates HTML for form buttons
+func renderButtons(formConfig map[string]interface{}) string {
+	var buttonsHTML bytes.Buffer
+	if submitConfig, ok := formConfig["submit"].(map[string]interface{}); ok {
+		buttonsHTML.WriteString(fmt.Sprintf(`<button type="%s" class="%s">%s</button>`, submitConfig["type"], submitConfig["class"], submitConfig["label"]))
+	}
+	if resetConfig, ok := formConfig["reset"].(map[string]interface{}); ok {
+		buttonsHTML.WriteString(fmt.Sprintf(`<button type="%s" class="%s">%s</button>`, resetConfig["type"], resetConfig["class"], resetConfig["label"]))
+	}
+	return buttonsHTML.String()
 }

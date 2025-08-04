@@ -8,9 +8,14 @@
 </head>
 
 <body class="bg-gray-100">
-    <div class="form-container p-4 bg-white shadow-md rounded">
-        {{form_fields}}
-    </div>
+    <form {{form_attributes}}>
+        <div class="form-container p-4 bg-white shadow-md rounded">
+            {{form_groups}}
+            <div class="mt-4 flex gap-2">
+                {{form_buttons}}
+            </div>
+        </div>
+    </form>
 </body>
 
 </html>

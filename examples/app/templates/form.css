@@ -60,21 +60,51 @@ button {
     padding: 0.75rem 1.5rem;
     font-size: 1rem;
     font-weight: bold;
-    color: #fff;
-    background-color: #007bff;
     border: none;
     border-radius: 0.25rem;
     cursor: pointer;
-    transition: background-color 0.3s ease;
+    transition: background-color 0.3s ease, transform 0.2s ease;
 }
 
 button:hover {
-    background-color: #0056b3;
+    transform: scale(1.05);
+}
+
+button:active {
+    transform: scale(0.95);
 }
 
 button:disabled {
     background-color: #ccc;
     cursor: not-allowed;
+}
+
+/* Primary Button */
+.btn-primary {
+    color: #fff;
+    background-color: #007bff;
+}
+
+.btn-primary:hover {
+    background-color: #0056b3;
+}
+
+.btn-primary:active {
+    background-color: #004085;
+}
+
+/* Secondary Button */
+.btn-secondary {
+    color: #fff;
+    background-color: #6c757d;
+}
+
+.btn-secondary:hover {
+    background-color: #5a6268;
+}
+
+.btn-secondary:active {
+    background-color: #4e555b;
 }
 
 /* Additional layout-specific styles */

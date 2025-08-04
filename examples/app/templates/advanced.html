@@ -15,12 +15,15 @@
 </head>
 
 <body class="bg-gray-200">
-    <div class="form-container rounded-lg">
-        <h1 class="text-xl font-bold mb-4">Form Fields</h1>
-        <div class="grid grid-cols-3 gap-3">
-            {{form_fields}}
+    <form {{form_attributes}}>
+        <div class="form-container rounded-lg">
+            <h1 class="text-xl font-bold mb-4">Form Fields</h1>
+            {{form_groups}}
+            <div class="mt-4">
+                {{form_buttons}}
+            </div>
         </div>
-    </div>
+    </form>
 </body>
 
 </html>

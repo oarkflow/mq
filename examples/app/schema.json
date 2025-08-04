@@ -83,23 +83,31 @@
         "enctype": "application/x-www-form-urlencoded",
         "groups": [
             {
-                "title": "User Information",
-                "fields": [ "first_name", "last_name", "email" ]
+                "title": {
+                    "text": "User Information",
+                    "class": "text-lg font-semibold mb-2"
+                },
+                "fields": [ "first_name", "last_name", "email" ],
+                "class": "flex gap-2 items-center justify-between"
             },
             {
-                "title": "Ticket Details",
-                "fields": [ "user_type", "priority", "subject", "message" ]
+                "title": {
+                    "text": "Details",
+                    "class": "text-lg font-semibold mb-2"
+                },
+                "fields": [ "user_type", "priority", "subject", "message" ],
+                "class": "flex gap-2 items-center justify-between"
             }
         ],
         "submit": {
             "type": "submit",
             "label": "Submit",
-            "class": "btn btn-primary"
+            "class": "btn btn-primary px-2 py-1"
         },
         "reset": {
             "type": "reset",
             "label": "Reset",
-            "class": "btn btn-secondary"
+            "class": "btn btn-secondary px-2 py-1"
         }
     }
 }
