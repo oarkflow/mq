@@ -32,6 +32,7 @@ type JSONSchemaRenderer struct {
 	Schema       map[string]interface{}
 	HTMLLayout   string
 	TemplateData map[string]interface{} // Data for template interpolation
+	cachedHTML   string                 // Cached rendered HTML
 }
 
 // NewJSONSchemaRenderer creates a new instance of JSONSchemaRenderer
@@ -81,24 +82,23 @@ func (r *JSONSchemaRenderer) interpolateTemplate(templateStr string) string {
 
 // RenderFields generates HTML for fields based on the JSONSchema
 func (r *JSONSchemaRenderer) RenderFields() (string, error) {
-	groups := parseGroupsFromSchema(r.Schema)
+	// Return cached HTML if available
+	if r.cachedHTML != "" {
+		return r.cachedHTML, nil
+	}
 
+	groups := parseGroupsFromSchema(r.Schema)
 	var groupHTML bytes.Buffer
 	for _, group := range groups {
 		groupHTML.WriteString(renderGroup(group))
 	}
 
 	formConfig := r.Schema["form"].(map[string]interface{})
-
-	// Extract individual form attributes and interpolate template values
 	formClass, _ := formConfig["class"].(string)
 	formAction, _ := formConfig["action"].(string)
 	formMethod, _ := formConfig["method"].(string)
 	formEnctype, _ := formConfig["enctype"].(string)
-
-	// Interpolate template placeholders in form action
 	formAction = r.interpolateTemplate(formAction)
-
 	buttonsHTML := renderButtons(formConfig)
 	tmpl, err := template.New("layout").Funcs(template.FuncMap{
 		"form_groups": func() template.HTML {
@@ -123,7 +123,8 @@ func (r *JSONSchemaRenderer) RenderFields() (string, error) {
 		return "", fmt.Errorf("failed to execute HTML template: %w", err)
 	}
 
-	return renderedHTML.String(), nil
+	r.cachedHTML = renderedHTML.String()
+	return r.cachedHTML, nil
 }
 
 // parseGroupsFromSchema extracts and sorts groups and fields from schema
@@ -231,7 +232,16 @@ func renderGroup(group GroupInfo) string {
 	return groupHTML.String()
 }
 
-// renderField generates HTML for a single field
+// Templates for field rendering
+var fieldTemplates = map[string]string{
+	"input":    `<div class="{{.Class}}"><label for="{{.Name}}">{{.Title}}</label><input type="{{.InputType}}" id="{{.Name}}" name="{{.Name}}" placeholder="{{.Placeholder}}" {{.Required}} {{.AdditionalAttributes}} /></div>`,
+	"textarea": `<div class="{{.Class}}"><label for="{{.Name}}">{{.Title}}</label><textarea id="{{.Name}}" name="{{.Name}}" placeholder="{{.Placeholder}}" {{.Required}} {{.AdditionalAttributes}}></textarea></div>`,
+	"select":   `<div class="{{.Class}}"><label for="{{.Name}}">{{.Title}}</label><select id="{{.Name}}" name="{{.Name}}" {{.Required}} {{.AdditionalAttributes}}>{{.OptionsHTML}}</select></div>`,
+	"h":        `<{{.Control}} class="{{.Class}}" id="{{.Name}}" {{.AdditionalAttributes}}>{{.Title}}</{{.Control}}>`,
+	"p":        `<p class="{{.Class}}" id="{{.Name}}" {{.AdditionalAttributes}}>{{.Title}}</p>`,
+	"a":        `<a class="{{.Class}}" id="{{.Name}}" href="{{.Href}}" {{.AdditionalAttributes}}>{{.Title}}</a>`,
+}
+
 func renderField(field FieldInfo) string {
 	ui, ok := field.Definition["ui"].(map[string]interface{})
 	if !ok {
@@ -244,16 +254,14 @@ func renderField(field FieldInfo) string {
 	title, _ := field.Definition["title"].(string)
 	placeholder, _ := field.Definition["placeholder"].(string)
 
-	// Check if field is required
 	isRequired, _ := field.Definition["isRequired"].(bool)
-
 	required := ""
+	titleHTML := title
 	if isRequired {
 		required = "required"
-		title += ` <span class="required">*</span>` // Add asterisk for required fields
+		titleHTML += ` <span class="required">*</span>`
 	}
 
-	// Handle input type from ui config
 	inputType := "text"
 	if uiType, ok := ui["type"].(string); ok {
 		inputType = uiType
@@ -261,45 +269,94 @@ func renderField(field FieldInfo) string {
 		inputType = "email"
 	}
 
-	additionalAttributes := ""
+	var additionalAttributes bytes.Buffer
 	for key, value := range field.Definition {
-		if key != "title" && key != "ui" && key != "placeholder" && key != "type" && key != "order" && key != "isRequired" {
-			additionalAttributes += fmt.Sprintf(` %s="%v"`, key, value)
+		switch key {
+		case "title", "ui", "placeholder", "type", "order", "isRequired":
+			continue
+		default:
+			additionalAttributes.WriteString(fmt.Sprintf(` %s="%v"`, key, value))
 		}
+	}
+
+	data := map[string]interface{}{
+		"Class":                class,
+		"Name":                 name,
+		"Title":                template.HTML(titleHTML),
+		"Placeholder":          placeholder,
+		"Required":             required,
+		"AdditionalAttributes": template.HTML(additionalAttributes.String()),
+		"InputType":            inputType,
+		"Control":              control,
 	}
 
 	switch control {
 	case "input":
-		return fmt.Sprintf(`<div class="%s"><label for="%s">%s</label><input type="%s" id="%s" name="%s" placeholder="%s" %s %s /></div>`, class, name, title, inputType, name, name, placeholder, required, additionalAttributes)
+		tmpl := template.Must(template.New("input").Parse(fieldTemplates["input"]))
+		var buf bytes.Buffer
+		tmpl.Execute(&buf, data)
+		return buf.String()
 	case "textarea":
-		return fmt.Sprintf(`<div class="%s"><label for="%s">%s</label><textarea id="%s" name="%s" placeholder="%s" %s %s></textarea></div>`, class, name, title, name, name, placeholder, required, additionalAttributes)
+		tmpl := template.Must(template.New("textarea").Parse(fieldTemplates["textarea"]))
+		var buf bytes.Buffer
+		tmpl.Execute(&buf, data)
+		return buf.String()
 	case "select":
 		options, _ := ui["options"].([]interface{})
 		var optionsHTML bytes.Buffer
 		for _, option := range options {
 			optionsHTML.WriteString(fmt.Sprintf(`<option value="%v">%v</option>`, option, option))
 		}
-		return fmt.Sprintf(`<div class="%s"><label for="%s">%s</label><select id="%s" name="%s" %s %s>%s</select></div>`, class, name, title, name, name, required, additionalAttributes, optionsHTML.String())
+		data["OptionsHTML"] = template.HTML(optionsHTML.String())
+		tmpl := template.Must(template.New("select").Parse(fieldTemplates["select"]))
+		var buf bytes.Buffer
+		tmpl.Execute(&buf, data)
+		return buf.String()
 	case "h1", "h2", "h3", "h4", "h5", "h6":
-		return fmt.Sprintf(`<%s class="%s" id="%s" %s>%s</%s>`, control, class, name, additionalAttributes, title, control)
+		data["Control"] = control
+		tmpl := template.Must(template.New("h").Parse(fieldTemplates["h"]))
+		var buf bytes.Buffer
+		tmpl.Execute(&buf, data)
+		return buf.String()
 	case "p":
-		return fmt.Sprintf(`<p class="%s" id="%s" %s>%s</p>`, class, name, additionalAttributes, title)
+		tmpl := template.Must(template.New("p").Parse(fieldTemplates["p"]))
+		var buf bytes.Buffer
+		tmpl.Execute(&buf, data)
+		return buf.String()
 	case "a":
 		href, _ := ui["href"].(string)
-		return fmt.Sprintf(`<a class="%s" id="%s" href="%s" %s>%s</a>`, class, name, href, additionalAttributes, title)
+		data["Href"] = href
+		tmpl := template.Must(template.New("a").Parse(fieldTemplates["a"]))
+		var buf bytes.Buffer
+		tmpl.Execute(&buf, data)
+		return buf.String()
 	default:
 		return ""
 	}
 }
 
-// renderButtons generates HTML for form buttons
+// Template for buttons
+var buttonTemplate = `<button type="{{.Type}}" class="{{.Class}}">{{.Label}}</button>`
+
 func renderButtons(formConfig map[string]interface{}) string {
 	var buttonsHTML bytes.Buffer
 	if submitConfig, ok := formConfig["submit"].(map[string]interface{}); ok {
-		buttonsHTML.WriteString(fmt.Sprintf(`<button type="%s" class="%s">%s</button>`, submitConfig["type"], submitConfig["class"], submitConfig["label"]))
+		data := map[string]interface{}{
+			"Type":  submitConfig["type"],
+			"Class": submitConfig["class"],
+			"Label": submitConfig["label"],
+		}
+		tmpl := template.Must(template.New("button").Parse(buttonTemplate))
+		tmpl.Execute(&buttonsHTML, data)
 	}
 	if resetConfig, ok := formConfig["reset"].(map[string]interface{}); ok {
-		buttonsHTML.WriteString(fmt.Sprintf(`<button type="%s" class="%s">%s</button>`, resetConfig["type"], resetConfig["class"], resetConfig["label"]))
+		data := map[string]interface{}{
+			"Type":  resetConfig["type"],
+			"Class": resetConfig["class"],
+			"Label": resetConfig["label"],
+		}
+		tmpl := template.Must(template.New("button").Parse(buttonTemplate))
+		tmpl.Execute(&buttonsHTML, data)
 	}
 	return buttonsHTML.String()
 }
