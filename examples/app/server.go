@@ -33,6 +33,18 @@ func main() {
 		}
 
 		renderer := NewJSONSchemaRenderer(schema, string(htmlLayout))
+
+		// Set template data for dynamic interpolation
+		templateData := map[string]interface{}{
+			"task_id": r.URL.Query().Get("task_id"), // Get task_id from query params
+		}
+		// If task_id is not provided, use a default value
+		if templateData["task_id"] == "" {
+			templateData["task_id"] = "default_task_123"
+		}
+
+		renderer.SetTemplateData(templateData)
+
 		renderedHTML, err := renderer.RenderFields()
 		if err != nil {
 			http.Error(w, fmt.Sprintf("Failed to render fields: %v", err), http.StatusInternalServerError)

@@ -8,6 +8,11 @@ body {
 
 .form-group {
     margin-bottom: 1rem;
+    width: 100%;
+}
+
+.required {
+    color: #dc3545; /* Bootstrap's danger color */
 }
 
 .form-group label {

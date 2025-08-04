@@ -78,7 +78,7 @@
     "required": [ "first_name", "last_name", "email", "user_type", "priority", "subject", "message" ],
     "form": {
         "class": "form-horizontal",
-        "action": "/submit",
+        "action": "/process?task_id={{task_id}}&next=true",
         "method": "POST",
         "enctype": "application/x-www-form-urlencoded",
         "groups": [
