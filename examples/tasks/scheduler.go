@@ -14,9 +14,7 @@ func SchedulerHandler(ctx context.Context, task *mq.Task) mq.Result {
 
 func SchedulerCallback(ctx context.Context, result mq.Result) error {
 	if result.Error != nil {
-		fmt.Println("Task failed!")
-	} else {
-		fmt.Println("Task completed successfully.")
+		fmt.Println("Task failed!", result.Error.Error())
 	}
 	return nil
 }

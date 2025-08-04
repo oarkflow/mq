@@ -15,6 +15,7 @@ func main() {
 		mq.WithHandler(tasks.SchedulerHandler),
 		mq.WithPoolCallback(tasks.SchedulerCallback),
 		mq.WithTaskStorage(mq.NewMemoryTaskStorage(10*time.Minute)),
+		mq.WithDiagnostics(false),
 	)
 
 	for i := 0; i < 100; i++ {

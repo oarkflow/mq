@@ -1,0 +1,79 @@
+{
+    "type": "object",
+    "properties": {
+        "first_name": {
+            "type": "string",
+            "title": "👤 First Name",
+            "order": 1,
+            "ui": {
+                "control": "input",
+                "class": "form-group",
+                "name": "first_name"
+            }
+        },
+        "last_name": {
+            "type": "string",
+            "title": "👤 Last Name",
+            "order": 2,
+            "ui": {
+                "control": "input",
+                "class": "form-group",
+                "name": "last_name"
+            }
+        },
+        "email": {
+            "type": "email",
+            "title": "📧 Email Address",
+            "order": 3,
+            "ui": {
+                "control": "input",
+                "type": "email",
+                "class": "form-group",
+                "name": "email"
+            }
+        },
+        "user_type": {
+            "type": "string",
+            "title": "👥 User Type",
+            "order": 4,
+            "ui": {
+                "control": "select",
+                "class": "form-group",
+                "name": "user_type",
+                "options": [ "new", "premium", "standard" ]
+            }
+        },
+        "priority": {
+            "type": "string",
+            "title": "🚨 Priority Level",
+            "order": 5,
+            "ui": {
+                "control": "select",
+                "class": "form-group",
+                "name": "priority",
+                "options": [ "low", "medium", "high", "urgent" ]
+            }
+        },
+        "subject": {
+            "type": "string",
+            "title": "📋 Subject",
+            "order": 6,
+            "ui": {
+                "control": "input",
+                "class": "form-group",
+                "name": "subject"
+            }
+        },
+        "message": {
+            "type": "textarea",
+            "title": "💬 Message",
+            "order": 7,
+            "ui": {
+                "control": "textarea",
+                "class": "form-group",
+                "name": "message"
+            }
+        }
+    },
+    "required": [ "first_name", "last_name", "email", "user_type", "priority", "subject", "message" ]
+}

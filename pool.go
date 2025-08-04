@@ -211,7 +211,6 @@ func (m *InMemoryMetricsRegistry) Register(metricName string, value interface{})
 	defer m.mu.Unlock()
 	if v, ok := value.(int64); ok {
 		m.metrics[metricName] = v
-		Logger.Info().Str("metric", metricName).Msgf("Registered metric: %d", v)
 	}
 }
 
@@ -627,7 +626,7 @@ func (wp *Pool) handleTaskFailure(task *QueueTask, result Result) {
 }
 
 // handleTaskSuccess processes successful task completion
-func (wp *Pool) handleTaskSuccess(task *QueueTask, result Result, ctx context.Context) {
+func (wp *Pool) handleTaskSuccess(task *QueueTask, _ Result, _ context.Context) {
 	// Reset circuit breaker failure count on success
 	if wp.circuitBreaker.Enabled {
 		atomic.StoreInt32(&wp.circuitBreakerFailureCount, 0)
@@ -809,7 +808,9 @@ func (wp *Pool) EnqueueTask(ctx context.Context, payload *Task, priority int) er
 	// Update metrics
 	atomic.AddInt64(&wp.metrics.TotalScheduled, 1)
 
-	wp.logger.Debug().Str("taskID", payload.ID).Msgf("Task enqueued with priority %d, queue depth: %d", priority, queueLen)
+	if wp.diagnosticsEnabled {
+		wp.logger.Debug().Str("taskID", payload.ID).Msgf("Task enqueued with priority %d, queue depth: %d", priority, queueLen)
+	}
 
 	return nil
 }
