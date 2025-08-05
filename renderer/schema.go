@@ -837,6 +837,7 @@ type RequestSchemaTemplate struct {
 
 var cache = make(map[string]*RequestSchemaTemplate)
 var mu = &sync.Mutex{}
+var BaseTemplateDir = "templates"
 
 func Get(schemaPath, template string) (*JSONSchemaRenderer, error) {
 	mu.Lock()
@@ -857,7 +858,7 @@ func Get(schemaPath, template string) (*JSONSchemaRenderer, error) {
 		return nil, fmt.Errorf("error compiling schema: %w", err)
 	}
 
-	templatePath := fmt.Sprintf("templates/%s.html", template)
+	templatePath := fmt.Sprintf("%s/%s.html", BaseTemplateDir, template)
 	htmlLayout, err := os.ReadFile(templatePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load template: %w", err)
