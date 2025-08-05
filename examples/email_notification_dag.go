@@ -20,17 +20,75 @@ import (
 	"github.com/oarkflow/mq/consts"
 )
 
+type ValidateLoginNode struct {
+	dag.Operation
+}
+
+func (v *ValidateLoginNode) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
+	var inputData map[string]any
+	if err := json.Unmarshal(task.Payload, &inputData); err != nil {
+		return mq.Result{Error: fmt.Errorf("invalid input data: %v", err), Ctx: ctx}
+	}
+
+	username, _ := inputData["username"].(string)
+	password, _ := inputData["password"].(string)
+
+	if username == "" || password == "" {
+		inputData["validation_error"] = "Username and password are required"
+		inputData["error_field"] = "credentials"
+		bt, _ := json.Marshal(inputData)
+		return mq.Result{Payload: bt, Ctx: ctx, ConditionStatus: "invalid"}
+	}
+
+	// Simulate user validation
+	if username == "admin" && password == "password" {
+		inputData["validation_status"] = "success"
+	} else {
+		inputData["validation_error"] = "Invalid username or password"
+		inputData["error_field"] = "credentials"
+		bt, _ := json.Marshal(inputData)
+		return mq.Result{Payload: bt, Ctx: ctx, ConditionStatus: "invalid"}
+	}
+
+	validatedData := map[string]any{
+		"username":          username,
+		"validated_at":      time.Now().Format("2006-01-02 15:04:05"),
+		"validation_status": "success",
+	}
+
+	bt, _ := json.Marshal(validatedData)
+	return mq.Result{Payload: bt, Ctx: ctx, ConditionStatus: "valid"}
+}
+
+func loginDAG() *dag.DAG {
+	flow := dag.NewDAG("Login Flow", "login-flow", func(taskID string, result mq.Result) {
+		fmt.Printf("Login flow completed for task %s: %s\n", taskID, string(result.Payload))
+	}, mq.WithSyncMode(true), mq.WithLogger(nil))
+	renderHTML := handlers.NewRenderHTMLNode("render-html")
+	renderHTML.Payload.Data = map[string]any{
+		"schema_file": "login.json",
+	}
+	flow.AddNode(dag.Page, "Login Form", "LoginForm", renderHTML, true)
+	flow.AddNode(dag.Function, "Validate Login", "ValidateLogin", &ValidateLoginNode{})
+	flow.AddNode(dag.Page, "Error Page", "ErrorPage", &EmailErrorPageNode{})
+	flow.AddEdge(dag.Simple, "Validate Login", "LoginForm", "ValidateLogin")
+	flow.AddCondition("ValidateLogin", map[string]string{
+		"invalid": "ErrorPage",
+	})
+	return flow
+}
+
 func main() {
 	flow := dag.NewDAG("Email Notification System", "email-notification", func(taskID string, result mq.Result) {
 		fmt.Printf("Email notification workflow completed for task %s: %s\n", taskID, string(utils.RemoveRecursiveFromJSON(result.Payload, "html_content")))
-	}, mq.WithSyncMode(true))
+	}, mq.WithSyncMode(true), mq.WithLogger(nil))
 
 	renderHTML := handlers.NewRenderHTMLNode("render-html")
 	renderHTML.Payload.Data = map[string]any{
 		"schema_file": "schema.json",
-	} // Add workflow nodes
-	// Note: Page nodes have no timeout by default, allowing users unlimited time for form input
-	flow.AddNode(dag.Page, "Contact Form", "ContactForm", renderHTML, true)
+	}
+	flow.AddDAGNode(dag.Page, "CheckLogin", "Login", loginDAG(), true)
+	flow.AddNode(dag.Page, "Contact Form", "ContactForm", renderHTML)
 	flow.AddNode(dag.Function, "Validate Contact Data", "ValidateContact", &ValidateContactNode{})
 	flow.AddNode(dag.Function, "Check User Type", "CheckUserType", &CheckUserTypeNode{})
 	flow.AddNode(dag.Function, "Send Welcome Email", "SendWelcomeEmail", &SendWelcomeEmailNode{})
@@ -38,7 +96,7 @@ func main() {
 	flow.AddNode(dag.Function, "Send Standard Email", "SendStandardEmail", &SendStandardEmailNode{})
 	flow.AddNode(dag.Page, "Success Page", "SuccessPage", &SuccessPageNode{})
 	flow.AddNode(dag.Page, "Error Page", "ErrorPage", &EmailErrorPageNode{})
-
+	flow.AddEdge(dag.Simple, "Login to Contact", "Login", "ContactForm")
 	// Define conditional flow
 	flow.AddEdge(dag.Simple, "Form to Validation", "ContactForm", "ValidateContact")
 	flow.AddCondition("ValidateContact", map[string]string{

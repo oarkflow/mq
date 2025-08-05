@@ -225,7 +225,7 @@ func (tm *TaskManager) processNode(exec *task) {
 	attempts := 0
 	for {
 		// Tracing start (stubbed)
-		log.Printf("Tracing: Start processing node %s (attempt %d)", exec.nodeID, attempts+1)
+		log.Printf("Tracing: Start processing node %s (attempt %d) on flow %s", exec.nodeID, attempts+1, tm.dag.key)
 		result = node.processor.ProcessTask(exec.ctx, mq.NewTask(exec.taskID, exec.payload, exec.nodeID, mq.WithDAG(tm.dag)))
 		if result.Error != nil {
 			if te, ok := result.Error.(TaskError); ok && te.Recoverable {
@@ -253,7 +253,7 @@ func (tm *TaskManager) processNode(exec *task) {
 		}
 		break
 	}
-	log.Printf("Tracing: End processing node %s", exec.nodeID)
+	log.Printf("Tracing: End processing node %s on flow %s", exec.nodeID, tm.dag.key)
 	nodeLatency := time.Since(startTime)
 
 	// Invoke PostProcessHook if available.

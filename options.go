@@ -161,7 +161,11 @@ func WithNotifyResponse(callback Callback) Option {
 
 func WithLogger(log logger.Logger) Option {
 	return func(opts *Options) {
-		opts.logger = log
+		if log == nil {
+			opts.logger = logger.NewNullLogger()
+		} else {
+			opts.logger = log
+		}
 	}
 }
 
