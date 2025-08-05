@@ -55,26 +55,23 @@ func (r *JSONSchemaRenderer) interpolateTemplate(templateStr string) string {
 		return templateStr
 	}
 
-	// Simple string replacement approach as fallback
-	result := templateStr
-	for key, value := range r.TemplateData {
-		placeholder := fmt.Sprintf("{{%s}}", key)
-		if valueStr, ok := value.(string); ok {
-			result = bytes.NewBufferString(result).String()
-			result = fmt.Sprintf("%s", bytes.ReplaceAll([]byte(result), []byte(placeholder), []byte(valueStr)))
-		}
-	}
-
-	// Try Go template parsing as well
 	tmpl, err := template.New("interpolate").Parse(templateStr)
 	if err != nil {
-		return result // Return string replacement result if template parsing fails
+		// Fallback to simple string replacement if template parsing fails
+		result := templateStr
+		for key, value := range r.TemplateData {
+			placeholder := fmt.Sprintf("{{%s}}", key)
+			if valueStr, ok := value.(string); ok {
+				result = fmt.Sprintf("%s", bytes.ReplaceAll([]byte(result), []byte(placeholder), []byte(valueStr)))
+			}
+		}
+		return result
 	}
 
 	var templateResult bytes.Buffer
 	err = tmpl.Execute(&templateResult, r.TemplateData)
 	if err != nil {
-		return result // Return string replacement result if execution fails
+		return templateStr // Return original string if execution fails
 	}
 
 	return templateResult.String()
@@ -98,8 +95,12 @@ func (r *JSONSchemaRenderer) RenderFields() (string, error) {
 	formAction, _ := formConfig["action"].(string)
 	formMethod, _ := formConfig["method"].(string)
 	formEnctype, _ := formConfig["enctype"].(string)
+
+	// Interpolate template data into form action
 	formAction = r.interpolateTemplate(formAction)
 	buttonsHTML := renderButtons(formConfig)
+
+	// Create a new template with the layout and functions
 	tmpl, err := template.New("layout").Funcs(template.FuncMap{
 		"form_groups": func() template.HTML {
 			return template.HTML(groupHTML.String())
@@ -108,9 +109,8 @@ func (r *JSONSchemaRenderer) RenderFields() (string, error) {
 			return template.HTML(buttonsHTML)
 		},
 		"form_attributes": func() template.HTMLAttr {
-			attrs := fmt.Sprintf(`class="%s" action="%s" method="%s" enctype="%s"`,
-				formClass, formAction, formMethod, formEnctype)
-			return template.HTMLAttr(attrs)
+			return template.HTMLAttr(fmt.Sprintf(`class="%s" action="%s" method="%s" enctype="%s"`,
+				formClass, formAction, formMethod, formEnctype))
 		},
 	}).Parse(r.HTMLLayout)
 	if err != nil {
@@ -118,8 +118,7 @@ func (r *JSONSchemaRenderer) RenderFields() (string, error) {
 	}
 
 	var renderedHTML bytes.Buffer
-	err = tmpl.Execute(&renderedHTML, nil)
-	if err != nil {
+	if err := tmpl.Execute(&renderedHTML, nil); err != nil {
 		return "", fmt.Errorf("failed to execute HTML template: %w", err)
 	}
 
@@ -139,7 +138,6 @@ func parseGroupsFromSchema(schema map[string]any) []GroupInfo {
 		return nil
 	}
 
-	// Get required fields from schema root
 	var requiredFields map[string]bool = make(map[string]bool)
 	if reqFields, ok := schema["required"].([]any); ok {
 		for _, field := range reqFields {
@@ -153,7 +151,6 @@ func parseGroupsFromSchema(schema map[string]any) []GroupInfo {
 	for _, group := range formConfig["groups"].([]any) {
 		groupMap := group.(map[string]any)
 
-		// Parse group title
 		var groupTitle GroupTitle
 		if titleMap, ok := groupMap["title"].(map[string]any); ok {
 			if text, ok := titleMap["text"].(string); ok {
@@ -164,7 +161,6 @@ func parseGroupsFromSchema(schema map[string]any) []GroupInfo {
 			}
 		}
 
-		// Get group class
 		groupClass, _ := groupMap["class"].(string)
 
 		var fields []FieldInfo
@@ -175,7 +171,6 @@ func parseGroupsFromSchema(schema map[string]any) []GroupInfo {
 				order = ord
 			}
 
-			// Add required field info to field definition
 			fieldDefCopy := make(map[string]any)
 			for k, v := range fieldDef {
 				fieldDefCopy[k] = v
@@ -197,7 +192,6 @@ func parseGroupsFromSchema(schema map[string]any) []GroupInfo {
 			GroupClass: groupClass,
 		})
 	}
-
 	return groups
 }
 
@@ -205,30 +199,40 @@ func parseGroupsFromSchema(schema map[string]any) []GroupInfo {
 func renderGroup(group GroupInfo) string {
 	var groupHTML bytes.Buffer
 
-	groupHTML.WriteString(`<div class="form-group-container">`)
+	// A single template for the entire group structure
+	const groupTemplateStr = `
+<div class="form-group-container">
+    {{if .Title.Text}}
+        {{if .Title.Class}}
+            <div class="{{.Title.Class}}">{{.Title.Text}}</div>
+        {{else}}
+            <h3 class="group-title">{{.Title.Text}}</h3>
+        {{end}}
+    {{end}}
+    <div class="{{.GroupClass}}">{{.FieldsHTML}}</div>
+</div>
+`
 
-	// Render group title if present
-	if group.Title.Text != "" {
-		if group.Title.Class != "" {
-			groupHTML.WriteString(fmt.Sprintf(`<div class="%s">%s</div>`, group.Title.Class, group.Title.Text))
-		} else {
-			groupHTML.WriteString(fmt.Sprintf(`<h3 class="group-title">%s</h3>`, group.Title.Text))
-		}
-	}
-
-	if group.GroupClass != "" {
-		groupHTML.WriteString(fmt.Sprintf(`<div class="%s">`, group.GroupClass))
-	} else {
-		groupHTML.WriteString(`<div class="form-group-fields">`)
-	}
 	// Render fields
+	var fieldsHTML bytes.Buffer
 	for _, field := range group.Fields {
-		groupHTML.WriteString(renderField(field))
+		fieldsHTML.WriteString(renderField(field))
 	}
 
-	// Close group container div
-	groupHTML.WriteString(`</div>`)
-	groupHTML.WriteString(`</div>`)
+	tmpl := template.Must(template.New("group").Parse(groupTemplateStr))
+	data := map[string]any{
+		"Title":      group.Title,
+		"GroupClass": group.GroupClass,
+		"FieldsHTML": template.HTML(fieldsHTML.String()),
+	}
+	if group.GroupClass == "" {
+		data["GroupClass"] = "form-group-fields"
+	}
+
+	if err := tmpl.Execute(&groupHTML, data); err != nil {
+		return "" // Return empty string on error
+	}
+
 	return groupHTML.String()
 }
 
@@ -240,6 +244,7 @@ var fieldTemplates = map[string]string{
 	"h":        `<{{.Control}} class="{{.Class}}" id="{{.Name}}" {{.AdditionalAttributes}}>{{.Title}}</{{.Control}}>`,
 	"p":        `<p class="{{.Class}}" id="{{.Name}}" {{.AdditionalAttributes}}>{{.Title}}</p>`,
 	"a":        `<a class="{{.Class}}" id="{{.Name}}" href="{{.Href}}" {{.AdditionalAttributes}}>{{.Title}}</a>`,
+	"button":   `<button type="{{.Type}}" class="{{.Class}}">{{.Label}}</button>`,
 }
 
 func renderField(field FieldInfo) string {
@@ -288,75 +293,66 @@ func renderField(field FieldInfo) string {
 		"AdditionalAttributes": template.HTML(additionalAttributes.String()),
 		"InputType":            inputType,
 		"Control":              control,
+		"Href":                 "",
 	}
 
-	switch control {
-	case "input":
-		tmpl := template.Must(template.New("input").Parse(fieldTemplates["input"]))
-		var buf bytes.Buffer
-		tmpl.Execute(&buf, data)
-		return buf.String()
-	case "textarea":
-		tmpl := template.Must(template.New("textarea").Parse(fieldTemplates["textarea"]))
-		var buf bytes.Buffer
-		tmpl.Execute(&buf, data)
-		return buf.String()
-	case "select":
+	// Handle options for select
+	if control == "select" {
 		options, _ := ui["options"].([]any)
 		var optionsHTML bytes.Buffer
 		for _, option := range options {
 			optionsHTML.WriteString(fmt.Sprintf(`<option value="%v">%v</option>`, option, option))
 		}
 		data["OptionsHTML"] = template.HTML(optionsHTML.String())
-		tmpl := template.Must(template.New("select").Parse(fieldTemplates["select"]))
+	}
+
+	// Handle href for links
+	if control == "a" {
+		if href, ok := ui["href"].(string); ok {
+			data["Href"] = href
+		}
+	}
+
+	if tmplStr, ok := fieldTemplates[control]; ok {
+		tmpl := template.Must(template.New(control).Parse(tmplStr))
 		var buf bytes.Buffer
 		tmpl.Execute(&buf, data)
 		return buf.String()
-	case "h1", "h2", "h3", "h4", "h5", "h6":
+	}
+	// Handle generic 'h' template for h1-h6
+	if control[0] == 'h' && len(control) == 2 && control[1] >= '1' && control[1] <= '6' {
 		data["Control"] = control
 		tmpl := template.Must(template.New("h").Parse(fieldTemplates["h"]))
 		var buf bytes.Buffer
 		tmpl.Execute(&buf, data)
 		return buf.String()
-	case "p":
-		tmpl := template.Must(template.New("p").Parse(fieldTemplates["p"]))
-		var buf bytes.Buffer
-		tmpl.Execute(&buf, data)
-		return buf.String()
-	case "a":
-		href, _ := ui["href"].(string)
-		data["Href"] = href
-		tmpl := template.Must(template.New("a").Parse(fieldTemplates["a"]))
-		var buf bytes.Buffer
-		tmpl.Execute(&buf, data)
-		return buf.String()
-	default:
-		return ""
 	}
+
+	return ""
 }
 
-// Template for buttons
-var buttonTemplate = `<button type="{{.Type}}" class="{{.Class}}">{{.Label}}</button>`
-
+// renderButtons generates HTML for form buttons
 func renderButtons(formConfig map[string]any) string {
 	var buttonsHTML bytes.Buffer
+	tmpl := template.Must(template.New("button").Parse(fieldTemplates["button"]))
+
 	if submitConfig, ok := formConfig["submit"].(map[string]any); ok {
 		data := map[string]any{
 			"Type":  submitConfig["type"],
 			"Class": submitConfig["class"],
 			"Label": submitConfig["label"],
 		}
-		tmpl := template.Must(template.New("button").Parse(buttonTemplate))
 		tmpl.Execute(&buttonsHTML, data)
 	}
+
 	if resetConfig, ok := formConfig["reset"].(map[string]any); ok {
 		data := map[string]any{
 			"Type":  resetConfig["type"],
 			"Class": resetConfig["class"],
 			"Label": resetConfig["label"],
 		}
-		tmpl := template.Must(template.New("button").Parse(buttonTemplate))
 		tmpl.Execute(&buttonsHTML, data)
 	}
+
 	return buttonsHTML.String()
 }
