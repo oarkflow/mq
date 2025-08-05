@@ -1,0 +1,681 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "title": "Comprehensive Validation Demo",
+    "description": "A complete example showcasing all JSON Schema 2020-12 validation features",
+    "properties": {
+        "personalInfo": {
+            "type": "object",
+            "title": "Personal Information",
+            "properties": {
+                "firstName": {
+                    "type": "string",
+                    "title": "First Name",
+                    "minLength": 2,
+                    "maxLength": 50,
+                    "pattern": "^[A-Za-z\\s]+$",
+                    "ui": {
+                        "element": "input",
+                        "type": "text",
+                        "class": "form-group",
+                        "order": 1,
+                        "placeholder": "Enter your first name"
+                    }
+                },
+                "lastName": {
+                    "type": "string",
+                    "title": "Last Name",
+                    "minLength": 2,
+                    "maxLength": 50,
+                    "pattern": "^[A-Za-z\\s]+$",
+                    "ui": {
+                        "element": "input",
+                        "type": "text",
+                        "class": "form-group",
+                        "order": 2
+                    }
+                },
+                "age": {
+                    "type": "integer",
+                    "title": "Age",
+                    "minimum": 18,
+                    "maximum": 120,
+                    "ui": {
+                        "element": "input",
+                        "type": "number",
+                        "class": "form-group",
+                        "order": 3
+                    }
+                },
+                "email": {
+                    "type": "string",
+                    "format": "email",
+                    "title": "Email Address",
+                    "ui": {
+                        "element": "input",
+                        "type": "email",
+                        "class": "form-group",
+                        "order": 4
+                    }
+                },
+                "phone": {
+                    "type": "string",
+                    "title": "Phone Number",
+                    "pattern": "^\\+?[1-9]\\d{1,14}$",
+                    "ui": {
+                        "element": "input",
+                        "type": "tel",
+                        "class": "form-group",
+                        "order": 5
+                    }
+                },
+                "dateOfBirth": {
+                    "type": "string",
+                    "format": "date",
+                    "title": "Date of Birth",
+                    "ui": {
+                        "element": "input",
+                        "type": "date",
+                        "class": "form-group",
+                        "order": 6
+                    }
+                },
+                "website": {
+                    "type": "string",
+                    "format": "uri",
+                    "title": "Personal Website",
+                    "ui": {
+                        "element": "input",
+                        "type": "url",
+                        "class": "form-group",
+                        "order": 7
+                    }
+                }
+            },
+            "required": [ "firstName", "lastName", "email" ],
+            "dependentRequired": {
+                "phone": [ "email" ],
+                "website": [ "email" ]
+            }
+        },
+        "address": {
+            "type": "object",
+            "title": "Address Information",
+            "properties": {
+                "street": {
+                    "type": "string",
+                    "title": "Street Address",
+                    "minLength": 5,
+                    "maxLength": 100,
+                    "ui": {
+                        "element": "input",
+                        "type": "text",
+                        "class": "form-group",
+                        "order": 1
+                    }
+                },
+                "city": {
+                    "type": "string",
+                    "title": "City",
+                    "minLength": 2,
+                    "maxLength": 50,
+                    "ui": {
+                        "element": "input",
+                        "type": "text",
+                        "class": "form-group",
+                        "order": 2
+                    }
+                },
+                "state": {
+                    "type": "string",
+                    "title": "State/Province",
+                    "ui": {
+                        "element": "input",
+                        "type": "text",
+                        "class": "form-group",
+                        "order": 3
+                    }
+                },
+                "country": {
+                    "type": "string",
+                    "title": "Country",
+                    "enum": [ "US", "CA", "UK", "DE", "FR", "AU", "JP", "IN" ],
+                    "ui": {
+                        "element": "select",
+                        "class": "form-group",
+                        "order": 4,
+                        "options": [
+                            { "value": "US", "text": "United States" },
+                            { "value": "CA", "text": "Canada" },
+                            { "value": "UK", "text": "United Kingdom" },
+                            { "value": "DE", "text": "Germany" },
+                            { "value": "FR", "text": "France" },
+                            { "value": "AU", "text": "Australia" },
+                            { "value": "JP", "text": "Japan" },
+                            { "value": "IN", "text": "India" }
+                        ]
+                    }
+                },
+                "postalCode": {
+                    "type": "string",
+                    "title": "Postal Code",
+                    "ui": {
+                        "element": "input",
+                        "type": "text",
+                        "class": "form-group",
+                        "order": 5
+                    }
+                }
+            },
+            "required": [ "street", "city", "country" ],
+            "allOf": [
+                {
+                    "if": {
+                        "properties": {
+                            "country": { "const": "US" }
+                        }
+                    },
+                    "then": {
+                        "properties": {
+                            "postalCode": {
+                                "pattern": "^\\d{5}(-\\d{4})?$"
+                            }
+                        }
+                    }
+                },
+                {
+                    "if": {
+                        "properties": {
+                            "country": { "const": "CA" }
+                        }
+                    },
+                    "then": {
+                        "properties": {
+                            "postalCode": {
+                                "pattern": "^[A-Z]\\d[A-Z] \\d[A-Z]\\d$"
+                            }
+                        }
+                    }
+                }
+            ]
+        },
+        "preferences": {
+            "type": "object",
+            "title": "User Preferences",
+            "properties": {
+                "newsletter": {
+                    "type": "boolean",
+                    "title": "Subscribe to Newsletter",
+                    "default": false,
+                    "ui": {
+                        "element": "input",
+                        "type": "checkbox",
+                        "class": "form-group",
+                        "order": 1
+                    }
+                },
+                "notifications": {
+                    "type": "array",
+                    "title": "Notification Types",
+                    "minItems": 1,
+                    "maxItems": 5,
+                    "uniqueItems": true,
+                    "items": {
+                        "type": "string",
+                        "enum": [ "email", "sms", "push", "phone", "mail" ]
+                    },
+                    "ui": {
+                        "element": "select",
+                        "class": "form-group",
+                        "order": 2,
+                        "multiple": true,
+                        "options": [
+                            { "value": "email", "text": "Email Notifications" },
+                            { "value": "sms", "text": "SMS Notifications" },
+                            { "value": "push", "text": "Push Notifications" },
+                            { "value": "phone", "text": "Phone Calls" },
+                            { "value": "mail", "text": "Physical Mail" }
+                        ]
+                    }
+                },
+                "theme": {
+                    "type": "string",
+                    "title": "Preferred Theme",
+                    "enum": [ "light", "dark", "auto" ],
+                    "default": "auto",
+                    "ui": {
+                        "element": "select",
+                        "class": "form-group",
+                        "order": 3,
+                        "options": [
+                            { "value": "light", "text": "Light Theme" },
+                            { "value": "dark", "text": "Dark Theme" },
+                            { "value": "auto", "text": "Auto (System)" }
+                        ]
+                    }
+                },
+                "language": {
+                    "type": "string",
+                    "title": "Preferred Language",
+                    "enum": [ "en", "es", "fr", "de", "zh", "ja" ],
+                    "default": "en",
+                    "ui": {
+                        "element": "select",
+                        "class": "form-group",
+                        "order": 4,
+                        "options": [
+                            { "value": "en", "text": "English" },
+                            { "value": "es", "text": "Español" },
+                            { "value": "fr", "text": "Français" },
+                            { "value": "de", "text": "Deutsch" },
+                            { "value": "zh", "text": "中文" },
+                            { "value": "ja", "text": "日本語" }
+                        ]
+                    }
+                }
+            }
+        },
+        "financial": {
+            "type": "object",
+            "title": "Financial Information",
+            "properties": {
+                "annualIncome": {
+                    "type": "number",
+                    "title": "Annual Income",
+                    "minimum": 0,
+                    "maximum": 10000000,
+                    "multipleOf": 1000,
+                    "ui": {
+                        "element": "input",
+                        "type": "number",
+                        "class": "form-group",
+                        "order": 1,
+                        "step": "1000"
+                    }
+                },
+                "creditScore": {
+                    "type": "integer",
+                    "title": "Credit Score",
+                    "minimum": 300,
+                    "maximum": 850,
+                    "ui": {
+                        "element": "input",
+                        "type": "range",
+                        "class": "form-group",
+                        "order": 2,
+                        "min": "300",
+                        "max": "850"
+                    }
+                },
+                "accountType": {
+                    "type": "string",
+                    "title": "Account Type",
+                    "oneOf": [
+                        {
+                            "const": "basic",
+                            "title": "Basic Account",
+                            "description": "Free account with basic features"
+                        },
+                        {
+                            "const": "premium",
+                            "title": "Premium Account",
+                            "description": "Paid account with advanced features"
+                        },
+                        {
+                            "const": "enterprise",
+                            "title": "Enterprise Account",
+                            "description": "Business account with full features"
+                        }
+                    ],
+                    "ui": {
+                        "element": "select",
+                        "class": "form-group",
+                        "order": 3,
+                        "options": [
+                            { "value": "basic", "text": "Basic Account" },
+                            { "value": "premium", "text": "Premium Account" },
+                            { "value": "enterprise", "text": "Enterprise Account" }
+                        ]
+                    }
+                }
+            },
+            "if": {
+                "properties": {
+                    "accountType": { "const": "premium" }
+                }
+            },
+            "then": {
+                "properties": {
+                    "paymentMethod": {
+                        "type": "string",
+                        "title": "Payment Method",
+                        "enum": [ "credit_card", "debit_card", "paypal", "bank_transfer" ],
+                        "ui": {
+                            "element": "select",
+                            "class": "form-group",
+                            "order": 4,
+                            "options": [
+                                { "value": "credit_card", "text": "Credit Card" },
+                                { "value": "debit_card", "text": "Debit Card" },
+                                { "value": "paypal", "text": "PayPal" },
+                                { "value": "bank_transfer", "text": "Bank Transfer" }
+                            ]
+                        }
+                    }
+                },
+                "required": [ "paymentMethod" ]
+            },
+            "else": {
+                "not": {
+                    "required": [ "paymentMethod" ]
+                }
+            }
+        },
+        "skills": {
+            "type": "array",
+            "title": "Technical Skills",
+            "minItems": 1,
+            "maxItems": 10,
+            "uniqueItems": true,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "title": "Skill Name",
+                        "minLength": 2,
+                        "maxLength": 50
+                    },
+                    "level": {
+                        "type": "string",
+                        "title": "Proficiency Level",
+                        "enum": [ "beginner", "intermediate", "advanced", "expert" ]
+                    },
+                    "yearsExperience": {
+                        "type": "number",
+                        "title": "Years of Experience",
+                        "minimum": 0,
+                        "maximum": 50,
+                        "multipleOf": 0.5
+                    }
+                },
+                "required": [ "name", "level" ]
+            },
+            "ui": {
+                "element": "fieldset",
+                "class": "skills-section",
+                "order": 1
+            }
+        },
+        "portfolio": {
+            "type": "object",
+            "title": "Portfolio",
+            "properties": {
+                "projects": {
+                    "type": "array",
+                    "title": "Projects",
+                    "maxItems": 5,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "title": {
+                                "type": "string",
+                                "title": "Project Title",
+                                "minLength": 3,
+                                "maxLength": 100
+                            },
+                            "description": {
+                                "type": "string",
+                                "title": "Description",
+                                "maxLength": 500,
+                                "ui": {
+                                    "element": "textarea",
+                                    "rows": 4,
+                                    "class": "form-group"
+                                }
+                            },
+                            "url": {
+                                "type": "string",
+                                "format": "uri",
+                                "title": "Project URL"
+                            },
+                            "technologies": {
+                                "type": "array",
+                                "title": "Technologies Used",
+                                "items": {
+                                    "type": "string"
+                                },
+                                "minItems": 1,
+                                "maxItems": 10,
+                                "uniqueItems": true
+                            }
+                        },
+                        "required": [ "title", "description" ]
+                    }
+                }
+            },
+            "anyOf": [
+                {
+                    "properties": {
+                        "githubUrl": {
+                            "type": "string",
+                            "format": "uri",
+                            "pattern": "^https://github\\.com/",
+                            "title": "GitHub Profile"
+                        }
+                    }
+                },
+                {
+                    "properties": {
+                        "linkedinUrl": {
+                            "type": "string",
+                            "format": "uri",
+                            "pattern": "^https://www\\.linkedin\\.com/",
+                            "title": "LinkedIn Profile"
+                        }
+                    }
+                },
+                {
+                    "properties": {
+                        "personalWebsite": {
+                            "type": "string",
+                            "format": "uri",
+                            "title": "Personal Website"
+                        }
+                    }
+                }
+            ]
+        },
+        "comments": {
+            "type": "string",
+            "title": "Additional Comments",
+            "maxLength": 1000,
+            "ui": {
+                "element": "textarea",
+                "class": "form-group",
+                "rows": 5,
+                "placeholder": "Any additional information you'd like to share..."
+            }
+        },
+        "termsAccepted": {
+            "type": "boolean",
+            "title": "I accept the terms and conditions",
+            "const": true,
+            "ui": {
+                "element": "input",
+                "type": "checkbox",
+                "class": "form-group required-checkbox"
+            }
+        },
+        "privacyAccepted": {
+            "type": "boolean",
+            "title": "I accept the privacy policy",
+            "const": true,
+            "ui": {
+                "element": "input",
+                "type": "checkbox",
+                "class": "form-group required-checkbox"
+            }
+        }
+    },
+    "required": [ "personalInfo", "address", "termsAccepted", "privacyAccepted" ],
+    "dependentSchemas": {
+        "financial": {
+            "properties": {
+                "personalInfo": {
+                    "properties": {
+                        "age": {
+                            "minimum": 21
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "form": {
+        "class": "comprehensive-form",
+        "action": "/api/submit-comprehensive-form",
+        "method": "POST",
+        "enctype": "multipart/form-data",
+        "groups": [
+            {
+                "title": {
+                    "text": "Personal Information",
+                    "class": "section-header"
+                },
+                "class": "personal-info-section",
+                "fields": [
+                    "personalInfo.firstName",
+                    "personalInfo.lastName",
+                    "personalInfo.age",
+                    "personalInfo.email",
+                    "personalInfo.phone",
+                    "personalInfo.dateOfBirth",
+                    "personalInfo.website"
+                ]
+            },
+            {
+                "title": {
+                    "text": "Address Information",
+                    "class": "section-header"
+                },
+                "class": "address-section flex flex-wrap gap-4",
+                "fields": [
+                    "address.street",
+                    "address.city",
+                    "address.state",
+                    "address.country",
+                    "address.postalCode"
+                ]
+            },
+            {
+                "title": {
+                    "text": "Preferences & Settings",
+                    "class": "section-header"
+                },
+                "class": "preferences-section",
+                "fields": [
+                    "preferences.newsletter",
+                    "preferences.notifications",
+                    "preferences.theme",
+                    "preferences.language"
+                ]
+            },
+            {
+                "title": {
+                    "text": "Financial Information",
+                    "class": "section-header"
+                },
+                "class": "financial-section",
+                "fields": [
+                    "financial.annualIncome",
+                    "financial.creditScore",
+                    "financial.accountType"
+                ]
+            },
+            {
+                "title": {
+                    "text": "Skills & Portfolio",
+                    "class": "section-header"
+                },
+                "class": "skills-section",
+                "fields": [
+                    "skills",
+                    "portfolio"
+                ]
+            },
+            {
+                "title": {
+                    "text": "Final Details",
+                    "class": "section-header"
+                },
+                "class": "final-section",
+                "fields": [
+                    "comments",
+                    "termsAccepted",
+                    "privacyAccepted"
+                ]
+            }
+        ],
+        "submit": {
+            "label": "Submit Application",
+            "class": "btn btn-primary btn-lg",
+            "id": "submit-btn"
+        },
+        "reset": {
+            "label": "Reset Form",
+            "class": "btn btn-secondary",
+            "id": "reset-btn"
+        },
+        "buttons": [
+            {
+                "type": "button",
+                "label": "Save Draft",
+                "class": "btn btn-outline-secondary",
+                "id": "save-draft-btn",
+                "onclick": "saveDraft()"
+            },
+            {
+                "type": "button",
+                "label": "Preview",
+                "class": "btn btn-outline-primary",
+                "id": "preview-btn",
+                "onclick": "showPreview()"
+            }
+        ]
+    },
+    "examples": [
+        {
+            "personalInfo": {
+                "firstName": "John",
+                "lastName": "Doe",
+                "age": 30,
+                "email": "john.doe@example.com",
+                "phone": "+1-555-123-4567",
+                "dateOfBirth": "1993-05-15",
+                "website": "https://johndoe.com"
+            },
+            "address": {
+                "street": "123 Main St",
+                "city": "New York",
+                "state": "NY",
+                "country": "US",
+                "postalCode": "10001"
+            },
+            "preferences": {
+                "newsletter": true,
+                "notifications": [ "email", "push" ],
+                "theme": "dark",
+                "language": "en"
+            },
+            "financial": {
+                "annualIncome": 75000,
+                "creditScore": 750,
+                "accountType": "premium",
+                "paymentMethod": "credit_card"
+            },
+            "termsAccepted": true,
+            "privacyAccepted": true
+        }
+    ]
+}

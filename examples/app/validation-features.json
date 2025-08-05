@@ -1,0 +1,586 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "title": "Advanced Validation Features Demo",
+    "description": "Demonstrates all implemented validation features",
+    "properties": {
+        "stringValidations": {
+            "type": "object",
+            "title": "String Validation Examples",
+            "properties": {
+                "basicString": {
+                    "type": "string",
+                    "title": "Basic String with Length Limits",
+                    "minLength": 3,
+                    "maxLength": 20,
+                    "ui": {
+                        "element": "input",
+                        "type": "text",
+                        "class": "form-group",
+                        "order": 1
+                    }
+                },
+                "patternString": {
+                    "type": "string",
+                    "title": "Pattern Validation (Letters Only)",
+                    "pattern": "^[A-Za-z\\s]+$",
+                    "ui": {
+                        "element": "input",
+                        "type": "text",
+                        "class": "form-group",
+                        "order": 2,
+                        "placeholder": "Letters and spaces only"
+                    }
+                },
+                "emailField": {
+                    "type": "string",
+                    "format": "email",
+                    "title": "Email Format Validation",
+                    "ui": {
+                        "element": "input",
+                        "type": "email",
+                        "class": "form-group",
+                        "order": 3
+                    }
+                },
+                "urlField": {
+                    "type": "string",
+                    "format": "uri",
+                    "title": "URL Format Validation",
+                    "ui": {
+                        "element": "input",
+                        "type": "url",
+                        "class": "form-group",
+                        "order": 4
+                    }
+                },
+                "dateField": {
+                    "type": "string",
+                    "format": "date",
+                    "title": "Date Format Validation",
+                    "ui": {
+                        "element": "input",
+                        "type": "date",
+                        "class": "form-group",
+                        "order": 5
+                    }
+                },
+                "enumField": {
+                    "type": "string",
+                    "title": "Enum Selection",
+                    "enum": [ "option1", "option2", "option3" ],
+                    "ui": {
+                        "element": "select",
+                        "class": "form-group",
+                        "order": 6,
+                        "options": [
+                            { "value": "option1", "text": "Option 1" },
+                            { "value": "option2", "text": "Option 2" },
+                            { "value": "option3", "text": "Option 3" }
+                        ]
+                    }
+                }
+            },
+            "required": [ "basicString", "emailField" ]
+        },
+        "numericValidations": {
+            "type": "object",
+            "title": "Numeric Validation Examples",
+            "properties": {
+                "integerField": {
+                    "type": "integer",
+                    "title": "Integer with Range",
+                    "minimum": 1,
+                    "maximum": 100,
+                    "ui": {
+                        "element": "input",
+                        "type": "number",
+                        "class": "form-group",
+                        "order": 1
+                    }
+                },
+                "numberField": {
+                    "type": "number",
+                    "title": "Number with Exclusive Range",
+                    "exclusiveMinimum": 0,
+                    "exclusiveMaximum": 1000,
+                    "multipleOf": 0.5,
+                    "ui": {
+                        "element": "input",
+                        "type": "number",
+                        "class": "form-group",
+                        "order": 2,
+                        "step": "0.5"
+                    }
+                },
+                "rangeField": {
+                    "type": "integer",
+                    "title": "Range Slider",
+                    "minimum": 0,
+                    "maximum": 100,
+                    "default": 50,
+                    "ui": {
+                        "element": "input",
+                        "type": "range",
+                        "class": "form-group",
+                        "order": 3
+                    }
+                }
+            }
+        },
+        "arrayValidations": {
+            "type": "object",
+            "title": "Array Validation Examples",
+            "properties": {
+                "multiSelect": {
+                    "type": "array",
+                    "title": "Multi-Select with Constraints",
+                    "minItems": 2,
+                    "maxItems": 4,
+                    "uniqueItems": true,
+                    "items": {
+                        "type": "string",
+                        "enum": [ "red", "green", "blue", "yellow", "purple", "orange" ]
+                    },
+                    "ui": {
+                        "element": "select",
+                        "class": "form-group",
+                        "order": 1,
+                        "multiple": true,
+                        "options": [
+                            { "value": "red", "text": "Red" },
+                            { "value": "green", "text": "Green" },
+                            { "value": "blue", "text": "Blue" },
+                            { "value": "yellow", "text": "Yellow" },
+                            { "value": "purple", "text": "Purple" },
+                            { "value": "orange", "text": "Orange" }
+                        ]
+                    }
+                },
+                "dynamicList": {
+                    "type": "array",
+                    "title": "Dynamic List of Objects",
+                    "minItems": 1,
+                    "maxItems": 5,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {
+                                "type": "string",
+                                "title": "Name",
+                                "minLength": 2
+                            },
+                            "value": {
+                                "type": "number",
+                                "title": "Value",
+                                "minimum": 0
+                            }
+                        },
+                        "required": [ "name" ]
+                    },
+                    "ui": {
+                        "element": "fieldset",
+                        "class": "dynamic-list",
+                        "order": 2
+                    }
+                }
+            }
+        },
+        "conditionalValidations": {
+            "type": "object",
+            "title": "Conditional Validation Examples",
+            "properties": {
+                "userType": {
+                    "type": "string",
+                    "title": "User Type",
+                    "enum": [ "individual", "business", "non-profit" ],
+                    "ui": {
+                        "element": "select",
+                        "class": "form-group",
+                        "order": 1,
+                        "options": [
+                            { "value": "individual", "text": "Individual" },
+                            { "value": "business", "text": "Business" },
+                            { "value": "non-profit", "text": "Non-Profit" }
+                        ]
+                    }
+                },
+                "individualInfo": {
+                    "type": "object",
+                    "title": "Individual Information",
+                    "properties": {
+                        "ssn": {
+                            "type": "string",
+                            "title": "Social Security Number",
+                            "pattern": "^\\d{3}-\\d{2}-\\d{4}$",
+                            "ui": {
+                                "element": "input",
+                                "type": "text",
+                                "class": "form-group",
+                                "placeholder": "XXX-XX-XXXX"
+                            }
+                        }
+                    }
+                },
+                "businessInfo": {
+                    "type": "object",
+                    "title": "Business Information",
+                    "properties": {
+                        "taxId": {
+                            "type": "string",
+                            "title": "Tax ID",
+                            "pattern": "^\\d{2}-\\d{7}$",
+                            "ui": {
+                                "element": "input",
+                                "type": "text",
+                                "class": "form-group",
+                                "placeholder": "XX-XXXXXXX"
+                            }
+                        },
+                        "businessName": {
+                            "type": "string",
+                            "title": "Business Name",
+                            "minLength": 2,
+                            "ui": {
+                                "element": "input",
+                                "type": "text",
+                                "class": "form-group"
+                            }
+                        }
+                    }
+                }
+            },
+            "allOf": [
+                {
+                    "if": {
+                        "properties": {
+                            "userType": { "const": "individual" }
+                        }
+                    },
+                    "then": {
+                        "properties": {
+                            "individualInfo": {
+                                "required": [ "ssn" ]
+                            }
+                        }
+                    }
+                },
+                {
+                    "if": {
+                        "properties": {
+                            "userType": { "const": "business" }
+                        }
+                    },
+                    "then": {
+                        "properties": {
+                            "businessInfo": {
+                                "required": [ "taxId", "businessName" ]
+                            }
+                        }
+                    }
+                }
+            ]
+        },
+        "dependentFields": {
+            "type": "object",
+            "title": "Dependent Field Examples",
+            "properties": {
+                "hasPhone": {
+                    "type": "boolean",
+                    "title": "I have a phone number",
+                    "ui": {
+                        "element": "input",
+                        "type": "checkbox",
+                        "class": "form-group",
+                        "order": 1
+                    }
+                },
+                "phoneNumber": {
+                    "type": "string",
+                    "title": "Phone Number",
+                    "pattern": "^\\+?[1-9]\\d{1,14}$",
+                    "ui": {
+                        "element": "input",
+                        "type": "tel",
+                        "class": "form-group",
+                        "order": 2
+                    }
+                },
+                "preferredContact": {
+                    "type": "string",
+                    "title": "Preferred Contact Method",
+                    "enum": [ "email", "phone", "mail" ],
+                    "ui": {
+                        "element": "select",
+                        "class": "form-group",
+                        "order": 3,
+                        "options": [
+                            { "value": "email", "text": "Email" },
+                            { "value": "phone", "text": "Phone" },
+                            { "value": "mail", "text": "Physical Mail" }
+                        ]
+                    }
+                },
+                "mailingAddress": {
+                    "type": "string",
+                    "title": "Mailing Address",
+                    "ui": {
+                        "element": "textarea",
+                        "class": "form-group",
+                        "order": 4,
+                        "rows": 3
+                    }
+                }
+            },
+            "dependentRequired": {
+                "hasPhone": [ "phoneNumber" ],
+                "preferredContact": [ "preferredContact" ]
+            },
+            "if": {
+                "properties": {
+                    "preferredContact": { "const": "phone" }
+                }
+            },
+            "then": {
+                "required": [ "phoneNumber" ]
+            },
+            "else": {
+                "if": {
+                    "properties": {
+                        "preferredContact": { "const": "mail" }
+                    }
+                },
+                "then": {
+                    "required": [ "mailingAddress" ]
+                }
+            }
+        },
+        "compositionValidations": {
+            "type": "object",
+            "title": "Composition Validation Examples (allOf, anyOf, oneOf)",
+            "properties": {
+                "contactMethod": {
+                    "title": "Contact Method Validation",
+                    "anyOf": [
+                        {
+                            "type": "object",
+                            "properties": {
+                                "email": {
+                                    "type": "string",
+                                    "format": "email",
+                                    "title": "Email Address"
+                                }
+                            },
+                            "required": [ "email" ]
+                        },
+                        {
+                            "type": "object",
+                            "properties": {
+                                "phone": {
+                                    "type": "string",
+                                    "pattern": "^\\+?[1-9]\\d{1,14}$",
+                                    "title": "Phone Number"
+                                }
+                            },
+                            "required": [ "phone" ]
+                        }
+                    ],
+                    "ui": {
+                        "element": "fieldset",
+                        "class": "contact-methods",
+                        "order": 1
+                    }
+                },
+                "paymentMethod": {
+                    "title": "Payment Method (One Of)",
+                    "oneOf": [
+                        {
+                            "type": "object",
+                            "properties": {
+                                "type": { "const": "credit_card" },
+                                "cardNumber": {
+                                    "type": "string",
+                                    "pattern": "^\\d{16}$",
+                                    "title": "Card Number"
+                                },
+                                "expiryDate": {
+                                    "type": "string",
+                                    "pattern": "^(0[1-9]|1[0-2])\\/\\d{2}$",
+                                    "title": "Expiry Date (MM/YY)"
+                                }
+                            },
+                            "required": [ "type", "cardNumber", "expiryDate" ]
+                        },
+                        {
+                            "type": "object",
+                            "properties": {
+                                "type": { "const": "paypal" },
+                                "paypalEmail": {
+                                    "type": "string",
+                                    "format": "email",
+                                    "title": "PayPal Email"
+                                }
+                            },
+                            "required": [ "type", "paypalEmail" ]
+                        }
+                    ],
+                    "ui": {
+                        "element": "fieldset",
+                        "class": "payment-methods",
+                        "order": 2
+                    }
+                }
+            }
+        },
+        "advancedFeatures": {
+            "type": "object",
+            "title": "Advanced Features",
+            "properties": {
+                "constField": {
+                    "const": "REQUIRED_VALUE",
+                    "title": "Constant Value Field",
+                    "ui": {
+                        "element": "input",
+                        "type": "hidden",
+                        "value": "REQUIRED_VALUE"
+                    }
+                },
+                "booleanField": {
+                    "type": "boolean",
+                    "title": "Boolean Checkbox",
+                    "ui": {
+                        "element": "input",
+                        "type": "checkbox",
+                        "class": "form-group"
+                    }
+                },
+                "readOnlyField": {
+                    "type": "string",
+                    "title": "Read Only Field",
+                    "default": "This is read only",
+                    "readOnly": true,
+                    "ui": {
+                        "element": "input",
+                        "type": "text",
+                        "class": "form-group",
+                        "readonly": true
+                    }
+                },
+                "textareaField": {
+                    "type": "string",
+                    "title": "Large Text Area",
+                    "maxLength": 500,
+                    "ui": {
+                        "element": "textarea",
+                        "class": "form-group",
+                        "rows": 4,
+                        "placeholder": "Enter detailed information here..."
+                    }
+                }
+            }
+        }
+    },
+    "required": [ "stringValidations" ],
+    "form": {
+        "class": "validation-demo-form",
+        "action": "/api/validate-form",
+        "method": "POST",
+        "groups": [
+            {
+                "title": {
+                    "text": "String Validations",
+                    "class": "section-header"
+                },
+                "class": "string-validation-section",
+                "fields": [
+                    "stringValidations.basicString",
+                    "stringValidations.patternString",
+                    "stringValidations.emailField",
+                    "stringValidations.urlField",
+                    "stringValidations.dateField",
+                    "stringValidations.enumField"
+                ]
+            },
+            {
+                "title": {
+                    "text": "Numeric Validations",
+                    "class": "section-header"
+                },
+                "class": "numeric-validation-section",
+                "fields": [
+                    "numericValidations.integerField",
+                    "numericValidations.numberField",
+                    "numericValidations.rangeField"
+                ]
+            },
+            {
+                "title": {
+                    "text": "Array Validations",
+                    "class": "section-header"
+                },
+                "class": "array-validation-section",
+                "fields": [
+                    "arrayValidations.multiSelect",
+                    "arrayValidations.dynamicList"
+                ]
+            },
+            {
+                "title": {
+                    "text": "Conditional Validations",
+                    "class": "section-header"
+                },
+                "class": "conditional-validation-section",
+                "fields": [
+                    "conditionalValidations.userType",
+                    "conditionalValidations.individualInfo",
+                    "conditionalValidations.businessInfo"
+                ]
+            },
+            {
+                "title": {
+                    "text": "Dependent Fields",
+                    "class": "section-header"
+                },
+                "class": "dependent-validation-section",
+                "fields": [
+                    "dependentFields.hasPhone",
+                    "dependentFields.phoneNumber",
+                    "dependentFields.preferredContact",
+                    "dependentFields.mailingAddress"
+                ]
+            },
+            {
+                "title": {
+                    "text": "Composition Validations",
+                    "class": "section-header"
+                },
+                "class": "composition-validation-section",
+                "fields": [
+                    "compositionValidations.contactMethod",
+                    "compositionValidations.paymentMethod"
+                ]
+            },
+            {
+                "title": {
+                    "text": "Advanced Features",
+                    "class": "section-header"
+                },
+                "class": "advanced-features-section",
+                "fields": [
+                    "advancedFeatures.constField",
+                    "advancedFeatures.booleanField",
+                    "advancedFeatures.readOnlyField",
+                    "advancedFeatures.textareaField"
+                ]
+            }
+        ],
+        "submit": {
+            "label": "Validate Form",
+            "class": "btn btn-primary"
+        },
+        "reset": {
+            "label": "Reset All",
+            "class": "btn btn-secondary"
+        }
+    }
+}
