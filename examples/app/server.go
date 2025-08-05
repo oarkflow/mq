@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+
+	"github.com/oarkflow/mq/renderer"
 )
 
 func main() {
@@ -18,6 +20,7 @@ func main() {
 		fmt.Printf("Error parsing schema: %v\n", err)
 		return
 	}
+
 	http.Handle("/form.css", http.FileServer(http.Dir("templates")))
 	http.HandleFunc("/render", func(w http.ResponseWriter, r *http.Request) {
 		templateName := r.URL.Query().Get("template")
@@ -32,7 +35,7 @@ func main() {
 			return
 		}
 
-		renderer := NewJSONSchemaRenderer(schema, string(htmlLayout))
+		renderer := renderer.NewJSONSchemaRenderer(schema, string(htmlLayout))
 
 		// Set template data for dynamic interpolation
 		templateData := map[string]interface{}{

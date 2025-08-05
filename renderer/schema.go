@@ -1,4 +1,4 @@
-package main
+package renderer
 
 import (
 	"bytes"
@@ -11,7 +11,7 @@ import (
 type FieldInfo struct {
 	Name       string
 	Order      int
-	Definition map[string]interface{}
+	Definition map[string]any
 }
 
 // GroupInfo represents metadata for a group extracted from JSONSchema
@@ -29,23 +29,23 @@ type GroupTitle struct {
 
 // JSONSchemaRenderer is responsible for rendering HTML fields based on JSONSchema
 type JSONSchemaRenderer struct {
-	Schema       map[string]interface{}
+	Schema       map[string]any
 	HTMLLayout   string
-	TemplateData map[string]interface{} // Data for template interpolation
-	cachedHTML   string                 // Cached rendered HTML
+	TemplateData map[string]any // Data for template interpolation
+	cachedHTML   string         // Cached rendered HTML
 }
 
 // NewJSONSchemaRenderer creates a new instance of JSONSchemaRenderer
-func NewJSONSchemaRenderer(schema map[string]interface{}, htmlLayout string) *JSONSchemaRenderer {
+func NewJSONSchemaRenderer(schema map[string]any, htmlLayout string) *JSONSchemaRenderer {
 	return &JSONSchemaRenderer{
 		Schema:       schema,
 		HTMLLayout:   htmlLayout,
-		TemplateData: make(map[string]interface{}),
+		TemplateData: make(map[string]any),
 	}
 }
 
 // SetTemplateData sets the data used for template interpolation
-func (r *JSONSchemaRenderer) SetTemplateData(data map[string]interface{}) {
+func (r *JSONSchemaRenderer) SetTemplateData(data map[string]any) {
 	r.TemplateData = data
 }
 
@@ -93,7 +93,7 @@ func (r *JSONSchemaRenderer) RenderFields() (string, error) {
 		groupHTML.WriteString(renderGroup(group))
 	}
 
-	formConfig := r.Schema["form"].(map[string]interface{})
+	formConfig := r.Schema["form"].(map[string]any)
 	formClass, _ := formConfig["class"].(string)
 	formAction, _ := formConfig["action"].(string)
 	formMethod, _ := formConfig["method"].(string)
@@ -128,20 +128,20 @@ func (r *JSONSchemaRenderer) RenderFields() (string, error) {
 }
 
 // parseGroupsFromSchema extracts and sorts groups and fields from schema
-func parseGroupsFromSchema(schema map[string]interface{}) []GroupInfo {
-	formConfig, ok := schema["form"].(map[string]interface{})
+func parseGroupsFromSchema(schema map[string]any) []GroupInfo {
+	formConfig, ok := schema["form"].(map[string]any)
 	if !ok {
 		return nil
 	}
 
-	properties, ok := schema["properties"].(map[string]interface{})
+	properties, ok := schema["properties"].(map[string]any)
 	if !ok {
 		return nil
 	}
 
 	// Get required fields from schema root
 	var requiredFields map[string]bool = make(map[string]bool)
-	if reqFields, ok := schema["required"].([]interface{}); ok {
+	if reqFields, ok := schema["required"].([]any); ok {
 		for _, field := range reqFields {
 			if fieldName, ok := field.(string); ok {
 				requiredFields[fieldName] = true
@@ -150,12 +150,12 @@ func parseGroupsFromSchema(schema map[string]interface{}) []GroupInfo {
 	}
 
 	var groups []GroupInfo
-	for _, group := range formConfig["groups"].([]interface{}) {
-		groupMap := group.(map[string]interface{})
+	for _, group := range formConfig["groups"].([]any) {
+		groupMap := group.(map[string]any)
 
 		// Parse group title
 		var groupTitle GroupTitle
-		if titleMap, ok := groupMap["title"].(map[string]interface{}); ok {
+		if titleMap, ok := groupMap["title"].(map[string]any); ok {
 			if text, ok := titleMap["text"].(string); ok {
 				groupTitle.Text = text
 			}
@@ -168,15 +168,15 @@ func parseGroupsFromSchema(schema map[string]interface{}) []GroupInfo {
 		groupClass, _ := groupMap["class"].(string)
 
 		var fields []FieldInfo
-		for _, fieldName := range groupMap["fields"].([]interface{}) {
-			fieldDef := properties[fieldName.(string)].(map[string]interface{})
+		for _, fieldName := range groupMap["fields"].([]any) {
+			fieldDef := properties[fieldName.(string)].(map[string]any)
 			order := 0
 			if ord, exists := fieldDef["order"].(int); exists {
 				order = ord
 			}
 
 			// Add required field info to field definition
-			fieldDefCopy := make(map[string]interface{})
+			fieldDefCopy := make(map[string]any)
 			for k, v := range fieldDef {
 				fieldDefCopy[k] = v
 			}
@@ -243,7 +243,7 @@ var fieldTemplates = map[string]string{
 }
 
 func renderField(field FieldInfo) string {
-	ui, ok := field.Definition["ui"].(map[string]interface{})
+	ui, ok := field.Definition["ui"].(map[string]any)
 	if !ok {
 		return ""
 	}
@@ -279,7 +279,7 @@ func renderField(field FieldInfo) string {
 		}
 	}
 
-	data := map[string]interface{}{
+	data := map[string]any{
 		"Class":                class,
 		"Name":                 name,
 		"Title":                template.HTML(titleHTML),
@@ -302,7 +302,7 @@ func renderField(field FieldInfo) string {
 		tmpl.Execute(&buf, data)
 		return buf.String()
 	case "select":
-		options, _ := ui["options"].([]interface{})
+		options, _ := ui["options"].([]any)
 		var optionsHTML bytes.Buffer
 		for _, option := range options {
 			optionsHTML.WriteString(fmt.Sprintf(`<option value="%v">%v</option>`, option, option))
@@ -338,10 +338,10 @@ func renderField(field FieldInfo) string {
 // Template for buttons
 var buttonTemplate = `<button type="{{.Type}}" class="{{.Class}}">{{.Label}}</button>`
 
-func renderButtons(formConfig map[string]interface{}) string {
+func renderButtons(formConfig map[string]any) string {
 	var buttonsHTML bytes.Buffer
-	if submitConfig, ok := formConfig["submit"].(map[string]interface{}); ok {
-		data := map[string]interface{}{
+	if submitConfig, ok := formConfig["submit"].(map[string]any); ok {
+		data := map[string]any{
 			"Type":  submitConfig["type"],
 			"Class": submitConfig["class"],
 			"Label": submitConfig["label"],
@@ -349,8 +349,8 @@ func renderButtons(formConfig map[string]interface{}) string {
 		tmpl := template.Must(template.New("button").Parse(buttonTemplate))
 		tmpl.Execute(&buttonsHTML, data)
 	}
-	if resetConfig, ok := formConfig["reset"].(map[string]interface{}); ok {
-		data := map[string]interface{}{
+	if resetConfig, ok := formConfig["reset"].(map[string]any); ok {
+		data := map[string]any{
 			"Type":  resetConfig["type"],
 			"Class": resetConfig["class"],
 			"Label": resetConfig["label"],

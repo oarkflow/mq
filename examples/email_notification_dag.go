@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"regexp"
 	"sort"
 	"strings"
@@ -20,145 +21,19 @@ import (
 )
 
 func main() {
-	contactFormSchema := map[string]any{
-		"properties": map[string]any{
-			"first_name": map[string]any{
-				"type":  "string",
-				"title": "👤 First Name",
-				"order": 1,
-				"ui": map[string]any{
-					"control": "input",
-					"class":   "form-group",
-					"name":    "first_name",
-				},
-			},
-			"last_name": map[string]any{
-				"type":  "string",
-				"title": "👤 Last Name",
-				"order": 2,
-				"ui": map[string]any{
-					"control": "input",
-					"class":   "form-group",
-					"name":    "last_name",
-				},
-			},
-			"email": map[string]any{
-				"type":  "email",
-				"title": "📧 Email Address",
-				"order": 3,
-				"ui": map[string]any{
-					"control": "input",
-					"class":   "form-group",
-					"name":    "email",
-				},
-			},
-			"user_type": map[string]any{
-				"type":  "string",
-				"title": "👥 User Type",
-				"order": 4,
-				"ui": map[string]any{
-					"control": "select",
-					"class":   "form-group",
-					"name":    "user_type",
-					"options": []any{"new", "premium", "standard"},
-				},
-			},
-			"priority": map[string]any{
-				"type":  "string",
-				"title": "🚨 Priority Level",
-				"order": 5,
-				"ui": map[string]any{
-					"control": "select",
-					"class":   "form-group",
-					"name":    "priority",
-					"options": []any{"low", "medium", "high", "urgent"},
-				},
-			},
-			"subject": map[string]any{
-				"type":  "string",
-				"title": "📋 Subject",
-				"order": 6,
-				"ui": map[string]any{
-					"control": "input",
-					"class":   "form-group",
-					"name":    "subject",
-				},
-			},
-			"message": map[string]any{
-				"type":  "textarea",
-				"title": "💬 Message",
-				"order": 7,
-				"ui": map[string]any{
-					"control": "textarea",
-					"class":   "form-group",
-					"name":    "message",
-				},
-			},
-		},
-		"required": []any{"first_name", "last_name", "email", "user_type", "priority", "subject", "message"},
+	var contactFormSchema = map[string]any{}
+	content, err := os.ReadFile("app/schema.json")
+	if err != nil {
+		panic(err)
+	}
+	if err := json.Unmarshal(content, &contactFormSchema); err != nil {
+		panic(fmt.Errorf("failed to parse JSON schema: %w", err))
 	}
 
-	contactFormLayout := `
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Contact Us - Email Notification System</title>
-    <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 700px; margin: 50px auto; padding: 20px; background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); color: white; min-height: 100vh; }
-        .form-container { background: rgba(255, 255, 255, 0.1); padding: 40px; border-radius: 20px; backdrop-filter: blur(15px); box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4); border: 1px solid rgba(255, 255, 255, 0.2); }
-        h1 { text-align: center; margin-bottom: 10px; text-shadow: 2px 2px 4px rgba(0,0,0,0.3); font-size: 2.2em; }
-        .subtitle { text-align: center; margin-bottom: 30px; opacity: 0.9; font-size: 1.1em; }
-        .form-group { margin-bottom: 25px; }
-        label { display: block; margin-bottom: 8px; font-weight: 600; text-shadow: 1px 1px 2px rgba(0,0,0,0.3); font-size: 1.1em; }
-        input, textarea, select { width: 100%; padding: 15px; border: none; border-radius: 10px; font-size: 16px; background: rgba(255, 255, 255, 0.2); color: white; backdrop-filter: blur(5px); transition: all 0.3s ease; border: 1px solid rgba(255, 255, 255, 0.3); }
-        input:focus, textarea:focus, select:focus { outline: none; background: rgba(255, 255, 255, 0.3); border: 1px solid rgba(255, 255, 255, 0.6); transform: translateY(-2px); box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2); }
-        input::placeholder, textarea::placeholder { color: rgba(255, 255, 255, 0.7); }
-        textarea { height: 120px; resize: vertical; }
-        select { cursor: pointer; }
-        select option { background: #2a5298; color: white; }
-        .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-        @media (max-width: 600px) { .form-row { grid-template-columns: 1fr; } }
-        button { background: linear-gradient(45deg, #FF6B6B, #4ECDC4); color: white; padding: 18px 40px; border: none; border-radius: 30px; cursor: pointer; font-size: 18px; font-weight: bold; width: 100%; transition: all 0.3s ease; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3); text-transform: uppercase; letter-spacing: 1px; }
-        button:hover { transform: translateY(-3px); box-shadow: 0 8px 25px rgba(0, 0, 0, 0.4); }
-        .info-box { background: rgba(255, 255, 255, 0.15); padding: 20px; border-radius: 12px; margin-bottom: 25px; text-align: center; border-left: 4px solid #4ECDC4; }
-        .feature-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin: 20px 0; }
-        .feature-item { background: rgba(255, 255, 255, 0.1); padding: 15px; border-radius: 8px; text-align: center; font-size: 14px; }
-    </style>
-</head>
-<body>
-    <div class="form-container">
-        <h1>📧 Contact Us</h1>
-        <div class="subtitle">Advanced Email Notification System with DAG Workflow</div>
-
-        <div class="info-box">
-            <p><strong>🔄 Smart Routing:</strong> Our system automatically routes your message based on your user type and preferences.</p>
-        </div>
-
-        <div class="feature-list">
-            <div class="feature-item">
-                <strong>📱 Instant Notifications</strong><br>
-                Real-time email delivery
-            </div>
-            <div class="feature-item">
-                <strong>🎯 Smart Targeting</strong><br>
-                User-specific content
-            </div>
-            <div class="feature-item">
-                <strong>🔒 Secure Processing</strong><br>
-                Enterprise-grade security
-            </div>
-        </div>
-
-        <form method="post" action="/process?task_id={{task_id}}&next=true">
-            <div class="form-row">
-                {{form_fields}}
-            </div>
-
-            <button type="submit">🚀 Send Message</button>
-        </form>
-    </div>
-</body>
-</html>`
+	contactFormLayout, err := os.ReadFile("email/contact-form.html")
+	if err != nil {
+		panic(err)
+	}
 
 	flow := dag.NewDAG("Email Notification System", "email-notification", func(taskID string, result mq.Result) {
 		fmt.Printf("Email notification workflow completed for task %s: %s\n", taskID, string(utils.RemoveRecursiveFromJSON(result.Payload, "html_content")))
@@ -166,7 +41,7 @@ func main() {
 
 	// Add workflow nodes
 	// Note: Page nodes have no timeout by default, allowing users unlimited time for form input
-	flow.AddNode(dag.Page, "Contact Form", "ContactForm", &ConfigurableFormNode{Schema: contactFormSchema, HTMLLayout: contactFormLayout}, true)
+	flow.AddNode(dag.Page, "Contact Form", "ContactForm", &ConfigurableFormNode{Schema: contactFormSchema, HTMLLayout: string(contactFormLayout)}, true)
 	flow.AddNode(dag.Function, "Validate Contact Data", "ValidateContact", &ValidateContactNode{})
 	flow.AddNode(dag.Function, "Check User Type", "CheckUserType", &CheckUserTypeNode{})
 	flow.AddNode(dag.Function, "Send Welcome Email", "SendWelcomeEmail", &SendWelcomeEmailNode{})
@@ -631,190 +506,13 @@ func (s *SuccessPageNode) ProcessTask(ctx context.Context, task *mq.Task) mq.Res
 		return mq.Result{Error: err, Ctx: ctx}
 	}
 
-	htmlTemplate := `
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Message Sent Successfully</title>
-    <style>
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            max-width: 700px;
-            margin: 50px auto;
-            padding: 20px;
-            background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
-            color: white;
-        }
-        .result-container {
-            background: rgba(255, 255, 255, 0.1);
-            padding: 40px;
-            border-radius: 20px;
-            backdrop-filter: blur(15px);
-            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
-            text-align: center;
-        }
-        .success-icon {
-            font-size: 80px;
-            margin-bottom: 20px;
-            animation: bounce 2s infinite;
-        }
-        @keyframes bounce {
-            0%, 20%, 50%, 80%, 100% { transform: translateY(0); }
-            40% { transform: translateY(-10px); }
-            60% { transform: translateY(-5px); }
-        }
-        h1 {
-            margin-bottom: 30px;
-            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
-            font-size: 2.5em;
-        }
-        .info-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 20px;
-            margin: 30px 0;
-            text-align: left;
-        }
-        .info-item {
-            background: rgba(255, 255, 255, 0.15);
-            padding: 20px;
-            border-radius: 12px;
-            border-left: 4px solid #4ECDC4;
-        }
-        .info-label {
-            font-weight: bold;
-            margin-bottom: 8px;
-            opacity: 0.9;
-            font-size: 14px;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-        }
-        .info-value {
-            font-size: 16px;
-            word-break: break-word;
-        }
-        .message-preview {
-            background: rgba(255, 255, 255, 0.1);
-            padding: 25px;
-            border-radius: 12px;
-            margin: 30px 0;
-            text-align: left;
-            border: 1px solid rgba(255, 255, 255, 0.2);
-        }
-        .actions {
-            margin-top: 40px;
-        }
-        .btn {
-            background: linear-gradient(45deg, #FF6B6B, #4ECDC4);
-            color: white;
-            padding: 15px 30px;
-            border: none;
-            border-radius: 25px;
-            cursor: pointer;
-            font-size: 16px;
-            font-weight: bold;
-            margin: 0 15px;
-            text-decoration: none;
-            display: inline-block;
-            transition: all 0.3s ease;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-        }
-        .btn:hover {
-            transform: translateY(-3px);
-            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
-        }
-        .status-badge {
-            background: #4CAF50;
-            color: white;
-            padding: 8px 20px;
-            border-radius: 25px;
-            font-size: 14px;
-            font-weight: bold;
-            display: inline-block;
-            margin: 10px 0;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-        }
-        .workflow-info {
-            background: rgba(255, 255, 255, 0.1);
-            padding: 20px;
-            border-radius: 12px;
-            margin-top: 30px;
-            font-size: 14px;
-            opacity: 0.9;
-        }
-    </style>
-</head>
-<body>
-    <div class="result-container">
-        <div class="success-icon">✅</div>
-        <h1>Message Sent Successfully!</h1>
-
-        <div class="status-badge">{{email_status}}</div>
-
-        <div class="info-grid">
-            <div class="info-item">
-                <div class="info-label">👤 Recipient</div>
-                <div class="info-value">{{full_name}}</div>
-            </div>
-            <div class="info-item">
-                <div class="info-label">📧 Email Address</div>
-                <div class="info-value">{{email}}</div>
-            </div>
-            <div class="info-item">
-                <div class="info-label">🆔 Email ID</div>
-                <div class="info-value">{{email_id}}</div>
-            </div>
-            <div class="info-item">
-                <div class="info-label">⏰ Sent At</div>
-                <div class="info-value">{{sent_at}}</div>
-            </div>
-            <div class="info-item">
-                <div class="info-label">📨 Email Type</div>
-                <div class="info-value">{{email_type}}</div>
-            </div>
-            <div class="info-item">
-                <div class="info-label">👥 User Type</div>
-                <div class="info-value">{{user_type}}</div>
-            </div>
-            <div class="info-item">
-                <div class="info-label">🚨 Priority</div>
-                <div class="info-value">{{priority}}</div>
-            </div>
-            <div class="info-item">
-                <div class="info-label">🚚 Delivery</div>
-                <div class="info-value">{{delivery_estimate}}</div>
-            </div>
-        </div>
-
-        <div class="message-preview">
-            <div class="info-label">📋 Subject:</div>
-            <div class="info-value" style="margin: 10px 0; font-weight: bold; font-size: 18px;">
-                {{subject}}
-            </div>
-            <div class="info-label">💬 Message ({{message_length}} chars):</div>
-            <div class="info-value" style="margin-top: 15px; font-style: italic; line-height: 1.6;">
-                "{{message}}"
-            </div>
-        </div>
-
-        <div class="actions">
-            <a href="/" class="btn">📧 Send Another Message</a>
-            <a href="/api/metrics" class="btn">📊 View Metrics</a>
-        </div>
-
-        <div class="workflow-info">
-            <strong>🔄 Workflow Details:</strong><br>
-            Gateway: {{gateway}} | Template: {{email_template}} | Processed: {{processed_at}}<br>
-            This message was processed through our advanced DAG workflow system with conditional routing.
-        </div>
-    </div>
-</body>
-</html>`
+	htmlTemplate, err := os.ReadFile("email/success.html")
+	if err != nil {
+		return mq.Result{Error: fmt.Errorf("failed to read success template: %v", err)}
+	}
 
 	parser := jet.NewWithMemory(jet.WithDelims("{{", "}}"))
-	rs, err := parser.ParseTemplate(htmlTemplate, inputData)
+	rs, err := parser.ParseTemplate(string(htmlTemplate), inputData)
 	if err != nil {
 		return mq.Result{Error: err, Ctx: ctx}
 	}
@@ -853,123 +551,10 @@ func (e *EmailErrorPageNode) ProcessTask(ctx context.Context, task *mq.Task) mq.
 		errorMessage = "An unknown error occurred"
 	}
 
-	htmlTemplate := `
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Email Error</title>
-    <style>
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            max-width: 700px;
-            margin: 50px auto;
-            padding: 20px;
-            background: linear-gradient(135deg, #FF6B6B 0%, #FF5722 100%);
-            color: white;
-        }
-        .error-container {
-            background: rgba(255, 255, 255, 0.1);
-            padding: 40px;
-            border-radius: 20px;
-            backdrop-filter: blur(15px);
-            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
-            text-align: center;
-        }
-        .error-icon {
-            font-size: 80px;
-            margin-bottom: 20px;
-            animation: shake 0.5s ease-in-out infinite alternate;
-        }
-        @keyframes shake {
-            0% { transform: translateX(0); }
-            100% { transform: translateX(5px); }
-        }
-        h1 {
-            margin-bottom: 30px;
-            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
-            font-size: 2.5em;
-        }
-        .error-message {
-            background: rgba(255, 255, 255, 0.2);
-            padding: 25px;
-            border-radius: 12px;
-            margin: 25px 0;
-            font-size: 18px;
-            border-left: 6px solid #FFB6B6;
-            line-height: 1.6;
-        }
-        .error-details {
-            background: rgba(255, 255, 255, 0.15);
-            padding: 20px;
-            border-radius: 12px;
-            margin: 25px 0;
-            text-align: left;
-        }
-        .actions {
-            margin-top: 40px;
-        }
-        .btn {
-            background: linear-gradient(45deg, #4ECDC4, #44A08D);
-            color: white;
-            padding: 15px 30px;
-            border: none;
-            border-radius: 25px;
-            cursor: pointer;
-            font-size: 16px;
-            font-weight: bold;
-            margin: 0 15px;
-            text-decoration: none;
-            display: inline-block;
-            transition: all 0.3s ease;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-        }
-        .btn:hover {
-            transform: translateY(-3px);
-            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
-        }
-        .retry-btn {
-            background: linear-gradient(45deg, #FFA726, #FF9800);
-        }
-    </style>
-</head>
-<body>
-    <div class="error-container">
-        <div class="error-icon">❌</div>
-        <h1>Email Processing Error</h1>
-
-        <div class="error-message">
-            {{error_message}}
-        </div>
-
-        {{if error_field}}
-        <div class="error-details">
-            <strong>🎯 Error Field:</strong> {{error_field}}<br>
-            <strong>⚡ Action Required:</strong> Please correct the highlighted field and try again.<br>
-            <strong>💡 Tip:</strong> Make sure all required fields are properly filled out.
-        </div>
-        {{end}}
-
-        {{if retry_suggested}}
-        <div class="error-details">
-            <strong>⚠️ Temporary Issue:</strong> This appears to be a temporary system issue.
-            Please try sending your message again in a few moments.<br>
-            <strong>🔄 Auto-Retry:</strong> Our system will automatically retry failed deliveries.
-        </div>
-        {{end}}
-
-        <div class="actions">
-            <a href="/" class="btn retry-btn">🔄 Try Again</a>
-            <a href="/api/status" class="btn">📊 Check Status</a>
-        </div>
-
-        <div style="margin-top: 30px; font-size: 14px; opacity: 0.8;">
-            🔄 DAG Error Handler | Email Notification Workflow Failed<br>
-            Our advanced routing system ensures reliable message delivery.
-        </div>
-    </div>
-</body>
-</html>`
+	htmlTemplate, err := os.ReadFile("email/error.html")
+	if err != nil {
+		return mq.Result{Error: fmt.Errorf("failed to read error template: %v", err)}
+	}
 
 	parser := jet.NewWithMemory(jet.WithDelims("{{", "}}"))
 	templateData := map[string]any{
@@ -978,7 +563,7 @@ func (e *EmailErrorPageNode) ProcessTask(ctx context.Context, task *mq.Task) mq.
 		"retry_suggested": inputData["retry_suggested"],
 	}
 
-	rs, err := parser.ParseTemplate(htmlTemplate, templateData)
+	rs, err := parser.ParseTemplate(string(htmlTemplate), templateData)
 	if err != nil {
 		return mq.Result{Error: err, Ctx: ctx}
 	}
