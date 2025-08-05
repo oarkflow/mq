@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"fmt"
 	"html/template"
+	"os"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/oarkflow/jsonschema"
 )
@@ -826,4 +828,47 @@ func renderButtonFromConfig(config map[string]interface{}, defaultType string) s
 
 	return fmt.Sprintf(`<button %s>%s</button>`,
 		strings.Join(attributes, " "), content)
+}
+
+type RequestSchemaTemplate struct {
+	Schema   *jsonschema.Schema  `json:"schema"`
+	Renderer *JSONSchemaRenderer `json:"template"`
+}
+
+var cache = make(map[string]*RequestSchemaTemplate)
+var mu = &sync.Mutex{}
+
+func Get(schemaPath, template string) (*JSONSchemaRenderer, error) {
+	mu.Lock()
+	defer mu.Unlock()
+	path := fmt.Sprintf("%s:%s", schemaPath, template)
+	if cached, exists := cache[path]; exists {
+		return cached.Renderer, nil
+	}
+
+	schemaContent, err := os.ReadFile(schemaPath)
+	if err != nil {
+		return nil, fmt.Errorf("error reading schema file: %w", err)
+	}
+
+	compiler := jsonschema.NewCompiler()
+	schema, err := compiler.Compile(schemaContent)
+	if err != nil {
+		return nil, fmt.Errorf("error compiling schema: %w", err)
+	}
+
+	templatePath := fmt.Sprintf("templates/%s.html", template)
+	htmlLayout, err := os.ReadFile(templatePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load template: %w", err)
+	}
+
+	renderer := NewJSONSchemaRenderer(schema, string(htmlLayout))
+	cachedTemplate := &RequestSchemaTemplate{
+		Schema:   schema,
+		Renderer: renderer,
+	}
+	cache[path] = cachedTemplate
+
+	return cachedTemplate.Renderer, nil
 }
