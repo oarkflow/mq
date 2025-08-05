@@ -1,10 +1,8 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"html/template"
 	"os"
 	"regexp"
 	"strings"
@@ -13,7 +11,7 @@ import (
 	"github.com/oarkflow/json"
 
 	"github.com/oarkflow/mq/dag"
-	"github.com/oarkflow/mq/renderer"
+	"github.com/oarkflow/mq/handlers"
 	"github.com/oarkflow/mq/utils"
 
 	"github.com/oarkflow/jet"
@@ -23,17 +21,16 @@ import (
 )
 
 func main() {
-	renderer, err := renderer.GetFromFile("schema.json", "")
-	if err != nil {
-		panic(err)
-	}
 	flow := dag.NewDAG("Email Notification System", "email-notification", func(taskID string, result mq.Result) {
 		fmt.Printf("Email notification workflow completed for task %s: %s\n", taskID, string(utils.RemoveRecursiveFromJSON(result.Payload, "html_content")))
 	}, mq.WithSyncMode(true))
 
-	// Add workflow nodes
+	renderHTML := handlers.NewRenderHTMLNode("render-html")
+	renderHTML.Payload.Data = map[string]any{
+		"schema_file": "schema.json",
+	} // Add workflow nodes
 	// Note: Page nodes have no timeout by default, allowing users unlimited time for form input
-	flow.AddNode(dag.Page, "Contact Form", "ContactForm", &RenderHTMLNode{renderer: renderer}, true)
+	flow.AddNode(dag.Page, "Contact Form", "ContactForm", renderHTML, true)
 	flow.AddNode(dag.Function, "Validate Contact Data", "ValidateContact", &ValidateContactNode{})
 	flow.AddNode(dag.Function, "Check User Type", "CheckUserType", &CheckUserTypeNode{})
 	flow.AddNode(dag.Function, "Send Welcome Email", "SendWelcomeEmail", &SendWelcomeEmailNode{})
@@ -78,109 +75,6 @@ func main() {
 
 // RenderHTMLNode - Page node with JSONSchema-based fields and custom HTML layout
 // Usage: Pass JSONSchema and HTML layout to the node for dynamic form rendering and validation
-
-type RenderHTMLNode struct {
-	dag.Operation
-	renderer *renderer.JSONSchemaRenderer
-}
-
-func (c *RenderHTMLNode) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
-	data := c.Payload.Data
-	var (
-		schemaFile, _   = data["schema_file"].(string)
-		templateStr, _  = data["template"].(string)
-		templateFile, _ = data["template_file"].(string)
-	)
-
-	var templateData map[string]any
-	if len(task.Payload) > 0 {
-		if err := json.Unmarshal(task.Payload, &templateData); err != nil {
-			return mq.Result{Payload: task.Payload, Error: err, Ctx: ctx, ConditionStatus: "invalid"}
-		}
-	}
-	if templateData == nil {
-		templateData = make(map[string]any)
-	}
-	templateData["task_id"] = ctx.Value("task_id")
-
-	var renderedHTML string
-	var err error
-
-	switch {
-	// 1. JSONSchema + HTML Template
-	case schemaFile != "" && templateStr != "":
-		if c.renderer == nil {
-			renderer, err := renderer.GetFromFile(schemaFile, templateStr)
-			if err != nil {
-				return mq.Result{Error: fmt.Errorf("failed to get renderer from file %s: %v", schemaFile, err), Ctx: ctx}
-			}
-			c.renderer = renderer
-		}
-		renderedHTML, err = c.renderer.RenderFields(templateData)
-	// 2. JSONSchema + HTML File
-	case schemaFile != "" && templateFile != "":
-		if c.renderer == nil {
-			renderer, err := renderer.GetFromFile(schemaFile, "", templateFile)
-			if err != nil {
-				return mq.Result{Error: fmt.Errorf("failed to get renderer from file %s: %v", schemaFile, err), Ctx: ctx}
-			}
-			c.renderer = renderer
-		}
-		renderedHTML, err = c.renderer.RenderFields(templateData)
-	// 3. Only JSONSchema
-	case schemaFile != "" || c.renderer != nil:
-		if c.renderer == nil {
-			renderer, err := renderer.GetFromFile(schemaFile, "")
-			if err != nil {
-				return mq.Result{Error: fmt.Errorf("failed to get renderer from file %s: %v", schemaFile, err), Ctx: ctx}
-			}
-			c.renderer = renderer
-		}
-		renderedHTML, err = c.renderer.RenderFields(templateData)
-	// 4. Only HTML Template
-	case templateStr != "":
-		tmpl, err := template.New("inline").Parse(templateStr)
-		if err != nil {
-			return mq.Result{Error: fmt.Errorf("failed to parse template: %v", err), Ctx: ctx}
-		}
-		var buf bytes.Buffer
-		err = tmpl.Execute(&buf, templateData)
-		if err != nil {
-			return mq.Result{Error: fmt.Errorf("failed to execute template: %v", err), Ctx: ctx}
-		}
-		renderedHTML = buf.String()
-	// 5. Only HTML File
-	case templateFile != "":
-		fileContent, err := os.ReadFile(templateFile)
-		if err != nil {
-			return mq.Result{Error: fmt.Errorf("failed to read template file: %v", err), Ctx: ctx}
-		}
-		tmpl, err := template.New("file").Parse(string(fileContent))
-		if err != nil {
-			return mq.Result{Error: fmt.Errorf("failed to parse template file: %v", err), Ctx: ctx}
-		}
-		var buf bytes.Buffer
-		err = tmpl.Execute(&buf, templateData)
-		if err != nil {
-			return mq.Result{Error: fmt.Errorf("failed to execute template file: %v", err), Ctx: ctx}
-		}
-		renderedHTML = buf.String()
-	default:
-		return mq.Result{Error: fmt.Errorf("no valid rendering approach found"), Ctx: ctx}
-	}
-
-	if err != nil {
-		return mq.Result{Payload: task.Payload, Error: err, Ctx: ctx, ConditionStatus: "invalid"}
-	}
-
-	ctx = context.WithValue(ctx, consts.ContentType, consts.TypeHtml)
-	resultData := map[string]any{
-		"html_content": renderedHTML,
-		"step":         "form",
-	}
-	bt, _ := json.Marshal(resultData)
-	return mq.Result{Payload: bt, Ctx: ctx}
-}
 
 // ValidateContactNode - Validates contact form data
 type ValidateContactNode struct {
