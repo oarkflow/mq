@@ -437,9 +437,6 @@ func (tm *DAG) processTaskInternal(ctx context.Context, task *mq.Task) mq.Result
 	currentKey := tm.getCurrentNode(manager)
 	currentNode := strings.Split(currentKey, Delimiter)[0]
 	node, exists := tm.nodes.Get(currentNode)
-	if exists {
-		fmt.Println(isDAGNode(node))
-	}
 	method, ok := ctx.Value("method").(string)
 	if method == "GET" && exists && node.NodeType == Page {
 		ctx = context.WithValue(ctx, "initial_node", currentNode)
