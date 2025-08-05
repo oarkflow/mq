@@ -437,6 +437,27 @@ func (tm *DAG) processTaskInternal(ctx context.Context, task *mq.Task) mq.Result
 	currentKey := tm.getCurrentNode(manager)
 	currentNode := strings.Split(currentKey, Delimiter)[0]
 	node, exists := tm.nodes.Get(currentNode)
+
+	if node != nil {
+		if subDag, isSubDAG := node.processor.(*DAG); isSubDAG {
+			tm.Logger().Info("Processing subDAG",
+				logger.Field{Key: "subDAG", Value: subDag.name},
+				logger.Field{Key: "taskID", Value: task.ID},
+			)
+			result := subDag.processTaskInternal(ctx, task)
+			if result.Error != nil {
+				return result
+			}
+			node, exists = tm.nodes.Get(result.Topic)
+			if exists && node.NodeType == Page {
+				return result
+			}
+			m, ok := subDag.taskManager.Get(task.ID)
+			if !subDag.hasPageNode || (ok && m != nil && m.result != nil) {
+				task.Payload = result.Payload
+			}
+		}
+	}
 	method, ok := ctx.Value("method").(string)
 	if method == "GET" && exists && node.NodeType == Page {
 		ctx = context.WithValue(ctx, "initial_node", currentNode)
@@ -452,6 +473,7 @@ func (tm *DAG) processTaskInternal(ctx context.Context, task *mq.Task) mq.Result
 			ctx = context.WithValue(ctx, "initial_node", nodes[0].ID)
 		}
 	}
+
 	if currentNodeResult, hasResult := manager.currentNodeResult.Get(currentKey); hasResult {
 		var taskPayload, resultPayload map[string]any
 		if err := json.Unmarshal(task.Payload, &taskPayload); err == nil {
@@ -463,6 +485,7 @@ func (tm *DAG) processTaskInternal(ctx context.Context, task *mq.Task) mq.Result
 			}
 		}
 	}
+
 	firstNode, err := tm.parseInitialNode(ctx)
 	if err != nil {
 		return mq.Result{Error: err, Ctx: ctx}
