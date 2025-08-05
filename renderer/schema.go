@@ -575,30 +575,18 @@ func (r *JSONSchemaRenderer) getSchemaAtPath(path string) *jsonschema.Schema {
 	parts := strings.Split(path, ".")
 	currentSchema := r.Schema
 
-	fmt.Printf("DEBUG: Navigating to path '%s', parts: %v\n", path, parts)
-
-	for i, part := range parts {
+	for _, part := range parts {
 		if currentSchema.Properties == nil {
-			fmt.Printf("DEBUG: No properties at part %d ('%s')\n", i, part)
 			return nil
 		}
 
 		if propSchema, exists := (*currentSchema.Properties)[part]; exists {
 			currentSchema = propSchema
-			fmt.Printf("DEBUG: Found part '%s' at level %d\n", part, i)
 		} else {
-			fmt.Printf("DEBUG: Part '%s' not found at level %d. Available: %v\n", part, i, func() []string {
-				var keys []string
-				for k := range *currentSchema.Properties {
-					keys = append(keys, k)
-				}
-				return keys
-			}())
 			return nil
 		}
 	}
 
-	fmt.Printf("DEBUG: Successfully navigated to path '%s', found required: %v\n", path, currentSchema.Required)
 	return currentSchema
 }
 
@@ -615,17 +603,10 @@ func (r *JSONSchemaRenderer) isFieldRequiredAtPath(fieldName, schemaPath string)
 	}
 
 	if schema == nil {
-		// Debug: schema not found
-		fmt.Printf("DEBUG: Schema not found for path '%s'\n", schemaPath)
 		return false
 	}
 
-	isRequired := contains(schema.Required, fieldName)
-	// Debug: show what we're checking
-	fmt.Printf("DEBUG: Checking if '%s' is required in schema at path '%s'. Required fields: %v. Result: %v\n",
-		fieldName, schemaPath, schema.Required, isRequired)
-
-	return isRequired
+	return contains(schema.Required, fieldName)
 }
 
 // renderGroup generates HTML for a single group
