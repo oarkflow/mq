@@ -176,13 +176,13 @@
                 Enterprise-grade security
             </div>
         </div>
-
-        <form method="post" action="/process?task_id={{task_id}}&next=true">
-            <div class="form-row">
-                {{form_fields}}
+        <form {{form_attributes}}>
+            <div class="form-container p-4 bg-white shadow-md rounded">
+                {{form_groups}}
+                <div class="mt-4 flex flex-col items-center gap-2">
+                    {{form_buttons}}
+                </div>
             </div>
-
-            <button type="submit">🚀 Send Message</button>
         </form>
     </div>
 </body>

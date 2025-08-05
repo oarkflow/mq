@@ -1022,14 +1022,15 @@ func getPlaceholder(schema *jsonschema.Schema) string {
 func getFieldContent(field FieldInfo) string {
 	// Check for content in UI first
 	if field.Schema.UI != nil {
+		if content, ok := field.Schema.UI["value"].(string); ok {
+			return content
+		}
+		if content, ok := field.Schema.UI["defaultValue"].(string); ok {
+			return content
+		}
 		if content, ok := field.Schema.UI["content"].(string); ok {
 			return content
 		}
-	}
-
-	// Use title as fallback for some elements
-	if field.Schema.Title != nil {
-		return *field.Schema.Title
 	}
 
 	return ""
@@ -1202,17 +1203,39 @@ func GetCacheSize() int {
 	return len(cache)
 }
 
-func GetFromBytes(schemaContent []byte, template string) (*RequestSchemaTemplate, error) {
+func GetFromBytes(schemaContent []byte, template string, templateFiles ...string) (*RequestSchemaTemplate, error) {
+	template = strings.TrimSpace(template)
 	compiler := jsonschema.NewCompiler()
 	schema, err := compiler.Compile(schemaContent)
 	if err != nil {
 		return nil, fmt.Errorf("error compiling schema: %w", err)
 	}
-
-	templatePath := fmt.Sprintf("%s/%s.html", BaseTemplateDir, template)
-	htmlLayout, err := os.ReadFile(templatePath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load template: %w", err)
+	var htmlLayout []byte
+	if len(templateFiles) > 0 && templateFiles[0] != "" {
+		templateFile := templateFiles[0]
+		if !strings.Contains(templateFile, "/") {
+			template = fmt.Sprintf("%s/%s", BaseTemplateDir, templateFile)
+		}
+		if !strings.HasSuffix(templateFile, ".html") {
+			template += ".html"
+		}
+		htmlLayout, err = os.ReadFile(templateFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load template: %w", err)
+		}
+	} else if template != "" {
+		htmlLayout = []byte(template)
+	} else {
+		htmlLayout = []byte(`
+	<form {{form_attributes}}>
+		<div>
+			{{form_groups}}
+			<div>
+				{{form_buttons}}
+			</div>
+		</div>
+	</form>
+	`)
 	}
 
 	renderer := NewJSONSchemaRenderer(schema, string(htmlLayout))
@@ -1223,8 +1246,12 @@ func GetFromBytes(schemaContent []byte, template string) (*RequestSchemaTemplate
 	return cachedTemplate, nil
 }
 
-func GetFromFile(schemaPath, template string) (*JSONSchemaRenderer, error) {
-	path := fmt.Sprintf("%s:%s", schemaPath, template)
+func GetFromFile(schemaPath, template string, templateFiles ...string) (*JSONSchemaRenderer, error) {
+	path := schemaPath
+	if len(templateFiles) > 0 {
+		templateFile := templateFiles[0]
+		path += fmt.Sprintf(":%s", templateFile)
+	}
 	mu.RLock()
 	if cached, exists := cache[path]; exists {
 		mu.RUnlock()
@@ -1240,7 +1267,7 @@ func GetFromFile(schemaPath, template string) (*JSONSchemaRenderer, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error reading schema file: %w", err)
 	}
-	schemaRenderer, err := GetFromBytes(schemaContent, template)
+	schemaRenderer, err := GetFromBytes(schemaContent, template, templateFiles...)
 	if err != nil {
 		return nil, fmt.Errorf("error creating renderer from bytes: %w", err)
 	}
