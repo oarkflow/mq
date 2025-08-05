@@ -12,6 +12,7 @@
                     "ui": {
                         "element": "input",
                         "type": "text",
+                        "name": "name",
                         "class": "form-group",
                         "order": 1
                     }

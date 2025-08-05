@@ -481,8 +481,24 @@ func (r *JSONSchemaRenderer) extractFieldsFromPath(fieldPath, parentPath string)
 		return fields
 	}
 
-	// Check if this field is required
-	isRequired := r.isFieldRequired(fieldPath)
+	// For nested paths like "company.address.street", we need to check if the final part
+	// is required in its immediate parent's schema
+	var fieldName string
+	var parentSchemaPath string
+
+	pathParts := strings.Split(fieldPath, ".")
+	if len(pathParts) > 1 {
+		// Extract the field name (last part) and parent path (all but last)
+		fieldName = pathParts[len(pathParts)-1]
+		parentSchemaPath = strings.Join(pathParts[:len(pathParts)-1], ".")
+	} else {
+		// Single level field
+		fieldName = fieldPath
+		parentSchemaPath = parentPath
+	}
+
+	// Check if this field is required at the parent level
+	isRequired := r.isFieldRequiredAtPath(fieldName, parentSchemaPath)
 
 	// If this schema has properties, it's a nested object
 	if schema.Properties != nil && len(*schema.Properties) > 0 {
@@ -499,7 +515,7 @@ func (r *JSONSchemaRenderer) extractFieldsFromPath(fieldPath, parentPath string)
 		}
 
 		fields = append(fields, FieldInfo{
-			Name:       fieldPath,
+			Name:       fieldName,
 			FieldPath:  fullPath,
 			Order:      order,
 			Schema:     schema,
@@ -512,7 +528,7 @@ func (r *JSONSchemaRenderer) extractFieldsFromPath(fieldPath, parentPath string)
 }
 
 // extractFieldsFromNestedSchema processes nested schema properties
-func (r *JSONSchemaRenderer) extractFieldsFromNestedSchema(propName, parentPath string, propSchema *jsonschema.Schema, parentRequired bool) []FieldInfo {
+func (r *JSONSchemaRenderer) extractFieldsFromNestedSchema(propName, parentPath string, propSchema *jsonschema.Schema, _ bool) []FieldInfo {
 	var fields []FieldInfo
 
 	fullPath := propName
@@ -520,8 +536,9 @@ func (r *JSONSchemaRenderer) extractFieldsFromNestedSchema(propName, parentPath 
 		fullPath = parentPath + "." + propName
 	}
 
-	// Check if this nested field is required
-	isRequired := parentRequired || contains(r.Schema.Required, propName)
+	// Check if this field is required at its immediate parent level
+	// The parent schema path is the current parentPath, not one level up
+	isRequired := r.isFieldRequiredAtPath(propName, parentPath)
 
 	// If this property has nested properties, recurse
 	if propSchema.Properties != nil && len(*propSchema.Properties) > 0 {
@@ -558,24 +575,57 @@ func (r *JSONSchemaRenderer) getSchemaAtPath(path string) *jsonschema.Schema {
 	parts := strings.Split(path, ".")
 	currentSchema := r.Schema
 
-	for _, part := range parts {
+	fmt.Printf("DEBUG: Navigating to path '%s', parts: %v\n", path, parts)
+
+	for i, part := range parts {
 		if currentSchema.Properties == nil {
+			fmt.Printf("DEBUG: No properties at part %d ('%s')\n", i, part)
 			return nil
 		}
 
 		if propSchema, exists := (*currentSchema.Properties)[part]; exists {
 			currentSchema = propSchema
+			fmt.Printf("DEBUG: Found part '%s' at level %d\n", part, i)
 		} else {
+			fmt.Printf("DEBUG: Part '%s' not found at level %d. Available: %v\n", part, i, func() []string {
+				var keys []string
+				for k := range *currentSchema.Properties {
+					keys = append(keys, k)
+				}
+				return keys
+			}())
 			return nil
 		}
 	}
 
+	fmt.Printf("DEBUG: Successfully navigated to path '%s', found required: %v\n", path, currentSchema.Required)
 	return currentSchema
 }
 
-// isFieldRequired checks if a field is required at the current schema level
-func (r *JSONSchemaRenderer) isFieldRequired(fieldName string) bool {
-	return contains(r.Schema.Required, fieldName)
+// isFieldRequiredAtPath checks if a field is required at a specific schema path
+func (r *JSONSchemaRenderer) isFieldRequiredAtPath(fieldName, schemaPath string) bool {
+	var schema *jsonschema.Schema
+
+	if schemaPath == "" {
+		// Check at root level
+		schema = r.Schema
+	} else {
+		// Navigate to the schema at the given path
+		schema = r.getSchemaAtPath(schemaPath)
+	}
+
+	if schema == nil {
+		// Debug: schema not found
+		fmt.Printf("DEBUG: Schema not found for path '%s'\n", schemaPath)
+		return false
+	}
+
+	isRequired := contains(schema.Required, fieldName)
+	// Debug: show what we're checking
+	fmt.Printf("DEBUG: Checking if '%s' is required in schema at path '%s'. Required fields: %v. Result: %v\n",
+		fieldName, schemaPath, schema.Required, isRequired)
+
+	return isRequired
 }
 
 // renderGroup generates HTML for a single group
@@ -736,10 +786,20 @@ func buildAllAttributesWithValidation(field FieldInfo) string {
 	var builder strings.Builder
 	builder.Grow(512) // Pre-allocate capacity
 
-	// Use the field path as the name attribute for nested fields
-	fieldName := field.FieldPath
+	// Check if UI specifies a custom name, otherwise use field path for nested fields
+	var fieldName string
+	if field.Schema.UI != nil {
+		if customName, exists := field.Schema.UI["name"].(string); exists && customName != "" {
+			fieldName = customName
+		}
+	}
+
+	// Fallback to field path or field name
 	if fieldName == "" {
-		fieldName = field.Name
+		fieldName = field.FieldPath
+		if fieldName == "" {
+			fieldName = field.Name
+		}
 	}
 
 	// Add name attribute
@@ -895,184 +955,6 @@ func getPlaceholder(schema *jsonschema.Schema) string {
 	return ""
 }
 
-// renderFieldOptimized uses pre-compiled templates and optimized attribute building
-func renderFieldOptimized(field FieldInfo) string {
-	// Use the new comprehensive rendering logic
-	return renderField(field)
-}
-
-func buildAllAttributes(field FieldInfo) string {
-	var attributes []string
-
-	// Use the field path as the name attribute for nested fields
-	fieldName := field.FieldPath
-	if fieldName == "" {
-		fieldName = field.Name
-	}
-
-	// Add name attribute
-	attributes = append(attributes, fmt.Sprintf(`name="%s"`, fieldName))
-
-	// Add standard attributes from UI
-	if field.Schema.UI != nil {
-		element, _ := field.Schema.UI["element"].(string)
-		for _, attr := range standardAttrs {
-			if attr == "name" {
-				continue // Already handled above
-			}
-			if value, exists := field.Schema.UI[attr]; exists {
-				if attr == "class" && value == "" {
-					continue // Skip empty class
-				}
-				// For select, input, textarea, add class to element itself
-				if attr == "class" && (element == "select" || element == "input" || element == "textarea") {
-					attributes = append(attributes, fmt.Sprintf(`class="%v"`, value))
-					continue
-				}
-				// For other elements, do not add class here (it will be handled in the wrapper div)
-				if attr == "class" {
-					continue
-				}
-				attributes = append(attributes, fmt.Sprintf(`%s="%v"`, attr, value))
-			}
-		}
-
-		// Add data-* and aria-* attributes
-		for key, value := range field.Schema.UI {
-			if strings.HasPrefix(key, "data-") || strings.HasPrefix(key, "aria-") {
-				attributes = append(attributes, fmt.Sprintf(`%s="%v"`, key, value))
-			}
-		}
-	}
-
-	// Handle required field
-	if field.IsRequired {
-		if !containsAttribute(attributes, "required=") {
-			attributes = append(attributes, `required="required"`)
-		}
-	}
-
-	// Handle input type based on field type
-	element, _ := field.Schema.UI["element"].(string)
-	if element == "input" {
-		if inputType := getInputType(field.Schema); inputType != "" {
-			if !containsAttribute(attributes, "type=") {
-				attributes = append(attributes, fmt.Sprintf(`type="%s"`, inputType))
-			}
-		}
-	}
-
-	return strings.Join(attributes, " ")
-}
-
-// buildAllAttributesOptimized uses string builder for better performance
-func buildAllAttributesOptimized(field FieldInfo) string {
-	var builder strings.Builder
-	builder.Grow(256) // Pre-allocate reasonable capacity
-
-	// Use the field path as the name attribute for nested fields
-	fieldName := field.FieldPath
-	if fieldName == "" {
-		fieldName = field.Name
-	}
-
-	// Add name attribute
-	builder.WriteString(`name="`)
-	builder.WriteString(fieldName)
-	builder.WriteString(`"`)
-
-	// Add standard attributes from UI
-	if field.Schema.UI != nil {
-		element, _ := field.Schema.UI["element"].(string)
-		for _, attr := range standardAttrs {
-			if attr == "name" {
-				continue // Already handled above
-			}
-			if value, exists := field.Schema.UI[attr]; exists {
-				if attr == "class" && value == "" {
-					continue // Skip empty class
-				}
-				// For select, input, textarea, add class to element itself
-				if attr == "class" && (element == "select" || element == "input" || element == "textarea") {
-					builder.WriteString(` class="`)
-					builder.WriteString(fmt.Sprintf("%v", value))
-					builder.WriteString(`"`)
-					continue
-				}
-				// For other elements, do not add class here (it will be handled in the wrapper div)
-				if attr == "class" {
-					continue
-				}
-				builder.WriteString(` `)
-				builder.WriteString(attr)
-				builder.WriteString(`="`)
-				builder.WriteString(fmt.Sprintf("%v", value))
-				builder.WriteString(`"`)
-			}
-		}
-
-		// Add data-* and aria-* attributes
-		for key, value := range field.Schema.UI {
-			if strings.HasPrefix(key, "data-") || strings.HasPrefix(key, "aria-") {
-				builder.WriteString(` `)
-				builder.WriteString(key)
-				builder.WriteString(`="`)
-				builder.WriteString(fmt.Sprintf("%v", value))
-				builder.WriteString(`"`)
-			}
-		}
-	}
-
-	// Handle required field
-	if field.IsRequired {
-		currentAttrs := builder.String()
-		if !strings.Contains(currentAttrs, "required=") {
-			builder.WriteString(` required="required"`)
-		}
-	}
-
-	// Handle input type based on field type
-	element, _ := field.Schema.UI["element"].(string)
-	if element == "input" {
-		if inputType := getInputType(field.Schema); inputType != "" {
-			currentAttrs := builder.String()
-			if !strings.Contains(currentAttrs, "type=") {
-				builder.WriteString(` type="`)
-				builder.WriteString(inputType)
-				builder.WriteString(`"`)
-			}
-		}
-	}
-
-	return builder.String()
-}
-
-func getInputType(schema *jsonschema.Schema) string {
-	// Check UI type first
-	if schema.UI != nil {
-		if uiType, ok := schema.UI["type"].(string); ok {
-			return uiType
-		}
-	}
-	var typeStr string
-	if len(schema.Type) > 0 {
-		typeStr = schema.Type[0]
-	} else {
-		typeStr = "string"
-	}
-	// Map schema types to input types
-	switch typeStr {
-	case "string", "text":
-		return "text"
-	case "number", "integer":
-		return "number"
-	case "boolean":
-		return "checkbox"
-	default:
-		return "text"
-	}
-}
-
 func getFieldContent(field FieldInfo) string {
 	// Check for content in UI first
 	if field.Schema.UI != nil {
@@ -1157,50 +1039,6 @@ func generateLabel(field FieldInfo) string {
 	return fmt.Sprintf(`<label for="%s">%s%s</label>`, fieldName, title, requiredSpan)
 }
 
-func generateOptions(ui map[string]interface{}) string {
-	if ui == nil {
-		return ""
-	}
-
-	options, ok := ui["options"].([]interface{})
-	if !ok {
-		return ""
-	}
-
-	var optionsHTML strings.Builder
-	for _, option := range options {
-		if optionMap, ok := option.(map[string]interface{}); ok {
-			// Complex option with attributes
-			value := getMapValue(optionMap, "value", "")
-			text := getMapValue(optionMap, "text", value)
-			selected := ""
-			if isSelected, ok := optionMap["selected"].(bool); ok && isSelected {
-				selected = ` selected="selected"`
-			}
-			disabled := ""
-			if isDisabled, ok := optionMap["disabled"].(bool); ok && isDisabled {
-				disabled = ` disabled="disabled"`
-			}
-			optionsHTML.WriteString(fmt.Sprintf(`<option value="%s"%s%s>%s</option>`,
-				value, selected, disabled, text))
-		} else {
-			// Simple option (just value)
-			optionsHTML.WriteString(fmt.Sprintf(`<option value="%v">%v</option>`, option, option))
-		}
-	}
-	return optionsHTML.String()
-}
-
-func getUIValue(ui map[string]interface{}, key string) string {
-	if ui == nil {
-		return ""
-	}
-	if value, ok := ui[key].(string); ok {
-		return value
-	}
-	return ""
-}
-
 func getMapValue(m map[string]interface{}, key, defaultValue string) string {
 	if value, ok := m[key].(string); ok {
 		return value
@@ -1211,15 +1049,6 @@ func getMapValue(m map[string]interface{}, key, defaultValue string) string {
 func contains(slice []string, item string) bool {
 	for _, s := range slice {
 		if s == item {
-			return true
-		}
-	}
-	return false
-}
-
-func containsAttribute(attributes []string, prefix string) bool {
-	for _, attr := range attributes {
-		if strings.HasPrefix(attr, prefix) {
 			return true
 		}
 	}
