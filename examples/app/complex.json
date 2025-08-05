@@ -3,6 +3,26 @@
     "type": "object",
     "title": "Company Registration",
     "properties": {
+        "session_id": {
+            "type": "string",
+            "title": "Session ID",
+            "ui": {
+                "element": "input",
+                "type": "hidden",
+                "name": "session_id",
+                "value": "{{session_id}}"
+            }
+        },
+        "task_id": {
+            "type": "string",
+            "title": "Task ID",
+            "ui": {
+                "element": "input",
+                "type": "hidden",
+                "name": "task_id",
+                "value": "{{task_id}}"
+            }
+        },
         "company": {
             "type": "object",
             "properties": {

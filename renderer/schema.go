@@ -29,19 +29,20 @@ const groupTemplateStr = `
 // Templates for field rendering - now supports all HTML DOM elements
 var fieldTemplates = map[string]string{
 	// Form elements
-	"input":    `<div class="{{.Class}}">{{.LabelHTML}}<input {{.AllAttributes}} />{{.ContentHTML}}</div>`,
-	"textarea": `<div class="{{.Class}}">{{.LabelHTML}}<textarea {{.AllAttributes}}>{{.Content}}</textarea>{{.ContentHTML}}</div>`,
-	"select":   `<div class="{{.Class}}">{{.LabelHTML}}<select {{.AllAttributes}}>{{.OptionsHTML}}</select>{{.ContentHTML}}</div>`,
-	"button":   `<button {{.AllAttributes}}>{{.Content}}</button>`,
-	"option":   `<option {{.AllAttributes}}>{{.Content}}</option>`,
-	"optgroup": `<optgroup {{.AllAttributes}}>{{.OptionsHTML}}</optgroup>`,
-	"label":    `<label {{.AllAttributes}}>{{.Content}}</label>`,
-	"fieldset": `<fieldset {{.AllAttributes}}>{{.ContentHTML}}</fieldset>`,
-	"legend":   `<legend {{.AllAttributes}}>{{.Content}}</legend>`,
-	"datalist": `<datalist {{.AllAttributes}}>{{.OptionsHTML}}</datalist>`,
-	"output":   `<output {{.AllAttributes}}>{{.Content}}</output>`,
-	"progress": `<progress {{.AllAttributes}}>{{.Content}}</progress>`,
-	"meter":    `<meter {{.AllAttributes}}>{{.Content}}</meter>`,
+	"input":        `<div class="{{.Class}}">{{.LabelHTML}}<input {{.AllAttributes}} />{{.ContentHTML}}</div>`,
+	"input_hidden": `<input {{.AllAttributes}} />`, // Special template for hidden inputs without wrapper
+	"textarea":     `<div class="{{.Class}}">{{.LabelHTML}}<textarea {{.AllAttributes}}>{{.Content}}</textarea>{{.ContentHTML}}</div>`,
+	"select":       `<div class="{{.Class}}">{{.LabelHTML}}<select {{.AllAttributes}}>{{.OptionsHTML}}</select>{{.ContentHTML}}</div>`,
+	"button":       `<button {{.AllAttributes}}>{{.Content}}</button>`,
+	"option":       `<option {{.AllAttributes}}>{{.Content}}</option>`,
+	"optgroup":     `<optgroup {{.AllAttributes}}>{{.OptionsHTML}}</optgroup>`,
+	"label":        `<label {{.AllAttributes}}>{{.Content}}</label>`,
+	"fieldset":     `<fieldset {{.AllAttributes}}>{{.ContentHTML}}</fieldset>`,
+	"legend":       `<legend {{.AllAttributes}}>{{.Content}}</legend>`,
+	"datalist":     `<datalist {{.AllAttributes}}>{{.OptionsHTML}}</datalist>`,
+	"output":       `<output {{.AllAttributes}}>{{.Content}}</output>`,
+	"progress":     `<progress {{.AllAttributes}}>{{.Content}}</progress>`,
+	"meter":        `<meter {{.AllAttributes}}>{{.Content}}</meter>`,
 
 	// Text content elements
 	"h1":         `<h1 {{.AllAttributes}}>{{.Content}}</h1>`,
@@ -317,7 +318,7 @@ func (r *JSONSchemaRenderer) RenderFields(data map[string]any) (string, error) {
 	groupHTML.Grow(1024) // Pre-allocate reasonable capacity
 
 	for _, group := range r.cachedGroups {
-		groupHTML.WriteString(renderGroupOptimized(group))
+		groupHTML.WriteString(renderGroupWithData(group, data))
 	}
 
 	// Interpolate dynamic form action
@@ -364,7 +365,7 @@ func (r *JSONSchemaRenderer) RenderFields(data map[string]any) (string, error) {
 func (r *JSONSchemaRenderer) renderFieldsFallback(data map[string]any) (string, error) {
 	var groupHTML strings.Builder
 	for _, group := range r.cachedGroups {
-		groupHTML.WriteString(renderGroupOptimized(group))
+		groupHTML.WriteString(renderGroupWithData(group, data))
 	}
 
 	formAction := r.interpolateTemplate(r.formConfig.Action, data)
@@ -411,6 +412,8 @@ func (r *JSONSchemaRenderer) parseGroupsFromSchema() []GroupInfo {
 	}
 
 	var result []GroupInfo
+	var groupedFields = make(map[string]bool) // Track fields that are already in groups
+
 	for _, group := range groups {
 		groupMap, ok := group.(map[string]interface{})
 		if !ok {
@@ -439,6 +442,10 @@ func (r *JSONSchemaRenderer) parseGroupsFromSchema() []GroupInfo {
 					// Handle nested field paths
 					fieldInfos := r.extractFieldsFromPath(fieldNameStr, "")
 					fields = append(fields, fieldInfos...)
+					// Mark these fields as grouped
+					for _, field := range fieldInfos {
+						groupedFields[field.FieldPath] = true
+					}
 				}
 			}
 		}
@@ -462,6 +469,48 @@ func (r *JSONSchemaRenderer) parseGroupsFromSchema() []GroupInfo {
 			GroupClass: groupClass,
 		})
 	}
+
+	// Add ungrouped hidden fields to the first group or create a hidden group
+	if r.Schema.Properties != nil {
+		var hiddenFields []FieldInfo
+		for propName, propSchema := range *r.Schema.Properties {
+			if !groupedFields[propName] {
+				// Check if this is a hidden input
+				if propSchema.UI != nil {
+					if element, ok := propSchema.UI["element"].(string); ok && element == "input" {
+						if inputType, ok := propSchema.UI["type"].(string); ok && inputType == "hidden" {
+							// This is an ungrouped hidden field, add it
+							validation := extractValidationInfo(propSchema, false)
+							hiddenFields = append(hiddenFields, FieldInfo{
+								Name:       propName,
+								FieldPath:  propName,
+								Order:      0,
+								Schema:     propSchema,
+								IsRequired: false,
+								Validation: validation,
+							})
+						}
+					}
+				}
+			}
+		}
+
+		// If we have hidden fields, add them to the first group or create a new hidden group
+		if len(hiddenFields) > 0 {
+			if len(result) > 0 {
+				// Prepend hidden fields to the first group
+				result[0].Fields = append(hiddenFields, result[0].Fields...)
+			} else {
+				// Create a hidden group
+				result = append(result, GroupInfo{
+					Title:      GroupTitle{Text: "", Class: ""},
+					Fields:     hiddenFields,
+					GroupClass: "hidden-fields",
+				})
+			}
+		}
+	}
+
 	return result
 }
 
@@ -632,8 +681,8 @@ func renderGroup(group GroupInfo) string {
 	return groupHTML.String()
 }
 
-// renderGroupOptimized uses pre-compiled templates and string builder for better performance
-func renderGroupOptimized(group GroupInfo) string {
+// renderGroupWithData uses pre-compiled templates and string builder for better performance with data interpolation
+func renderGroupWithData(group GroupInfo, data map[string]any) string {
 	// Collect all validations for dependency checking
 	allValidations := make(map[string]ValidationInfo)
 	for _, field := range group.Fields {
@@ -645,7 +694,7 @@ func renderGroupOptimized(group GroupInfo) string {
 	fieldsHTML.Grow(512) // Pre-allocate reasonable capacity
 
 	for _, field := range group.Fields {
-		fieldsHTML.WriteString(renderFieldWithContext(field, allValidations))
+		fieldsHTML.WriteString(renderFieldWithContextAndData(field, allValidations, data))
 	}
 
 	// Use pre-compiled group template
@@ -655,13 +704,13 @@ func renderGroupOptimized(group GroupInfo) string {
 
 	if groupTemplate != nil {
 		var groupHTML bytes.Buffer
-		data := map[string]any{
+		templateData := map[string]any{
 			"Title":      group.Title,
 			"GroupClass": group.GroupClass,
 			"FieldsHTML": template.HTML(fieldsHTML.String()),
 		}
 
-		if err := groupTemplate.Execute(&groupHTML, data); err == nil {
+		if err := groupTemplate.Execute(&groupHTML, templateData); err == nil {
 			return groupHTML.String()
 		}
 	}
@@ -676,29 +725,29 @@ func renderField(field FieldInfo) string {
 
 // renderFieldWithContext renders a field with access to all field validations for dependency checking
 func renderFieldWithContext(field FieldInfo, allValidations map[string]ValidationInfo) string {
-	// Determine the appropriate element type based on schema
+	return renderFieldWithContextAndData(field, allValidations, nil)
+}
+
+// renderFieldWithContextAndData renders a field with access to all field validations and template data for interpolation
+func renderFieldWithContextAndData(field FieldInfo, allValidations map[string]ValidationInfo, data map[string]any) string {
 	element := determineFieldElement(field.Schema)
 	if element == "" {
 		return ""
 	}
+	allAttributes := buildAttributesWithValidation(field, data)
 
-	// Build all attributes including validation
-	allAttributes := buildAllAttributesWithValidation(field)
-
-	// Get content
 	content := getFieldContent(field)
 	contentHTML := getFieldContentHTML(field)
 
-	// Generate label if needed
-	labelHTML := generateLabel(field)
+	var labelHTML string
+	if element != "input" || getInputTypeFromSchema(field.Schema) != "hidden" {
+		labelHTML = generateLabel(field)
+	}
 
-	// Generate options for select/radio elements
 	optionsHTML := generateOptionsFromSchema(field.Schema)
-
-	// Generate client-side validation with context
 	validationJS := generateClientSideValidation(field.FieldPath, field.Validation, allValidations)
 
-	data := map[string]any{
+	templateData := map[string]any{
 		"Element":       element,
 		"AllAttributes": template.HTMLAttr(allAttributes),
 		"Content":       content,
@@ -708,9 +757,14 @@ func renderFieldWithContext(field FieldInfo, allValidations map[string]Validatio
 		"OptionsHTML":   template.HTML(optionsHTML),
 	}
 
-	// Use specific template if available, otherwise use generic
 	var tmplStr string
-	if template, exists := fieldTemplates[element]; exists {
+	if element == "input" && getInputTypeFromSchema(field.Schema) == "hidden" {
+		if template, exists := fieldTemplates["input_hidden"]; exists {
+			tmplStr = template
+		} else {
+			tmplStr = fieldTemplates["input"]
+		}
+	} else if template, exists := fieldTemplates[element]; exists {
 		tmplStr = template
 	} else if voidElements[element] {
 		tmplStr = fieldTemplates["void"]
@@ -720,7 +774,7 @@ func renderFieldWithContext(field FieldInfo, allValidations map[string]Validatio
 
 	tmpl := template.Must(template.New(element).Parse(tmplStr))
 	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, data); err != nil {
+	if err := tmpl.Execute(&buf, templateData); err != nil {
 		return ""
 	}
 	return buf.String()
@@ -728,14 +782,12 @@ func renderFieldWithContext(field FieldInfo, allValidations map[string]Validatio
 
 // determineFieldElement determines the appropriate HTML element based on JSON Schema
 func determineFieldElement(schema *jsonschema.Schema) string {
-	// Check UI element first
 	if schema.UI != nil {
 		if element, ok := schema.UI["element"].(string); ok {
 			return element
 		}
 	}
 
-	// Auto-determine based on schema properties
 	if shouldUseSelect(schema) {
 		return "select"
 	}
@@ -744,12 +796,10 @@ func determineFieldElement(schema *jsonschema.Schema) string {
 		return "textarea"
 	}
 
-	// Default to input for most cases
 	var typeStr string
 	if len(schema.Type) > 0 {
 		typeStr = schema.Type[0]
 	}
-
 	switch typeStr {
 	case "boolean":
 		return "input" // will be type="checkbox"
@@ -762,8 +812,8 @@ func determineFieldElement(schema *jsonschema.Schema) string {
 	}
 }
 
-// buildAllAttributesWithValidation creates all HTML attributes including validation
-func buildAllAttributesWithValidation(field FieldInfo) string {
+// buildAttributesWithValidation creates all HTML attributes including validation with data interpolation
+func buildAttributesWithValidation(field FieldInfo, data map[string]any) string {
 	var builder strings.Builder
 	builder.Grow(512) // Pre-allocate capacity
 
@@ -810,21 +860,42 @@ func buildAllAttributesWithValidation(field FieldInfo) string {
 		builder.WriteString(attr)
 	}
 
-	// Add default value
-	if defaultValue := getDefaultValue(field.Schema); defaultValue != "" {
+	// Add default value with interpolation
+	defaultValue := getDefaultValue(field.Schema)
+	if field.Schema.UI != nil {
+		if uiValue, exists := field.Schema.UI["value"].(string); exists {
+			// Interpolate template values in UI value
+			if data != nil {
+				defaultValue = interpolateString(uiValue, data)
+			} else {
+				defaultValue = uiValue
+			}
+		}
+	}
+	if defaultValue != "" {
 		builder.WriteString(` value="`)
 		builder.WriteString(defaultValue)
 		builder.WriteString(`"`)
 	}
 
-	// Add placeholder
-	if placeholder := getPlaceholder(field.Schema); placeholder != "" {
+	// Add placeholder with interpolation
+	placeholder := getPlaceholder(field.Schema)
+	if field.Schema.UI != nil {
+		if uiPlaceholder, exists := field.Schema.UI["placeholder"].(string); exists {
+			if data != nil {
+				placeholder = interpolateString(uiPlaceholder, data)
+			} else {
+				placeholder = uiPlaceholder
+			}
+		}
+	}
+	if placeholder != "" {
 		builder.WriteString(` placeholder="`)
 		builder.WriteString(placeholder)
 		builder.WriteString(`"`)
 	}
 
-	// Add standard attributes from UI
+	// Add standard attributes from UI with interpolation
 	if field.Schema.UI != nil {
 		for _, attr := range standardAttrs {
 			if attr == "name" || attr == "id" || attr == "type" || attr == "required" ||
@@ -836,21 +907,33 @@ func buildAllAttributesWithValidation(field FieldInfo) string {
 				if attr == "class" && value == "" {
 					continue // Skip empty class
 				}
+
+				// Apply interpolation to string values if data is available
+				valueStr := fmt.Sprintf("%v", value)
+				if data != nil && strings.Contains(valueStr, "{{") {
+					valueStr = interpolateString(valueStr, data)
+				}
+
 				builder.WriteString(` `)
 				builder.WriteString(attr)
 				builder.WriteString(`="`)
-				builder.WriteString(fmt.Sprintf("%v", value))
+				builder.WriteString(valueStr)
 				builder.WriteString(`"`)
 			}
 		}
 
-		// Add data-* and aria-* attributes
+		// Add data-* and aria-* attributes with interpolation
 		for key, value := range field.Schema.UI {
 			if strings.HasPrefix(key, "data-") || strings.HasPrefix(key, "aria-") {
+				valueStr := fmt.Sprintf("%v", value)
+				if data != nil && strings.Contains(valueStr, "{{") {
+					valueStr = interpolateString(valueStr, data)
+				}
+
 				builder.WriteString(` `)
 				builder.WriteString(key)
 				builder.WriteString(`="`)
-				builder.WriteString(fmt.Sprintf("%v", value))
+				builder.WriteString(valueStr)
 				builder.WriteString(`"`)
 			}
 		}
@@ -1119,31 +1202,7 @@ func GetCacheSize() int {
 	return len(cache)
 }
 
-func Get(schemaPath, template string) (*JSONSchemaRenderer, error) {
-	path := fmt.Sprintf("%s:%s", schemaPath, template)
-
-	// Try to get from cache with read lock first
-	mu.RLock()
-	if cached, exists := cache[path]; exists {
-		mu.RUnlock()
-		return cached.Renderer, nil
-	}
-	mu.RUnlock()
-
-	// If not in cache, acquire write lock and create
-	mu.Lock()
-	defer mu.Unlock()
-
-	// Double-check after acquiring write lock
-	if cached, exists := cache[path]; exists {
-		return cached.Renderer, nil
-	}
-
-	schemaContent, err := os.ReadFile(schemaPath)
-	if err != nil {
-		return nil, fmt.Errorf("error reading schema file: %w", err)
-	}
-
+func GetFromBytes(schemaContent []byte, template string) (*RequestSchemaTemplate, error) {
 	compiler := jsonschema.NewCompiler()
 	schema, err := compiler.Compile(schemaContent)
 	if err != nil {
@@ -1161,14 +1220,59 @@ func Get(schemaPath, template string) (*JSONSchemaRenderer, error) {
 		Schema:   schema,
 		Renderer: renderer,
 	}
-	cache[path] = cachedTemplate
-
-	return cachedTemplate.Renderer, nil
+	return cachedTemplate, nil
 }
 
-// ClearRenderCache clears the rendered HTML cache for a specific renderer
-func (r *JSONSchemaRenderer) ClearRenderCache() {
-	r.cacheMutex.Lock()
-	defer r.cacheMutex.Unlock()
-	// Since we're not caching static HTML anymore, this is just for API consistency
+func GetFromFile(schemaPath, template string) (*JSONSchemaRenderer, error) {
+	path := fmt.Sprintf("%s:%s", schemaPath, template)
+	mu.RLock()
+	if cached, exists := cache[path]; exists {
+		mu.RUnlock()
+		return cached.Renderer, nil
+	}
+	mu.RUnlock()
+	mu.Lock()
+	defer mu.Unlock()
+	if cached, exists := cache[path]; exists {
+		return cached.Renderer, nil
+	}
+	schemaContent, err := os.ReadFile(schemaPath)
+	if err != nil {
+		return nil, fmt.Errorf("error reading schema file: %w", err)
+	}
+	schemaRenderer, err := GetFromBytes(schemaContent, template)
+	if err != nil {
+		return nil, fmt.Errorf("error creating renderer from bytes: %w", err)
+	}
+	cache[path] = schemaRenderer
+	return schemaRenderer.Renderer, nil
+}
+
+// interpolateString replaces template placeholders in a string with actual values
+func interpolateString(templateStr string, data map[string]any) string {
+	if len(data) == 0 {
+		return templateStr
+	}
+
+	// First try Go template interpolation
+	tmpl, err := template.New("interpolate").Parse(templateStr)
+	if err == nil {
+		var templateResult bytes.Buffer
+		err = tmpl.Execute(&templateResult, data)
+		if err == nil {
+			return templateResult.String()
+		}
+	}
+
+	// Fallback to simple string replacement if template parsing/execution fails
+	result := templateStr
+	for key, value := range data {
+		placeholder := fmt.Sprintf("{{%s}}", key)
+		if valueStr, ok := value.(string); ok {
+			result = strings.ReplaceAll(result, placeholder, valueStr)
+		} else {
+			result = strings.ReplaceAll(result, placeholder, fmt.Sprintf("%v", value))
+		}
+	}
+	return result
 }
