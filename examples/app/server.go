@@ -1,11 +1,11 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
 
+	"github.com/oarkflow/jsonschema"
 	"github.com/oarkflow/mq/renderer"
 )
 
@@ -15,12 +15,12 @@ func main() {
 		fmt.Printf("Error reading schema file: %v\n", err)
 		return
 	}
-	var schema map[string]interface{}
-	if err := json.Unmarshal(schemaContent, &schema); err != nil {
-		fmt.Printf("Error parsing schema: %v\n", err)
+	compiler := jsonschema.NewCompiler()
+	schema, err := compiler.Compile(schemaContent)
+	if err != nil {
+		fmt.Printf("Error compiling schema: %v\n", err)
 		return
 	}
-
 	http.Handle("/form.css", http.FileServer(http.Dir("templates")))
 	http.HandleFunc("/render", func(w http.ResponseWriter, r *http.Request) {
 		templateName := r.URL.Query().Get("template")

@@ -6,6 +6,8 @@ import (
 	"html/template"
 	"sort"
 	"strings"
+
+	"github.com/oarkflow/jsonschema"
 )
 
 // A single template for the entire group structure
@@ -152,8 +154,10 @@ var standardAttrs = []string{
 // FieldInfo represents metadata for a field extracted from JSONSchema
 type FieldInfo struct {
 	Name       string
+	FieldPath  string // Full path for nested fields (e.g., "user.address.street")
 	Order      int
-	Definition map[string]any
+	Schema     *jsonschema.Schema
+	IsRequired bool
 }
 
 // GroupInfo represents metadata for a group extracted from JSONSchema
@@ -171,14 +175,14 @@ type GroupTitle struct {
 
 // JSONSchemaRenderer is responsible for rendering HTML fields based on JSONSchema
 type JSONSchemaRenderer struct {
-	Schema       map[string]any
+	Schema       *jsonschema.Schema
 	HTMLLayout   string
 	TemplateData map[string]any // Data for template interpolation
 	cachedHTML   string         // Cached rendered HTML
 }
 
 // NewJSONSchemaRenderer creates a new instance of JSONSchemaRenderer
-func NewJSONSchemaRenderer(schema map[string]any, htmlLayout string) *JSONSchemaRenderer {
+func NewJSONSchemaRenderer(schema *jsonschema.Schema, htmlLayout string) *JSONSchemaRenderer {
 	return &JSONSchemaRenderer{
 		Schema:       schema,
 		HTMLLayout:   htmlLayout,
@@ -204,7 +208,7 @@ func (r *JSONSchemaRenderer) interpolateTemplate(templateStr string) string {
 		for key, value := range r.TemplateData {
 			placeholder := fmt.Sprintf("{{%s}}", key)
 			if valueStr, ok := value.(string); ok {
-				result = fmt.Sprintf("%s", bytes.ReplaceAll([]byte(result), []byte(placeholder), []byte(valueStr)))
+				result = strings.ReplaceAll(result, placeholder, valueStr)
 			}
 		}
 		return result
@@ -226,21 +230,30 @@ func (r *JSONSchemaRenderer) RenderFields() (string, error) {
 		return r.cachedHTML, nil
 	}
 
-	groups := parseGroupsFromSchema(r.Schema)
+	groups := r.parseGroupsFromSchema()
 	var groupHTML bytes.Buffer
 	for _, group := range groups {
 		groupHTML.WriteString(renderGroup(group))
 	}
 
-	formConfig := r.Schema["form"].(map[string]any)
-	formClass, _ := formConfig["class"].(string)
-	formAction, _ := formConfig["action"].(string)
-	formMethod, _ := formConfig["method"].(string)
-	formEnctype, _ := formConfig["enctype"].(string)
+	// Extract form configuration
+	var formClass, formAction, formMethod, formEnctype string
+	if r.Schema.Form != nil {
+		if class, ok := r.Schema.Form["class"].(string); ok {
+			formClass = class
+		}
+		if action, ok := r.Schema.Form["action"].(string); ok {
+			formAction = r.interpolateTemplate(action)
+		}
+		if method, ok := r.Schema.Form["method"].(string); ok {
+			formMethod = method
+		}
+		if enctype, ok := r.Schema.Form["enctype"].(string); ok {
+			formEnctype = enctype
+		}
+	}
 
-	// Interpolate template data into form action
-	formAction = r.interpolateTemplate(formAction)
-	buttonsHTML := renderButtons(formConfig)
+	buttonsHTML := r.renderButtons()
 
 	// Create a new template with the layout and functions
 	tmpl, err := template.New("layout").Funcs(template.FuncMap{
@@ -269,32 +282,30 @@ func (r *JSONSchemaRenderer) RenderFields() (string, error) {
 }
 
 // parseGroupsFromSchema extracts and sorts groups and fields from schema
-func parseGroupsFromSchema(schema map[string]any) []GroupInfo {
-	formConfig, ok := schema["form"].(map[string]any)
+func (r *JSONSchemaRenderer) parseGroupsFromSchema() []GroupInfo {
+	if r.Schema.Form == nil {
+		return nil
+	}
+
+	groupsData, ok := r.Schema.Form["groups"]
 	if !ok {
 		return nil
 	}
 
-	properties, ok := schema["properties"].(map[string]any)
+	groups, ok := groupsData.([]interface{})
 	if !ok {
 		return nil
 	}
 
-	var requiredFields map[string]bool = make(map[string]bool)
-	if reqFields, ok := schema["required"].([]any); ok {
-		for _, field := range reqFields {
-			if fieldName, ok := field.(string); ok {
-				requiredFields[fieldName] = true
-			}
+	var result []GroupInfo
+	for _, group := range groups {
+		groupMap, ok := group.(map[string]interface{})
+		if !ok {
+			continue
 		}
-	}
-
-	var groups []GroupInfo
-	for _, group := range formConfig["groups"].([]any) {
-		groupMap := group.(map[string]any)
 
 		var groupTitle GroupTitle
-		if titleMap, ok := groupMap["title"].(map[string]any); ok {
+		if titleMap, ok := groupMap["title"].(map[string]interface{}); ok {
 			if text, ok := titleMap["text"].(string); ok {
 				groupTitle.Text = text
 			}
@@ -304,37 +315,152 @@ func parseGroupsFromSchema(schema map[string]any) []GroupInfo {
 		}
 
 		groupClass, _ := groupMap["class"].(string)
+		if groupClass == "" {
+			groupClass = "form-group-fields"
+		}
 
 		var fields []FieldInfo
-		for _, fieldName := range groupMap["fields"].([]any) {
-			fieldDef := properties[fieldName.(string)].(map[string]any)
-			order := 0
-			if ord, exists := fieldDef["order"].(int); exists {
-				order = ord
+		if fieldsData, ok := groupMap["fields"].([]interface{}); ok {
+			for _, fieldName := range fieldsData {
+				if fieldNameStr, ok := fieldName.(string); ok {
+					// Handle nested field paths
+					fieldInfos := r.extractFieldsFromPath(fieldNameStr, "")
+					fields = append(fields, fieldInfos...)
+				}
 			}
-
-			fieldDefCopy := make(map[string]any)
-			for k, v := range fieldDef {
-				fieldDefCopy[k] = v
-			}
-			fieldDefCopy["isRequired"] = requiredFields[fieldName.(string)]
-
-			fields = append(fields, FieldInfo{
-				Name:       fieldName.(string),
-				Order:      order,
-				Definition: fieldDefCopy,
-			})
 		}
+
+		// Sort fields by order
 		sort.Slice(fields, func(i, j int) bool {
-			return fields[i].Order < fields[j].Order
+			orderI := 0
+			orderJ := 0
+			if fields[i].Schema.Order != nil {
+				orderI = *fields[i].Schema.Order
+			}
+			if fields[j].Schema.Order != nil {
+				orderJ = *fields[j].Schema.Order
+			}
+			return orderI < orderJ
 		})
-		groups = append(groups, GroupInfo{
+
+		result = append(result, GroupInfo{
 			Title:      groupTitle,
 			Fields:     fields,
 			GroupClass: groupClass,
 		})
 	}
-	return groups
+	return result
+}
+
+// extractFieldsFromPath recursively extracts fields from a path, handling nested properties
+func (r *JSONSchemaRenderer) extractFieldsFromPath(fieldPath, parentPath string) []FieldInfo {
+	var fields []FieldInfo
+
+	// Build the full path
+	fullPath := fieldPath
+	if parentPath != "" {
+		fullPath = parentPath + "." + fieldPath
+	}
+
+	// Navigate to the schema at this path
+	schema := r.getSchemaAtPath(fieldPath)
+	if schema == nil {
+		return fields
+	}
+
+	// Check if this field is required
+	isRequired := r.isFieldRequired(fieldPath)
+
+	// If this schema has properties, it's a nested object
+	if schema.Properties != nil && len(*schema.Properties) > 0 {
+		// Recursively process nested properties
+		for propName, propSchema := range *schema.Properties {
+			nestedFields := r.extractFieldsFromNestedSchema(propName, fullPath, propSchema, isRequired)
+			fields = append(fields, nestedFields...)
+		}
+	} else {
+		// This is a leaf field
+		order := 0
+		if schema.Order != nil {
+			order = *schema.Order
+		}
+
+		fields = append(fields, FieldInfo{
+			Name:       fieldPath,
+			FieldPath:  fullPath,
+			Order:      order,
+			Schema:     schema,
+			IsRequired: isRequired,
+		})
+	}
+
+	return fields
+}
+
+// extractFieldsFromNestedSchema processes nested schema properties
+func (r *JSONSchemaRenderer) extractFieldsFromNestedSchema(propName, parentPath string, propSchema *jsonschema.Schema, parentRequired bool) []FieldInfo {
+	var fields []FieldInfo
+
+	fullPath := propName
+	if parentPath != "" {
+		fullPath = parentPath + "." + propName
+	}
+
+	// Check if this nested field is required
+	isRequired := parentRequired || contains(r.Schema.Required, propName)
+
+	// If this property has nested properties, recurse
+	if propSchema.Properties != nil && len(*propSchema.Properties) > 0 {
+		for nestedPropName, nestedPropSchema := range *propSchema.Properties {
+			nestedFields := r.extractFieldsFromNestedSchema(nestedPropName, fullPath, nestedPropSchema, isRequired)
+			fields = append(fields, nestedFields...)
+		}
+	} else {
+		// This is a leaf field
+		order := 0
+		if propSchema.Order != nil {
+			order = *propSchema.Order
+		}
+
+		fields = append(fields, FieldInfo{
+			Name:       propName,
+			FieldPath:  fullPath,
+			Order:      order,
+			Schema:     propSchema,
+			IsRequired: isRequired,
+		})
+	}
+
+	return fields
+}
+
+// getSchemaAtPath navigates to a schema at a given path
+func (r *JSONSchemaRenderer) getSchemaAtPath(path string) *jsonschema.Schema {
+	if r.Schema.Properties == nil {
+		return nil
+	}
+
+	parts := strings.Split(path, ".")
+	currentSchema := r.Schema
+
+	for _, part := range parts {
+		if currentSchema.Properties == nil {
+			return nil
+		}
+
+		if propSchema, exists := (*currentSchema.Properties)[part]; exists {
+			currentSchema = propSchema
+		} else {
+			return nil
+		}
+	}
+
+	return currentSchema
+}
+
+// isFieldRequired checks if a field is required at the current schema level
+func (r *JSONSchemaRenderer) isFieldRequired(fieldName string) bool {
+	return contains(r.Schema.Required, fieldName)
 }
 
 // renderGroup generates HTML for a single group
@@ -352,9 +478,6 @@ func renderGroup(group GroupInfo) string {
 		"GroupClass": group.GroupClass,
 		"FieldsHTML": template.HTML(fieldsHTML.String()),
 	}
-	if group.GroupClass == "" {
-		data["GroupClass"] = "form-group-fields"
-	}
 
 	if err := tmpl.Execute(&groupHTML, data); err != nil {
 		return "" // Return empty string on error
@@ -364,25 +487,24 @@ func renderGroup(group GroupInfo) string {
 }
 
 func renderField(field FieldInfo) string {
-	ui, ok := field.Definition["ui"].(map[string]any)
-	if !ok {
+	if field.Schema.UI == nil {
 		return ""
 	}
 
-	element, _ := ui["element"].(string)
-	if element == "" {
+	element, ok := field.Schema.UI["element"].(string)
+	if !ok || element == "" {
 		return ""
 	}
 
 	// Build all attributes
-	allAttributes := buildAllAttributes(field, ui)
+	allAttributes := buildAllAttributes(field)
 
 	// Get content
-	content := getFieldContent(field.Definition, ui)
-	contentHTML := getFieldContentHTML(field.Definition, ui)
+	content := getFieldContent(field)
+	contentHTML := getFieldContentHTML(field)
 
 	// Generate label if needed
-	labelHTML := generateLabel(field, ui)
+	labelHTML := generateLabel(field)
 
 	data := map[string]any{
 		"Element":       element,
@@ -390,8 +512,8 @@ func renderField(field FieldInfo) string {
 		"Content":       content,
 		"ContentHTML":   template.HTML(contentHTML),
 		"LabelHTML":     template.HTML(labelHTML),
-		"Class":         getUIValue(ui, "class"),
-		"OptionsHTML":   template.HTML(generateOptions(ui)),
+		"Class":         getUIValue(field.Schema.UI, "class"),
+		"OptionsHTML":   template.HTML(generateOptions(field.Schema.UI)),
 	}
 
 	// Use specific template if available, otherwise use generic
@@ -412,142 +534,133 @@ func renderField(field FieldInfo) string {
 	return buf.String()
 }
 
-func buildAllAttributes(field FieldInfo, ui map[string]any) string {
+func buildAllAttributes(field FieldInfo) string {
 	var attributes []string
 
-	// Add standard attributes from ui
-	for _, attr := range standardAttrs {
-		if value, exists := ui[attr]; exists {
-			if attr == "class" && value == "" {
-				continue // Skip empty class
+	// Use the field path as the name attribute for nested fields
+	fieldName := field.FieldPath
+	if fieldName == "" {
+		fieldName = field.Name
+	}
+
+	// Add name attribute
+	attributes = append(attributes, fmt.Sprintf(`name="%s"`, fieldName))
+
+	// Add standard attributes from UI
+	if field.Schema.UI != nil {
+		for _, attr := range standardAttrs {
+			if attr == "name" {
+				continue // Already handled above
 			}
-			attributes = append(attributes, fmt.Sprintf(`%s="%v"`, attr, value))
+			if value, exists := field.Schema.UI[attr]; exists {
+				if attr == "class" && value == "" {
+					continue // Skip empty class
+				}
+				attributes = append(attributes, fmt.Sprintf(`%s="%v"`, attr, value))
+			}
+		}
+
+		// Add data-* and aria-* attributes
+		for key, value := range field.Schema.UI {
+			if strings.HasPrefix(key, "data-") || strings.HasPrefix(key, "aria-") {
+				attributes = append(attributes, fmt.Sprintf(`%s="%v"`, key, value))
+			}
 		}
 	}
 
 	// Handle required field
-	if isRequired, ok := field.Definition["isRequired"].(bool); ok && isRequired {
-		if !contains(attributes, "required=") {
+	if field.IsRequired {
+		if !containsAttribute(attributes, "required=") {
 			attributes = append(attributes, `required="required"`)
 		}
 	}
 
 	// Handle input type based on field type
-	element, _ := ui["element"].(string)
+	element, _ := field.Schema.UI["element"].(string)
 	if element == "input" {
-		if inputType := getInputType(field.Definition, ui); inputType != "" {
-			if !contains(attributes, "type=") {
+		if inputType := getInputType(field.Schema); inputType != "" {
+			if !containsAttribute(attributes, "type=") {
 				attributes = append(attributes, fmt.Sprintf(`type="%s"`, inputType))
 			}
-		}
-	}
-
-	// Add data-* and aria-* attributes
-	for key, value := range ui {
-		if strings.HasPrefix(key, "data-") || strings.HasPrefix(key, "aria-") {
-			attributes = append(attributes, fmt.Sprintf(`%s="%v"`, key, value))
-		}
-	}
-
-	// Add custom attributes from field definition (excluding known schema properties)
-	excludeFields := map[string]bool{
-		"type": true, "title": true, "ui": true, "placeholder": true,
-		"order": true, "isRequired": true, "content": true, "children": true,
-	}
-
-	for key, value := range field.Definition {
-		if !excludeFields[key] && !strings.HasPrefix(key, "ui") {
-			attributes = append(attributes, fmt.Sprintf(`%s="%v"`, key, value))
 		}
 	}
 
 	return strings.Join(attributes, " ")
 }
 
-func getInputType(fieldDef map[string]any, ui map[string]any) string {
-	// Check ui type first
-	if uiType, ok := ui["type"].(string); ok {
-		return uiType
+func getInputType(schema *jsonschema.Schema) string {
+	// Check UI type first
+	if schema.UI != nil {
+		if uiType, ok := schema.UI["type"].(string); ok {
+			return uiType
+		}
 	}
-
+	var typeStr string
+	if len(schema.Type) > 0 {
+		typeStr = schema.Type[0]
+	} else {
+		typeStr = "string"
+	}
 	// Map schema types to input types
-	if fieldType, ok := fieldDef["type"].(string); ok {
-		switch fieldType {
-		case "email":
-			return "email"
-		case "password":
-			return "password"
-		case "number", "integer":
-			return "number"
-		case "boolean":
-			return "checkbox"
-		case "date":
-			return "date"
-		case "time":
-			return "time"
-		case "datetime":
-			return "datetime-local"
-		case "url":
-			return "url"
-		case "tel":
-			return "tel"
-		case "color":
-			return "color"
-		case "range":
-			return "range"
-		case "file":
-			return "file"
-		case "hidden":
-			return "hidden"
-		default:
-			return "text"
+	switch typeStr {
+	case "string", "text":
+		return "text"
+	case "number", "integer":
+		return "number"
+	case "boolean":
+		return "checkbox"
+	default:
+		return "text"
+	}
+}
+
+func getFieldContent(field FieldInfo) string {
+	// Check for content in UI first
+	if field.Schema.UI != nil {
+		if content, ok := field.Schema.UI["content"].(string); ok {
+			return content
 		}
 	}
 
-	return "text"
-}
-
-func getFieldContent(fieldDef map[string]any, ui map[string]any) string {
-	// Check for content in ui first
-	if content, ok := ui["content"].(string); ok {
-		return content
-	}
-
-	// Check for content in field definition
-	if content, ok := fieldDef["content"].(string); ok {
-		return content
-	}
-
 	// Use title as fallback for some elements
-	if title, ok := fieldDef["title"].(string); ok {
-		return title
+	if field.Schema.Title != nil {
+		return *field.Schema.Title
 	}
 
 	return ""
 }
 
-func getFieldContentHTML(fieldDef map[string]any, ui map[string]any) string {
-	// Check for HTML content in ui
-	if contentHTML, ok := ui["contentHTML"].(string); ok {
-		return contentHTML
-	}
+func getFieldContentHTML(field FieldInfo) string {
+	// Check for HTML content in UI
+	if field.Schema.UI != nil {
+		if contentHTML, ok := field.Schema.UI["contentHTML"].(string); ok {
+			return contentHTML
+		}
 
-	// Check for children elements
-	if children, ok := ui["children"].([]any); ok {
-		return renderChildren(children)
+		// Check for children elements
+		if children, ok := field.Schema.UI["children"].([]interface{}); ok {
+			return renderChildren(children)
+		}
 	}
 
 	return ""
 }
 
-func renderChildren(children []any) string {
+func renderChildren(children []interface{}) string {
 	var result strings.Builder
 	for _, child := range children {
-		if childMap, ok := child.(map[string]any); ok {
+		if childMap, ok := child.(map[string]interface{}); ok {
 			// Create a temporary field info for the child
+			childSchema := &jsonschema.Schema{
+				UI: childMap,
+			}
+			if title, ok := childMap["title"].(string); ok {
+				childSchema.Title = &title
+			}
+
 			childField := FieldInfo{
-				Name:       getMapValue(childMap, "name", ""),
-				Definition: childMap,
+				Name:   getMapValue(childMap, "name", ""),
+				Schema: childSchema,
 			}
 			result.WriteString(renderField(childField))
 		}
@@ -555,41 +668,49 @@ func renderChildren(children []any) string {
 	return result.String()
 }
 
-func generateLabel(field FieldInfo, ui map[string]any) string {
+func generateLabel(field FieldInfo) string {
 	// Check if label should be generated
-	if showLabel, ok := ui["showLabel"].(bool); !showLabel && ok {
-		return ""
+	if field.Schema.UI != nil {
+		if showLabel, ok := field.Schema.UI["showLabel"].(bool); !showLabel && ok {
+			return ""
+		}
 	}
 
-	title, _ := field.Definition["title"].(string)
+	var title string
+	if field.Schema.Title != nil {
+		title = *field.Schema.Title
+	}
 	if title == "" {
 		return ""
 	}
 
-	name := getUIValue(ui, "name")
-	if name == "" {
-		name = field.Name
+	fieldName := field.FieldPath
+	if fieldName == "" {
+		fieldName = field.Name
 	}
 
 	// Check if field is required
-	isRequired, _ := field.Definition["isRequired"].(bool)
 	requiredSpan := ""
-	if isRequired {
+	if field.IsRequired {
 		requiredSpan = ` <span class="required">*</span>`
 	}
 
-	return fmt.Sprintf(`<label for="%s">%s%s</label>`, name, title, requiredSpan)
+	return fmt.Sprintf(`<label for="%s">%s%s</label>`, fieldName, title, requiredSpan)
 }
 
-func generateOptions(ui map[string]any) string {
-	options, ok := ui["options"].([]any)
+func generateOptions(ui map[string]interface{}) string {
+	if ui == nil {
+		return ""
+	}
+
+	options, ok := ui["options"].([]interface{})
 	if !ok {
 		return ""
 	}
 
 	var optionsHTML strings.Builder
 	for _, option := range options {
-		if optionMap, ok := option.(map[string]any); ok {
+		if optionMap, ok := option.(map[string]interface{}); ok {
 			// Complex option with attributes
 			value := getMapValue(optionMap, "value", "")
 			text := getMapValue(optionMap, "text", value)
@@ -611,23 +732,35 @@ func generateOptions(ui map[string]any) string {
 	return optionsHTML.String()
 }
 
-func getUIValue(ui map[string]any, key string) string {
+func getUIValue(ui map[string]interface{}, key string) string {
+	if ui == nil {
+		return ""
+	}
 	if value, ok := ui[key].(string); ok {
 		return value
 	}
 	return ""
 }
 
-func getMapValue(m map[string]any, key, defaultValue string) string {
+func getMapValue(m map[string]interface{}, key, defaultValue string) string {
 	if value, ok := m[key].(string); ok {
 		return value
 	}
 	return defaultValue
 }
 
-func contains(slice []string, substr string) bool {
-	for _, item := range slice {
-		if strings.Contains(item, substr) {
+func contains(slice []string, item string) bool {
+	for _, s := range slice {
+		if s == item {
+			return true
+		}
+	}
+	return false
+}
+
+func containsAttribute(attributes []string, prefix string) bool {
+	for _, attr := range attributes {
+		if strings.HasPrefix(attr, prefix) {
 			return true
 		}
 	}
@@ -635,23 +768,27 @@ func contains(slice []string, substr string) bool {
 }
 
 // renderButtons generates HTML for form buttons
-func renderButtons(formConfig map[string]any) string {
+func (r *JSONSchemaRenderer) renderButtons() string {
+	if r.Schema.Form == nil {
+		return ""
+	}
+
 	var buttonsHTML bytes.Buffer
 
-	if submitConfig, ok := formConfig["submit"].(map[string]any); ok {
+	if submitConfig, ok := r.Schema.Form["submit"].(map[string]interface{}); ok {
 		buttonHTML := renderButtonFromConfig(submitConfig, "submit")
 		buttonsHTML.WriteString(buttonHTML)
 	}
 
-	if resetConfig, ok := formConfig["reset"].(map[string]any); ok {
+	if resetConfig, ok := r.Schema.Form["reset"].(map[string]interface{}); ok {
 		buttonHTML := renderButtonFromConfig(resetConfig, "reset")
 		buttonsHTML.WriteString(buttonHTML)
 	}
 
 	// Support for additional custom buttons
-	if buttons, ok := formConfig["buttons"].([]any); ok {
+	if buttons, ok := r.Schema.Form["buttons"].([]interface{}); ok {
 		for _, button := range buttons {
-			if buttonMap, ok := button.(map[string]any); ok {
+			if buttonMap, ok := button.(map[string]interface{}); ok {
 				buttonType := getMapValue(buttonMap, "type", "button")
 				buttonHTML := renderButtonFromConfig(buttonMap, buttonType)
 				buttonsHTML.WriteString(buttonHTML)
@@ -662,7 +799,7 @@ func renderButtons(formConfig map[string]any) string {
 	return buttonsHTML.String()
 }
 
-func renderButtonFromConfig(config map[string]any, defaultType string) string {
+func renderButtonFromConfig(config map[string]interface{}, defaultType string) string {
 	var attributes []string
 
 	buttonType := getMapValue(config, "type", defaultType)
