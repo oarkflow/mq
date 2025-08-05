@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -11,6 +12,14 @@ import (
 
 func main() {
 	http.Handle("/form.css", http.FileServer(http.Dir("templates")))
+	http.HandleFunc("/process", func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to read request body: %v", err), http.StatusBadRequest)
+			return
+		}
+		fmt.Printf("Received body: %s\n", body)
+	})
 	http.HandleFunc("/render", func(w http.ResponseWriter, r *http.Request) {
 		templateName := r.URL.Query().Get("template")
 		if templateName == "" {
