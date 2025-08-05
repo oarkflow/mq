@@ -13,14 +13,14 @@ import (
 // A single template for the entire group structure
 const groupTemplateStr = `
 <div class="form-group-container">
-    {{if .Title.Text}}
-        {{if .Title.Class}}
-            <div class="{{.Title.Class}}">{{.Title.Text}}</div>
-        {{else}}
-            <h3 class="group-title">{{.Title.Text}}</h3>
-        {{end}}
-    {{end}}
-    <div class="{{.GroupClass}}">{{.FieldsHTML}}</div>
+	{{if .Title.Text}}
+		{{if .Title.Class}}
+			<div class="{{.Title.Class}}">{{.Title.Text}}</div>
+		{{else}}
+			<h3 class="group-title">{{.Title.Text}}</h3>
+		{{end}}
+	{{end}}
+	<div class="{{.GroupClass}}">{{.FieldsHTML}}</div>
 </div>
 `
 
@@ -175,29 +175,22 @@ type GroupTitle struct {
 
 // JSONSchemaRenderer is responsible for rendering HTML fields based on JSONSchema
 type JSONSchemaRenderer struct {
-	Schema       *jsonschema.Schema
-	HTMLLayout   string
-	TemplateData map[string]any // Data for template interpolation
-	cachedHTML   string         // Cached rendered HTML
+	Schema     *jsonschema.Schema
+	HTMLLayout string
+	cachedHTML string // Cached rendered HTML
 }
 
 // NewJSONSchemaRenderer creates a new instance of JSONSchemaRenderer
 func NewJSONSchemaRenderer(schema *jsonschema.Schema, htmlLayout string) *JSONSchemaRenderer {
 	return &JSONSchemaRenderer{
-		Schema:       schema,
-		HTMLLayout:   htmlLayout,
-		TemplateData: make(map[string]any),
+		Schema:     schema,
+		HTMLLayout: htmlLayout,
 	}
 }
 
-// SetTemplateData sets the data used for template interpolation
-func (r *JSONSchemaRenderer) SetTemplateData(data map[string]any) {
-	r.TemplateData = data
-}
-
 // interpolateTemplate replaces template placeholders with actual values
-func (r *JSONSchemaRenderer) interpolateTemplate(templateStr string) string {
-	if len(r.TemplateData) == 0 {
+func (r *JSONSchemaRenderer) interpolateTemplate(templateStr string, data map[string]any) string {
+	if len(data) == 0 {
 		return templateStr
 	}
 
@@ -205,7 +198,7 @@ func (r *JSONSchemaRenderer) interpolateTemplate(templateStr string) string {
 	if err != nil {
 		// Fallback to simple string replacement if template parsing fails
 		result := templateStr
-		for key, value := range r.TemplateData {
+		for key, value := range data {
 			placeholder := fmt.Sprintf("{{%s}}", key)
 			if valueStr, ok := value.(string); ok {
 				result = strings.ReplaceAll(result, placeholder, valueStr)
@@ -215,7 +208,7 @@ func (r *JSONSchemaRenderer) interpolateTemplate(templateStr string) string {
 	}
 
 	var templateResult bytes.Buffer
-	err = tmpl.Execute(&templateResult, r.TemplateData)
+	err = tmpl.Execute(&templateResult, data)
 	if err != nil {
 		return templateStr // Return original string if execution fails
 	}
@@ -224,7 +217,7 @@ func (r *JSONSchemaRenderer) interpolateTemplate(templateStr string) string {
 }
 
 // RenderFields generates HTML for fields based on the JSONSchema
-func (r *JSONSchemaRenderer) RenderFields() (string, error) {
+func (r *JSONSchemaRenderer) RenderFields(data map[string]any) (string, error) {
 	// Return cached HTML if available
 	if r.cachedHTML != "" {
 		return r.cachedHTML, nil
@@ -243,7 +236,7 @@ func (r *JSONSchemaRenderer) RenderFields() (string, error) {
 			formClass = class
 		}
 		if action, ok := r.Schema.Form["action"].(string); ok {
-			formAction = r.interpolateTemplate(action)
+			formAction = r.interpolateTemplate(action, data)
 		}
 		if method, ok := r.Schema.Form["method"].(string); ok {
 			formMethod = method
@@ -548,6 +541,7 @@ func buildAllAttributes(field FieldInfo) string {
 
 	// Add standard attributes from UI
 	if field.Schema.UI != nil {
+		element, _ := field.Schema.UI["element"].(string)
 		for _, attr := range standardAttrs {
 			if attr == "name" {
 				continue // Already handled above
@@ -555,6 +549,15 @@ func buildAllAttributes(field FieldInfo) string {
 			if value, exists := field.Schema.UI[attr]; exists {
 				if attr == "class" && value == "" {
 					continue // Skip empty class
+				}
+				// For select, input, textarea, add class to element itself
+				if attr == "class" && (element == "select" || element == "input" || element == "textarea") {
+					attributes = append(attributes, fmt.Sprintf(`class="%v"`, value))
+					continue
+				}
+				// For other elements, do not add class here (it will be handled in the wrapper div)
+				if attr == "class" {
+					continue
 				}
 				attributes = append(attributes, fmt.Sprintf(`%s="%v"`, attr, value))
 			}
