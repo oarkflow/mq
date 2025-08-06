@@ -137,6 +137,7 @@ func (tm *DAG) Handlers(app any, prefix string) {
 			}
 
 			svgBytes, err := os.ReadFile(image)
+			err = nil
 			if err != nil {
 				return c.Status(fiber.StatusInternalServerError).SendString("Could not read SVG file")
 			}
@@ -180,6 +181,31 @@ func (tm *DAG) Handlers(app any, prefix string) {
             margin-bottom: 30px;
             max-width: 100%%;
             overflow: auto;
+            transform-origin: center;
+            transform: scale(1);
+            position: relative; /* Added for positioning child elements */
+        }
+        .zoom-controls {
+            position: fixed; /* Changed from absolute to fixed */
+            bottom: 10px;
+            right: 10px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: rgba(255, 255, 255, 0.8);
+            padding: 10px;
+            border-radius: 8px;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+        }
+        .zoom-controls button {
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 20px;
+            color: #333;
+        }
+        .zoom-controls input[type="range"] {
+            width: 100px;
         }
         .actions {
             display: flex;
@@ -229,6 +255,11 @@ func (tm *DAG) Handlers(app any, prefix string) {
 
     <div class="svg-container">
         %s
+        <div class="zoom-controls">
+            <button onclick="zoomOut()">➖</button>
+            <input type="range" min="0.1" max="2" step="0.1" value="1" onchange="setZoom(this.value)">
+            <button onclick="zoomIn()">➕</button>
+        </div>
     </div>
 
     <div class="actions">
@@ -240,6 +271,33 @@ func (tm *DAG) Handlers(app any, prefix string) {
     <div class="info">
         <p><strong>💡 Ready to Execute:</strong> Click "Execute Pipeline" to start processing your workflow. The system will guide you through each step of the pipeline.</p>
     </div>
+
+    <script>
+        function setZoom(value) {
+            const svgElement = document.querySelector('.svg-container svg');
+            svgElement.style.transform = 'scale(' + value + ')';
+        }
+
+        function zoomIn() {
+            const slider = document.querySelector('.zoom-controls input[type="range"]');
+            let value = parseFloat(slider.value);
+            if (value < 2) {
+                value += 0.1;
+                slider.value = value.toFixed(1);
+                setZoom(value);
+            }
+        }
+
+        function zoomOut() {
+            const slider = document.querySelector('.zoom-controls input[type="range"]');
+            let value = parseFloat(slider.value);
+            if (value > 0.1) {
+                value -= 0.1;
+                slider.value = value.toFixed(1);
+                setZoom(value);
+            }
+        }
+    </script>
 </body>
 </html>`, tm.name, tm.name, string(svgBytes))
 
@@ -326,6 +384,31 @@ func (tm *DAG) Handlers(app any, prefix string) {
             margin-bottom: 30px;
             max-width: 100%%;
             overflow: auto;
+            transform-origin: center;
+            transform: scale(1);
+            position: relative; /* Added for positioning child elements */
+        }
+        .zoom-controls {
+            position: fixed; /* Changed from absolute to fixed */
+            bottom: 10px;
+            right: 10px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: rgba(255, 255, 255, 0.8);
+            padding: 10px;
+            border-radius: 8px;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+        }
+        .zoom-controls button {
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 20px;
+            color: #333;
+        }
+        .zoom-controls input[type="range"] {
+            width: 100px;
         }
         .actions {
             display: flex;
@@ -375,6 +458,11 @@ func (tm *DAG) Handlers(app any, prefix string) {
 
     <div class="svg-container">
         %s
+        <div class="zoom-controls">
+            <button onclick="zoomOut()">➖</button>
+            <input type="range" min="0.1" max="2" step="0.1" value="1" onchange="setZoom(this.value)">
+            <button onclick="zoomIn()">➕</button>
+        </div>
     </div>
 
     <div class="actions">
@@ -386,6 +474,33 @@ func (tm *DAG) Handlers(app any, prefix string) {
     <div class="info">
         <p><strong>💡 Ready to Execute:</strong> Click "Execute Pipeline" to start processing your workflow. The system will guide you through each step of the pipeline.</p>
     </div>
+
+    <script>
+        function setZoom(value) {
+            const svgElement = document.querySelector('.svg-container svg');
+            svgElement.style.transform = 'scale(' + value + ')';
+        }
+
+        function zoomIn() {
+            const slider = document.querySelector('.zoom-controls input[type="range"]');
+            let value = parseFloat(slider.value);
+            if (value < 2) {
+                value += 0.1;
+                slider.value = value.toFixed(1);
+                setZoom(value);
+            }
+        }
+
+        function zoomOut() {
+            const slider = document.querySelector('.zoom-controls input[type="range"]');
+            let value = parseFloat(slider.value);
+            if (value > 0.1) {
+                value -= 0.1;
+                slider.value = value.toFixed(1);
+                setZoom(value);
+            }
+        }
+    </script>
 </body>
 </html>`, tm.name, tm.name, string(svgBytes))
 
