@@ -3,8 +3,6 @@ package handlers
 import (
 	"context"
 	"fmt"
-	"reflect"
-	"regexp"
 	"strings"
 
 	"github.com/oarkflow/json"
@@ -12,248 +10,201 @@ import (
 	"github.com/oarkflow/mq/dag"
 )
 
-// SplitJoinHandler handles splitting strings into arrays and joining arrays into strings
+// SplitJoinHandler handles string split and join operations
 type SplitJoinHandler struct {
 	dag.Operation
-	OpType      string           `json:"op_type"`      // "split" or "join"
-	SourceField string           `json:"source_field"` // field to operate on
-	TargetField string           `json:"target_field"` // field to store result
-	Delimiter   string           `json:"delimiter"`    // delimiter for split/join
-	Options     SplitJoinOptions `json:"options"`
 }
 
-type SplitJoinOptions struct {
-	TrimSpaces      bool   `json:"trim_spaces"`      // trim spaces from elements (split only)
-	RemoveEmpty     bool   `json:"remove_empty"`     // remove empty elements (split only)
-	MaxSplit        int    `json:"max_split"`        // maximum number of splits (-1 for unlimited)
-	UseRegex        bool   `json:"use_regex"`        // treat delimiter as regex pattern (split only)
-	CaseInsensitive bool   `json:"case_insensitive"` // case insensitive regex (split only)
-	Prefix          string `json:"prefix"`           // prefix for joined string (join only)
-	Suffix          string `json:"suffix"`           // suffix for joined string (join only)
-}
-
-func (s *SplitJoinHandler) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
+func (h *SplitJoinHandler) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 	var data map[string]any
-	if err := json.Unmarshal(task.Payload, &data); err != nil {
-		return mq.Result{Error: fmt.Errorf("failed to unmarshal data: %v", err), Ctx: ctx}
+	err := json.Unmarshal(task.Payload, &data)
+	if err != nil {
+		return mq.Result{Error: fmt.Errorf("failed to unmarshal task payload: %w", err)}
 	}
 
-	// Get source value
-	sourceValue, exists := data[s.SourceField]
-	if !exists {
-		return mq.Result{Error: fmt.Errorf("source field '%s' not found", s.SourceField), Ctx: ctx}
+	operation, ok := h.Payload.Data["operation"].(string)
+	if !ok {
+		return mq.Result{Error: fmt.Errorf("operation not specified")}
 	}
 
-	var result any
-	var err error
-
-	switch s.OpType {
+	var result map[string]any
+	switch operation {
 	case "split":
-		result, err = s.performSplit(sourceValue)
+		result = h.splitOperation(data)
 	case "join":
-		result, err = s.performJoin(sourceValue)
+		result = h.joinOperation(data)
+	case "split_to_array":
+		result = h.splitToArrayOperation(data)
+	case "join_from_array":
+		result = h.joinFromArrayOperation(data)
 	default:
-		return mq.Result{Error: fmt.Errorf("unsupported operation: %s", s.OpType), Ctx: ctx}
+		return mq.Result{Error: fmt.Errorf("unsupported operation: %s", operation)}
 	}
 
+	resultPayload, err := json.Marshal(result)
 	if err != nil {
-		return mq.Result{Error: err, Ctx: ctx}
+		return mq.Result{Error: fmt.Errorf("failed to marshal result: %w", err)}
 	}
 
-	// Set target field
-	targetField := s.TargetField
-	if targetField == "" {
-		targetField = s.SourceField // overwrite source if no target specified
-	}
-	data[targetField] = result
-
-	bt, _ := json.Marshal(data)
-	return mq.Result{Payload: bt, Ctx: ctx}
+	return mq.Result{Payload: resultPayload, Ctx: ctx}
 }
 
-func (s *SplitJoinHandler) performSplit(value any) ([]string, error) {
-	// Convert value to string
-	str := fmt.Sprintf("%v", value)
+func (h *SplitJoinHandler) splitOperation(data map[string]any) map[string]any {
+	result := make(map[string]any)
+	fields := h.getTargetFields()
+	separator := h.getSeparator()
 
-	var parts []string
+	// Copy all original data
+	for key, value := range data {
+		result[key] = value
+	}
 
-	if s.Options.UseRegex {
-		// Use regex for splitting
-		flags := ""
-		if s.Options.CaseInsensitive {
-			flags = "(?i)"
-		}
-		pattern := flags + s.Delimiter
+	for _, field := range fields {
+		if val, ok := data[field]; ok {
+			if str, ok := val.(string); ok {
+				parts := strings.Split(str, separator)
 
-		re, err := regexp.Compile(pattern)
-		if err != nil {
-			return nil, fmt.Errorf("invalid regex pattern '%s': %v", pattern, err)
-		}
+				// Create individual fields for each part
+				for i, part := range parts {
+					result[fmt.Sprintf("%s_%d", field, i)] = strings.TrimSpace(part)
+				}
 
-		if s.Options.MaxSplit > 0 {
-			parts = re.Split(str, s.Options.MaxSplit+1)
-		} else {
-			parts = re.Split(str, -1)
-		}
-	} else {
-		// Use simple string splitting
-		if s.Options.MaxSplit > 0 {
-			parts = strings.SplitN(str, s.Delimiter, s.Options.MaxSplit+1)
-		} else {
-			parts = strings.Split(str, s.Delimiter)
+				// Also store as array
+				result[field+"_parts"] = parts
+				result[field+"_count"] = len(parts)
+			}
 		}
 	}
 
-	// Process the parts based on options
-	var processedParts []string
-	for _, part := range parts {
-		if s.Options.TrimSpaces {
-			part = strings.TrimSpace(part)
-		}
-
-		if s.Options.RemoveEmpty && part == "" {
-			continue
-		}
-
-		processedParts = append(processedParts, part)
-	}
-
-	return processedParts, nil
+	return result
 }
 
-func (s *SplitJoinHandler) performJoin(value any) (string, error) {
-	// Convert value to slice of strings
-	parts, err := s.convertToStringSlice(value)
-	if err != nil {
-		return "", err
-	}
+func (h *SplitJoinHandler) joinOperation(data map[string]any) map[string]any {
+	result := make(map[string]any)
+	targetField := h.getTargetField()
+	separator := h.getSeparator()
+	sourceFields := h.getSourceFields()
 
-	// Join the parts
-	joined := strings.Join(parts, s.Delimiter)
-
-	// Add prefix/suffix if specified
-	if s.Options.Prefix != "" {
-		joined = s.Options.Prefix + joined
-	}
-	if s.Options.Suffix != "" {
-		joined = joined + s.Options.Suffix
-	}
-
-	return joined, nil
-}
-
-func (s *SplitJoinHandler) convertToStringSlice(value any) ([]string, error) {
-	rv := reflect.ValueOf(value)
-
-	if rv.Kind() != reflect.Slice && rv.Kind() != reflect.Array {
-		return nil, fmt.Errorf("value must be an array or slice for join operation")
+	// Copy all original data
+	for key, value := range data {
+		result[key] = value
 	}
 
 	var parts []string
-	for i := 0; i < rv.Len(); i++ {
-		element := rv.Index(i).Interface()
-		parts = append(parts, fmt.Sprintf("%v", element))
-	}
-
-	return parts, nil
-}
-
-// Advanced split/join handler for complex operations
-type AdvancedSplitJoinHandler struct {
-	dag.Operation
-	Operations []SplitJoinOperation `json:"operations"` // chain of split/join operations
-}
-
-type SplitJoinOperation struct {
-	Type        string           `json:"type"`         // "split" or "join"
-	SourceField string           `json:"source_field"` // field to operate on
-	TargetField string           `json:"target_field"` // field to store result
-	Delimiter   string           `json:"delimiter"`    // delimiter for operation
-	Options     SplitJoinOptions `json:"options"`      // operation options
-}
-
-func (a *AdvancedSplitJoinHandler) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
-	var data map[string]any
-	if err := json.Unmarshal(task.Payload, &data); err != nil {
-		return mq.Result{Error: fmt.Errorf("failed to unmarshal data: %v", err), Ctx: ctx}
-	}
-
-	// Execute operations in sequence
-	for i, op := range a.Operations {
-		handler := &SplitJoinHandler{
-			Operation: dag.Operation{
-				ID:   fmt.Sprintf("%s_op_%d", a.ID, i),
-				Key:  "temp_split_join",
-				Type: dag.Function,
-				Tags: []string{"data", "temp"},
-			},
-			OpType:      op.Type,
-			SourceField: op.SourceField,
-			TargetField: op.TargetField,
-			Delimiter:   op.Delimiter,
-			Options:     op.Options,
-		}
-
-		// Create a temporary task for this operation
-		tempData, _ := json.Marshal(data)
-		tempTask := &mq.Task{Payload: tempData}
-
-		result := handler.ProcessTask(ctx, tempTask)
-		if result.Error != nil {
-			return mq.Result{Error: fmt.Errorf("operation %d failed: %v", i+1, result.Error), Ctx: ctx}
-		}
-
-		// Update data with the result
-		if err := json.Unmarshal(result.Payload, &data); err != nil {
-			return mq.Result{Error: fmt.Errorf("failed to unmarshal result from operation %d: %v", i+1, err), Ctx: ctx}
+	for _, field := range sourceFields {
+		if val, ok := data[field]; ok && val != nil {
+			parts = append(parts, fmt.Sprintf("%v", val))
 		}
 	}
 
-	bt, _ := json.Marshal(data)
-	return mq.Result{Payload: bt, Ctx: ctx}
+	if len(parts) > 0 {
+		result[targetField] = strings.Join(parts, separator)
+	}
+
+	return result
 }
 
-// Factory functions
-func NewSplitHandler(id, sourceField, targetField, delimiter string, options SplitJoinOptions) *SplitJoinHandler {
+func (h *SplitJoinHandler) splitToArrayOperation(data map[string]any) map[string]any {
+	result := make(map[string]any)
+	fields := h.getTargetFields()
+	separator := h.getSeparator()
+
+	// Copy all original data
+	for key, value := range data {
+		result[key] = value
+	}
+
+	for _, field := range fields {
+		if val, ok := data[field]; ok {
+			if str, ok := val.(string); ok {
+				parts := strings.Split(str, separator)
+				var cleanParts []interface{}
+				for _, part := range parts {
+					cleanParts = append(cleanParts, strings.TrimSpace(part))
+				}
+				result[field+"_array"] = cleanParts
+			}
+		}
+	}
+
+	return result
+}
+
+func (h *SplitJoinHandler) joinFromArrayOperation(data map[string]any) map[string]any {
+	result := make(map[string]any)
+	targetField := h.getTargetField()
+	separator := h.getSeparator()
+	sourceField := h.getSourceField()
+
+	// Copy all original data
+	for key, value := range data {
+		result[key] = value
+	}
+
+	if val, ok := data[sourceField]; ok {
+		if arr, ok := val.([]interface{}); ok {
+			var parts []string
+			for _, item := range arr {
+				if item != nil {
+					parts = append(parts, fmt.Sprintf("%v", item))
+				}
+			}
+			result[targetField] = strings.Join(parts, separator)
+		}
+	}
+
+	return result
+}
+
+func (h *SplitJoinHandler) getTargetFields() []string {
+	if fields, ok := h.Payload.Data["fields"].([]interface{}); ok {
+		var result []string
+		for _, field := range fields {
+			if str, ok := field.(string); ok {
+				result = append(result, str)
+			}
+		}
+		return result
+	}
+	return nil
+}
+
+func (h *SplitJoinHandler) getTargetField() string {
+	if field, ok := h.Payload.Data["target_field"].(string); ok {
+		return field
+	}
+	return "joined_field"
+}
+
+func (h *SplitJoinHandler) getSourceField() string {
+	if field, ok := h.Payload.Data["source_field"].(string); ok {
+		return field
+	}
+	return ""
+}
+
+func (h *SplitJoinHandler) getSourceFields() []string {
+	if fields, ok := h.Payload.Data["source_fields"].([]interface{}); ok {
+		var result []string
+		for _, field := range fields {
+			if str, ok := field.(string); ok {
+				result = append(result, str)
+			}
+		}
+		return result
+	}
+	return nil
+}
+
+func (h *SplitJoinHandler) getSeparator() string {
+	if sep, ok := h.Payload.Data["separator"].(string); ok {
+		return sep
+	}
+	return "," // Default separator
+}
+
+func NewSplitJoinHandler(id string) *SplitJoinHandler {
 	return &SplitJoinHandler{
-		Operation: dag.Operation{
-			ID:   id,
-			Key:  "split_string",
-			Type: dag.Function,
-			Tags: []string{"data", "string", "split"},
-		},
-		OpType:      "split",
-		SourceField: sourceField,
-		TargetField: targetField,
-		Delimiter:   delimiter,
-		Options:     options,
-	}
-}
-
-func NewJoinHandler(id, sourceField, targetField, delimiter string, options SplitJoinOptions) *SplitJoinHandler {
-	return &SplitJoinHandler{
-		Operation: dag.Operation{
-			ID:   id,
-			Key:  "join_array",
-			Type: dag.Function,
-			Tags: []string{"data", "array", "join"},
-		},
-		OpType:      "join",
-		SourceField: sourceField,
-		TargetField: targetField,
-		Delimiter:   delimiter,
-		Options:     options,
-	}
-}
-
-func NewAdvancedSplitJoinHandler(id string, operations []SplitJoinOperation) *AdvancedSplitJoinHandler {
-	return &AdvancedSplitJoinHandler{
-		Operation: dag.Operation{
-			ID:   id,
-			Key:  "advanced_split_join",
-			Type: dag.Function,
-			Tags: []string{"data", "string", "array", "advanced"},
-		},
-		Operations: operations,
+		Operation: dag.Operation{ID: id, Key: "split_join", Type: dag.Function, Tags: []string{"data", "transformation", "string"}},
 	}
 }
