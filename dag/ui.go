@@ -412,7 +412,6 @@ func (tm *DAG) saveImage(fileName string, arg string) error {
 	return nil
 }
 
-// ExportDOT generates a DOT graph with professional styling and level-based colors
 func (tm *DAG) ExportDOT(direction ...Direction) string {
 	rankDir := TB
 	if len(direction) > 0 && direction[0] != "" {
@@ -422,17 +421,18 @@ func (tm *DAG) ExportDOT(direction ...Direction) string {
 
 	// Graph header and global attributes
 	sb.WriteString(fmt.Sprintf("digraph \"%s\" {\n", tm.name))
-	sb.WriteString("  graph [")
-	sb.WriteString("rankdir=" + string(rankDir) + ", ")
-	sb.WriteString("bgcolor=\"#FAFAFA\", ")
-	sb.WriteString("pad=\"0.3\", ")
-	sb.WriteString("nodesep=\"0.6\", ")
-	sb.WriteString("ranksep=\"1.0\", ")
-	sb.WriteString("splines=\"ortho\", ") // orthogonal straight segments
-	sb.WriteString("overlap=\"false\", ")
-	sb.WriteString("sep=\"+0.3\", ")
-	sb.WriteString("concentrate=\"true\" ") // reduce edge crossings
-	sb.WriteString("];\n")
+	sb.WriteString("  graph [\n")
+	sb.WriteString("    rankdir=" + string(rankDir) + ",\n")
+	sb.WriteString("    bgcolor=\"#FAFAFA\",\n")
+	sb.WriteString("    pad=\"0.5\",\n")
+	sb.WriteString("    nodesep=\"0.4\",\n")
+	sb.WriteString("    ranksep=\"0.7\",\n")
+	sb.WriteString("    splines=polyline,\n")
+	sb.WriteString("    overlap=scale,\n")
+	sb.WriteString("    concentrate=true,\n")
+	sb.WriteString("    layout=dot,\n")
+	sb.WriteString("    center=true\n")
+	sb.WriteString("  ];\n")
 
 	// Add professional color legend as a comment
 	sb.WriteString("  // Professional DAG Visualization\n")
@@ -442,30 +442,30 @@ func (tm *DAG) ExportDOT(direction ...Direction) string {
 	sb.WriteString("  // - Iterator edges: bold lines (medium weight)\n")
 	sb.WriteString("  // - Conditional edges: dashed lines (distinct styling)\n\n")
 
-	// Professional node styling
-	sb.WriteString("  node [")
-	sb.WriteString("fontname=\"Inter, -apple-system, BlinkMacSystemFont, sans-serif\", ")
-	sb.WriteString("fontsize=9, ")
-	sb.WriteString("style=\"filled,rounded\", ")
-	sb.WriteString("penwidth=1.5, ")
-	sb.WriteString("margin=\"0.15,0.08\", ")
-	sb.WriteString("width=0, height=0, fixedsize=false")
-	sb.WriteString("];\n")
+	// Node styling
+	sb.WriteString("  node [\n")
+	sb.WriteString("    fontname=\"Inter, -apple-system, BlinkMacSystemFont, sans-serif\",\n")
+	sb.WriteString("    fontsize=9,\n")
+	sb.WriteString("    style=\"filled,rounded\",\n")
+	sb.WriteString("    penwidth=1.5,\n")
+	sb.WriteString("    margin=\"0.15,0.08\",\n")
+	sb.WriteString("    width=0, height=0, fixedsize=false\n")
+	sb.WriteString("  ];\n")
 
-	// Professional edge styling with better label positioning
-	sb.WriteString("  edge [")
-	sb.WriteString("fontname=\"Inter, -apple-system, BlinkMacSystemFont, sans-serif\", ")
-	sb.WriteString("fontsize=7, ")
-	sb.WriteString("color=\"#666666\", ")
-	sb.WriteString("penwidth=1.0, ")
-	sb.WriteString("arrowsize=0.6, ")
-	sb.WriteString("minlen=1, ")
-	sb.WriteString("labeldistance=1.5, ") // Default label positioning
-	sb.WriteString("labelangle=0, ")      // horizontal labels
-	sb.WriteString("labelfloat=false ")   // snap labels to edge
-	sb.WriteString("];\n\n")
+	// Edge styling
+	sb.WriteString("  edge [\n")
+	sb.WriteString("    fontname=\"Inter, -apple-system, BlinkMacSystemFont, sans-serif\",\n")
+	sb.WriteString("    fontsize=8,\n")
+	sb.WriteString("    color=\"#666666\",\n")
+	sb.WriteString("    penwidth=1.0,\n")
+	sb.WriteString("    arrowsize=0.6,\n")
+	sb.WriteString("    minlen=1,\n")
+	sb.WriteString("    labelfloat=true,\n")
+	sb.WriteString("    labeldistance=5.5,\n")
+	sb.WriteString("    labelangle=30\n")
+	sb.WriteString("  ];\n\n")
 
-	// Render all nodes and edges
+	// Render graph content
 	tm.renderCompactDAG(&sb, "  ")
 	sb.WriteString("}\n")
 	return sb.String()
@@ -532,7 +532,7 @@ func (tm *DAG) renderCompactNode(sb *strings.Builder, node *Node, nodeLevel int,
 	cleanLabel := strings.ReplaceAll(node.Label, `"`, `\"`)
 
 	sb.WriteString(fmt.Sprintf("%s\"%s\" [", indent, node.ID))
-	sb.WriteString(fmt.Sprintf(`label="%s", `, cleanLabel))
+	sb.WriteString(fmt.Sprintf(`label=" \n %s \n ", `, cleanLabel))
 	sb.WriteString(fmt.Sprintf(`fillcolor="%s", `, fillColor))
 	sb.WriteString(fmt.Sprintf(`color="%s", `, borderColor))
 	sb.WriteString(fmt.Sprintf(`shape=%s`, shape))
