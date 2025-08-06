@@ -48,10 +48,11 @@ func (n *Node) SetTimeout(d time.Duration) {
 }
 
 type Edge struct {
-	From  *Node
-	To    *Node
-	Label string
-	Type  EdgeType
+	From       *Node
+	FromSource string
+	To         *Node
+	Label      string
+	Type       EdgeType
 }
 
 type DAG struct {
@@ -310,6 +311,14 @@ func (tm *DAG) IsReady() bool {
 	return isReady
 }
 
+func (tm *DAG) resolveNode(nodeID string) (*Node, bool) {
+	nodeParts := strings.Split(nodeID, ".")
+	if len(nodeParts) > 1 {
+		nodeID = nodeParts[0]
+	}
+	return tm.nodes.Get(nodeID)
+}
+
 func (tm *DAG) AddEdge(edgeType EdgeType, label, from string, targets ...string) *DAG {
 	if tm.Error != nil {
 		return tm
@@ -317,14 +326,14 @@ func (tm *DAG) AddEdge(edgeType EdgeType, label, from string, targets ...string)
 	if edgeType == Iterator {
 		tm.iteratorNodes.Set(from, []Edge{})
 	}
-	node, ok := tm.nodes.Get(from)
+	node, ok := tm.resolveNode(from)
 	if !ok {
 		tm.Error = fmt.Errorf("node not found %s", from)
 		return tm
 	}
 	for _, target := range targets {
 		if targetNode, ok := tm.nodes.Get(target); ok {
-			edge := Edge{From: node, To: targetNode, Type: edgeType, Label: label}
+			edge := Edge{From: node, To: targetNode, Type: edgeType, Label: label, FromSource: from}
 			node.Edges = append(node.Edges, edge)
 			if edgeType != Iterator {
 				if edges, ok := tm.iteratorNodes.Get(node.ID); ok {

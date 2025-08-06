@@ -98,7 +98,7 @@ func main() {
 	flow.AddNode(dag.Function, "Send Standard Email", "SendStandardEmail", &SendStandardEmailNode{})
 	flow.AddNode(dag.Page, "Success Page", "SuccessPage", &SuccessPageNode{})
 	flow.AddNode(dag.Page, "Error Page", "ErrorPage", &EmailErrorPageNode{})
-	flow.AddEdge(dag.Simple, "Login to Contact", "Login", "ContactForm")
+	flow.AddEdge(dag.Simple, "Login to Contact", "Login.Output", "ContactForm")
 	// Define conditional flow
 	flow.AddEdge(dag.Simple, "Form to Validation", "ContactForm", "ValidateContact")
 	flow.AddCondition("ValidateContact", map[string]string{
