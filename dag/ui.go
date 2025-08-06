@@ -427,7 +427,8 @@ func (tm *DAG) ExportDOT(direction ...Direction) string {
 	sb.WriteString("    pad=\"0.5\",\n")
 	sb.WriteString("    nodesep=\"0.4\",\n")
 	sb.WriteString("    ranksep=\"0.7\",\n")
-	sb.WriteString("    splines=polyline,\n")
+	// sb.WriteString("    splines=polyline,\n")
+	// sb.WriteString("    splines=ortho,\n")
 	sb.WriteString("    overlap=scale,\n")
 	sb.WriteString("    concentrate=true,\n")
 	sb.WriteString("    layout=dot,\n")
@@ -455,14 +456,9 @@ func (tm *DAG) ExportDOT(direction ...Direction) string {
 	// Edge styling
 	sb.WriteString("  edge [\n")
 	sb.WriteString("    fontname=\"Inter, -apple-system, BlinkMacSystemFont, sans-serif\",\n")
-	sb.WriteString("    fontsize=8,\n")
 	sb.WriteString("    color=\"#666666\",\n")
 	sb.WriteString("    penwidth=1.0,\n")
 	sb.WriteString("    arrowsize=0.6,\n")
-	sb.WriteString("    minlen=1,\n")
-	sb.WriteString("    labelfloat=true,\n")
-	sb.WriteString("    labeldistance=5.5,\n")
-	sb.WriteString("    labelangle=30\n")
 	sb.WriteString("  ];\n\n")
 
 	// Render graph content
