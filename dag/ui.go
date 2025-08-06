@@ -2,6 +2,7 @@ package dag
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"strings"
@@ -459,7 +460,7 @@ func (tm *DAG) ExportDOT(direction ...Direction) string {
 	sb.WriteString("penwidth=1.0, ")
 	sb.WriteString("arrowsize=0.6, ")
 	sb.WriteString("minlen=1, ")
-	sb.WriteString("labeldistance=1.5, ") // better label positioning
+	sb.WriteString("labeldistance=1.5, ") // Default label positioning
 	sb.WriteString("labelangle=0, ")      // horizontal labels
 	sb.WriteString("labelfloat=false ")   // snap labels to edge
 	sb.WriteString("];\n\n")
@@ -600,7 +601,8 @@ func (tm *DAG) renderCompactSubDAGCluster(sb *strings.Builder, parentNodeID stri
 			sb.WriteString(fmt.Sprintf(`fontsize=%s, `, style.FontSize))
 			sb.WriteString(fmt.Sprintf(`label="%s", `, cleanCondition))
 			sb.WriteString(fmt.Sprintf(`tooltip="Level %d - Conditional", `, level))
-			sb.WriteString(`labeldistance=1.2`)
+			sb.WriteString(fmt.Sprintf(`labeldistance=%.1f, `, math.Max(1.1, math.Min(1.3, float64(level)*0.1+1.1))))
+			sb.WriteString(`labelangle=0`)
 			sb.WriteString("];\n")
 		}
 	}
@@ -623,7 +625,7 @@ func (tm *DAG) renderCompactPrefixedNode(sb *strings.Builder, node *Node, prefix
 	sb.WriteString("];\n")
 }
 
-// renderCompactEdges renders edges with level-based colors and professional styling
+// renderCompactEdges dynamically adjusts label positions and dimensions
 func (tm *DAG) renderCompactEdges(sb *strings.Builder, node *Node, edgeLevels map[string]EdgeLevel, indent string) {
 	for _, edge := range node.Edges {
 		fromID := strings.Join(strings.Split(edge.FromSource, "."), "_")
@@ -650,8 +652,8 @@ func (tm *DAG) renderCompactEdges(sb *strings.Builder, node *Node, edgeLevels ma
 		if edge.Label != "" {
 			cleanLabel := strings.ReplaceAll(edge.Label, `"`, `\"`)
 			sb.WriteString(fmt.Sprintf(`label="%s", `, cleanLabel))
-			sb.WriteString(`labeldistance=1.2, `) // better label positioning
-			sb.WriteString(`labelangle=0`)        // horizontal labels
+			sb.WriteString(fmt.Sprintf(`labeldistance=%.1f, `, math.Max(1.1, math.Min(2.0, float64(len(edge.Label))*0.05+1.1))))
+			sb.WriteString(fmt.Sprintf(`labelangle=%d`, 0))
 		}
 
 		// Add edge type indicator in tooltip for debugging
@@ -689,7 +691,7 @@ func (tm *DAG) renderCompactPrefixedEdges(sb *strings.Builder, node *Node, prefi
 		if edge.Label != "" {
 			cleanLabel := strings.ReplaceAll(edge.Label, `"`, `\"`)
 			sb.WriteString(fmt.Sprintf(`label="%s", `, cleanLabel))
-			sb.WriteString(`labeldistance=1.1, `)
+			sb.WriteString(fmt.Sprintf(`labeldistance=%.1f, `, math.Max(1.1, math.Min(1.3, float64(edgeLevel.Level)*0.1+1.1))))
 			sb.WriteString(`labelangle=0`)
 		}
 
@@ -726,7 +728,7 @@ func (tm *DAG) renderCompactConditionalEdges(sb *strings.Builder, edgeLevels map
 			sb.WriteString(fmt.Sprintf(`fontsize=%s, `, style.FontSize))
 			sb.WriteString(fmt.Sprintf(`label="%s", `, cleanCondition))
 			sb.WriteString(fmt.Sprintf(`tooltip="Level %d - Conditional", `, level))
-			sb.WriteString(`labeldistance=1.3, `)
+			sb.WriteString(fmt.Sprintf(`labeldistance=%.1f, `, math.Max(1.1, math.Min(1.3, float64(level)*0.1+1.1))))
 			sb.WriteString(`labelangle=0`)
 			sb.WriteString("];\n")
 		}
