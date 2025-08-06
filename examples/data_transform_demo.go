@@ -49,6 +49,7 @@ func testFormatHandler() {
 
 	result := runHandler(handler, testData, "Uppercase Format")
 	printResult("Uppercase formatting", result)
+	printRequestConfigResult(testData, config, result)
 
 	// Test currency formatting
 	currencyData := map[string]any{
@@ -69,6 +70,7 @@ func testFormatHandler() {
 
 	result = runHandler(currencyHandler, currencyData, "Currency Format")
 	printResult("Currency formatting", result)
+	printRequestConfigResult(currencyData, currencyConfig, result)
 
 	// Test date formatting
 	dateData := map[string]any{
@@ -88,6 +90,7 @@ func testFormatHandler() {
 
 	result = runHandler(dateHandler, dateData, "Date Format")
 	printResult("Date formatting", result)
+	printRequestConfigResult(dateData, dateConfig, result)
 }
 
 func testGroupHandler() {
@@ -121,6 +124,7 @@ func testGroupHandler() {
 
 	result := runHandler(handler, testData, "Group by Department")
 	printResult("Data grouping", result)
+	printRequestConfigResult(testData, config, result)
 }
 
 func testSplitJoinHandler() {
@@ -134,10 +138,9 @@ func testSplitJoinHandler() {
 		"skills":    "golang python javascript",
 	}
 
-	splitHandler := handlers.NewSplitJoinHandler("split-test")
+	splitHandler := handlers.NewSplitHandler("split-test")
 	splitConfig := dag.Payload{
 		Data: map[string]any{
-			"operation": "split",
 			"fields":    []string{"full_name", "skills"},
 			"separator": " ",
 		},
@@ -146,12 +149,12 @@ func testSplitJoinHandler() {
 
 	result := runHandler(splitHandler, testData, "Split Operation (space)")
 	printResult("String splitting with space", result)
+	printRequestConfigResult(testData, splitConfig, result)
 
 	// Test split with comma
-	splitHandler2 := handlers.NewSplitJoinHandler("split-test-2")
+	splitHandler2 := handlers.NewSplitHandler("split-test-2")
 	splitConfig2 := dag.Payload{
 		Data: map[string]any{
-			"operation": "split",
 			"fields":    []string{"tags"},
 			"separator": ",",
 		},
@@ -160,6 +163,7 @@ func testSplitJoinHandler() {
 
 	result = runHandler(splitHandler2, testData, "Split Operation (comma)")
 	printResult("String splitting with comma", result)
+	printRequestConfigResult(testData, splitConfig2, result)
 
 	// Test join operation
 	joinData := map[string]any{
@@ -169,10 +173,9 @@ func testSplitJoinHandler() {
 		"title":       "Mr.",
 	}
 
-	joinHandler := handlers.NewSplitJoinHandler("join-test")
+	joinHandler := handlers.NewJoinHandler("join-test")
 	joinConfig := dag.Payload{
 		Data: map[string]any{
-			"operation":     "join",
 			"source_fields": []string{"title", "first_name", "middle_name", "last_name"},
 			"target_field":  "full_name_with_title",
 			"separator":     " ",
@@ -182,6 +185,7 @@ func testSplitJoinHandler() {
 
 	result = runHandler(joinHandler, joinData, "Join Operation")
 	printResult("String joining", result)
+	printRequestConfigResult(joinData, joinConfig, result)
 }
 
 func testFlattenHandler() {
@@ -211,6 +215,7 @@ func testFlattenHandler() {
 
 	result := runHandler(handler, testData, "Flatten Settings")
 	printResult("Settings flattening", result)
+	printRequestConfigResult(testData, config, result)
 
 	// Test flatten key-value pairs
 	kvData := map[string]any{
@@ -236,6 +241,7 @@ func testFlattenHandler() {
 
 	result = runHandler(kvHandler, kvData, "Flatten Key-Value")
 	printResult("Key-value flattening", result)
+	printRequestConfigResult(kvData, kvConfig, result)
 
 	// Test flatten nested objects
 	nestedData := map[string]any{
@@ -268,6 +274,7 @@ func testFlattenHandler() {
 
 	result = runHandler(nestedHandler, nestedData, "Flatten Nested Objects")
 	printResult("Nested object flattening", result)
+	printRequestConfigResult(nestedData, nestedConfig, result)
 }
 
 func testJSONHandler() {
@@ -292,6 +299,7 @@ func testJSONHandler() {
 
 	result := runHandler(parseHandler, testData, "JSON Parsing")
 	printResult("JSON parsing", result)
+	printRequestConfigResult(testData, parseConfig, result)
 
 	// Test JSON stringifying
 	objData := map[string]any{
@@ -320,6 +328,7 @@ func testJSONHandler() {
 
 	result = runHandler(stringifyHandler, objData, "JSON Stringifying")
 	printResult("JSON stringifying", result)
+	printRequestConfigResult(objData, stringifyConfig, result)
 
 	// Test JSON validation
 	validationData := map[string]any{
@@ -339,6 +348,7 @@ func testJSONHandler() {
 
 	result = runHandler(validateHandler, validationData, "JSON Validation")
 	printResult("JSON validation", result)
+	printRequestConfigResult(validationData, validateConfig, result)
 }
 
 func testFieldHandler() {
@@ -370,6 +380,7 @@ func testFieldHandler() {
 
 	result := runHandler(filterHandler, testData, "Filter/Select Fields")
 	printResult("Field filtering", result)
+	printRequestConfigResult(testData, filterConfig, result)
 
 	// Test field exclusion/removal
 	excludeHandler := handlers.NewFieldHandler("exclude-test")
@@ -383,6 +394,7 @@ func testFieldHandler() {
 
 	result = runHandler(excludeHandler, testData, "Exclude Fields")
 	printResult("Field exclusion", result)
+	printRequestConfigResult(testData, excludeConfig, result)
 
 	// Test field renaming
 	renameHandler := handlers.NewFieldHandler("rename-test")
@@ -404,6 +416,7 @@ func testFieldHandler() {
 
 	result = runHandler(renameHandler, testData, "Rename Fields")
 	printResult("Field renaming", result)
+	printRequestConfigResult(testData, renameConfig, result)
 
 	// Test adding new fields
 	addHandler := handlers.NewFieldHandler("add-test")
@@ -424,6 +437,7 @@ func testFieldHandler() {
 
 	result = runHandler(addHandler, testData, "Add Fields")
 	printResult("Adding fields", result)
+	printRequestConfigResult(testData, addConfig, result)
 
 	// Test field copying
 	copyHandler := handlers.NewFieldHandler("copy-test")
@@ -441,6 +455,7 @@ func testFieldHandler() {
 
 	result = runHandler(copyHandler, testData, "Copy Fields")
 	printResult("Field copying", result)
+	printRequestConfigResult(testData, copyConfig, result)
 
 	// Test key transformation
 	transformHandler := handlers.NewFieldHandler("transform-test")
@@ -454,6 +469,7 @@ func testFieldHandler() {
 
 	result = runHandler(transformHandler, testData, "Transform Keys")
 	printResult("Key transformation", result)
+	printRequestConfigResult(testData, transformConfig, result)
 }
 
 func testDataHandler() {
@@ -482,6 +498,7 @@ func testDataHandler() {
 
 	result := runHandler(sortHandler, testData, "Sort Data by Salary (Desc)")
 	printResult("Data sorting", result)
+	printRequestConfigResult(testData, sortConfig, result)
 
 	// Test field calculations
 	calcData := map[string]any{
@@ -520,6 +537,7 @@ func testDataHandler() {
 
 	result = runHandler(calcHandler, calcData, "Field Calculations")
 	printResult("Field calculations", result)
+	printRequestConfigResult(calcData, calcConfig, result)
 
 	// Test data deduplication
 	dupData := map[string]any{
@@ -543,6 +561,7 @@ func testDataHandler() {
 
 	result = runHandler(dedupHandler, dupData, "Data Deduplication")
 	printResult("Data deduplication", result)
+	printRequestConfigResult(dupData, dedupConfig, result)
 
 	// Test type casting
 	castData := map[string]any{
@@ -574,6 +593,7 @@ func testDataHandler() {
 
 	result = runHandler(castHandler, castData, "Type Casting")
 	printResult("Type casting", result)
+	printRequestConfigResult(castData, castConfig, result)
 
 	// Test conditional field setting
 	condData := map[string]any{
@@ -604,6 +624,7 @@ func testDataHandler() {
 
 	result = runHandler(condHandler, condData, "Conditional Field Setting")
 	printResult("Conditional setting", result)
+	printRequestConfigResult(condData, condConfig, result)
 }
 
 // Helper functions
@@ -662,8 +683,36 @@ func printResult(operation string, result map[string]any) {
 	if len(resultStr) > 1000 {
 		resultStr = resultStr[:997] + "..."
 	}
+}
 
-	fmt.Printf("Result:\n%s\n", resultStr)
+func printRequestConfigResult(requestData map[string]any, config dag.Payload, result map[string]any) {
+	fmt.Println("\n=== Request Data ===")
+	requestJSON, err := json.MarshalIndent(requestData, "", "  ")
+	if err != nil {
+		fmt.Printf("Error formatting request data: %v\n", err)
+	} else {
+		fmt.Println(string(requestJSON))
+	}
+
+	fmt.Println("\n=== Configuration ===")
+	configJSON, err := json.MarshalIndent(config.Data, "", "  ")
+	if err != nil {
+		fmt.Printf("Error formatting configuration: %v\n", err)
+	} else {
+		fmt.Println(string(configJSON))
+	}
+
+	fmt.Println("\n=== Result ===")
+	if result == nil {
+		fmt.Println("❌ Operation failed")
+	} else {
+		resultJSON, err := json.MarshalIndent(result, "", "  ")
+		if err != nil {
+			fmt.Printf("Error formatting result: %v\n", err)
+		} else {
+			fmt.Println(string(resultJSON))
+		}
+	}
 }
 
 // Example of chaining handlers in a DAG workflow

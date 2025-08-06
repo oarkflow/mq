@@ -242,6 +242,9 @@ func (h *GroupHandler) compareValues(a, b interface{}) int {
 }
 
 func (h *GroupHandler) getGroupByFields() []string {
+	if fields, ok := h.Payload.Data["group_by"].([]string); ok {
+		return fields
+	}
 	if fields, ok := h.Payload.Data["group_by"].([]interface{}); ok {
 		var result []string
 		for _, field := range fields {
