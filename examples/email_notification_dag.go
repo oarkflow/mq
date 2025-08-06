@@ -71,9 +71,11 @@ func loginDAG() *dag.DAG {
 	flow.AddNode(dag.Page, "Login Form", "LoginForm", renderHTML, true)
 	flow.AddNode(dag.Function, "Validate Login", "ValidateLogin", &ValidateLoginNode{})
 	flow.AddNode(dag.Page, "Error Page", "ErrorPage", &EmailErrorPageNode{})
+	flow.AddNode(dag.Function, "Output", "Output", &handlers.OutputHandler{})
 	flow.AddEdge(dag.Simple, "Validate Login", "LoginForm", "ValidateLogin")
 	flow.AddCondition("ValidateLogin", map[string]string{
 		"invalid": "ErrorPage",
+		"valid":   "Output",
 	})
 	return flow
 }
@@ -87,7 +89,7 @@ func main() {
 	renderHTML.Payload.Data = map[string]any{
 		"schema_file": "schema.json",
 	}
-	flow.AddDAGNode(dag.Page, "CheckLogin", "Login", loginDAG(), true)
+	flow.AddDAGNode(dag.Page, "Check Login", "Login", loginDAG(), true)
 	flow.AddNode(dag.Page, "Contact Form", "ContactForm", renderHTML)
 	flow.AddNode(dag.Function, "Validate Contact Data", "ValidateContact", &ValidateContactNode{})
 	flow.AddNode(dag.Function, "Check User Type", "CheckUserType", &CheckUserTypeNode{})

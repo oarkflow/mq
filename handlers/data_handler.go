@@ -623,6 +623,10 @@ func (h *DataHandler) getSortOrder() string {
 }
 
 func (h *DataHandler) getDedupeFields() []string {
+	// Support both []string and []interface{} for dedupe_fields
+	if fields, ok := h.Payload.Data["dedupe_fields"].([]string); ok {
+		return fields
+	}
 	if fields, ok := h.Payload.Data["dedupe_fields"].([]interface{}); ok {
 		var result []string
 		for _, field := range fields {

@@ -719,6 +719,7 @@ func (tm *DAG) GetReport() string {
 
 func (tm *DAG) AddDAGNode(nodeType NodeType, name string, key string, dag *DAG, firstNode ...bool) *DAG {
 	dag.AssignTopic(key)
+	dag.name += fmt.Sprintf("(%s)", name)
 	tm.nodes.Set(key, &Node{
 		Label:     name,
 		ID:        key,

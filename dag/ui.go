@@ -76,7 +76,7 @@ func (tm *DAG) dfs(v string, visited map[string]bool, discoveryTime, finishedTim
 			}
 		} else if inRecursionStack[edge.To.ID] {
 			cycleMsg := fmt.Sprintf("Cycle detected: %s -> %s\n", v, edge.To.ID)
-			return true, fmt.Errorf(cycleMsg)
+			return true, fmt.Errorf("%s", cycleMsg)
 		}
 	}
 	hasCycle, err = tm.handleConditionalEdges(v, visited, discoveryTime, finishedTime, timeVal, inRecursionStack, builder)
@@ -104,7 +104,7 @@ func (tm *DAG) handleConditionalEdges(v string, visited map[string]bool, discove
 				}
 			} else if inRecursionStack[targetNode.ID] {
 				cycleMsg := fmt.Sprintf("Cycle detected in Conditional Edge [%s]: %s -> %s\n", when, v, targetNode.ID)
-				return true, fmt.Errorf(cycleMsg)
+				return true, fmt.Errorf("%s", cycleMsg)
 			}
 		}
 	}
@@ -139,114 +139,487 @@ func (tm *DAG) saveImage(fileName string, arg string) error {
 	return nil
 }
 
-// Refactored ExportDOT for a modern, enterprise look.
+// ExportDOT generates a clean, professional DOT graph representation
 func (tm *DAG) ExportDOT(direction ...Direction) string {
 	rankDir := TB
 	if len(direction) > 0 && direction[0] != "" {
 		rankDir = direction[0]
 	}
+
 	var sb strings.Builder
-	// Graph properties with a clean background and smooth layout
+
+	// Clean, professional graph styling
 	sb.WriteString(fmt.Sprintf(`digraph "%s" {`, tm.name))
 	sb.WriteString("\n")
-	sb.WriteString(`  graph [layout=dot, splines=polyline, overlap=false, bgcolor="#FAFAFA", fontname="Helvetica", fontsize=12];`)
+	sb.WriteString(`  graph [`)
+	sb.WriteString(`rankdir=` + string(rankDir) + `, `)
+	sb.WriteString(`bgcolor="#F8F9FA", `)
+	sb.WriteString(`fontname="Arial", `)
+	sb.WriteString(`fontsize=14, `)
+	sb.WriteString(`labelloc="t", `)
+	sb.WriteString(`pad=0.5`)
+	sb.WriteString(`];`)
 	sb.WriteString("\n")
-	// Nodes get a sophisticated gradient fill, drop shadow effect simulated via penwidth and color, and rounded borders.
-	sb.WriteString(`  node [shape=box, style="filled,rounded", gradientangle=135, fontname="Helvetica", fontsize=10, penwidth=2, color="#2C3E50", fillcolor="#FFFFFF"];`)
+
+	// Node defaults
+	sb.WriteString(`  node [`)
+	sb.WriteString(`fontname="Arial", `)
+	sb.WriteString(`fontsize=11, `)
+	sb.WriteString(`style="filled,rounded", `)
+	sb.WriteString(`penwidth=2`)
+	sb.WriteString(`];`)
 	sb.WriteString("\n")
-	// Edges with smooth curves and subtle colors.
-	sb.WriteString(`  edge [fontname="Helvetica", fontsize=9, color="#7F8C8D", arrowsize=0.8, style=solid];`)
-	sb.WriteString("\n")
-	sb.WriteString(fmt.Sprintf(`  rankdir=%s;`, rankDir))
-	sb.WriteString("\n")
-	// Render nodes with advanced styling
-	sortedNodes := tm.TopologicalSort()
-	for _, nodeKey := range sortedNodes {
-		node, _ := tm.nodes.Get(nodeKey)
-		renderNode(&sb, node, "  ")
-	}
-	// Render normal edges with enhanced styling.
-	for _, nodeKey := range sortedNodes {
-		node, _ := tm.nodes.Get(nodeKey)
-		renderEdges(&sb, node, "  ")
-	}
-	// Render subgraphs for sub-DAGs with a distinct dashed border.
-	for _, nodeKey := range sortedNodes {
-		node, _ := tm.nodes.Get(nodeKey)
-		if node.processor != nil {
-			if subDAG, ok := isDAGNode(node); ok && subDAG.consumerTopic != "" {
-				prefix := subDAG.name + "_"
-				sb.WriteString(fmt.Sprintf(`  subgraph "cluster_%s" {`+"\n", subDAG.name))
-				sb.WriteString(fmt.Sprintf("    label = \"Sub-DAG: %s\";\n", subDAG.name))
-				sb.WriteString("    style = dashed;\n")
-				sb.WriteString("    color = \"#A6ACAF\";\n")
-				for _, subNodeKey := range subDAG.TopologicalSort() {
-					subNode, _ := subDAG.nodes.Get(subNodeKey)
-					renderNode(&sb, subNode, "    ", prefix)
-				}
-				for _, subNodeKey := range subDAG.TopologicalSort() {
-					subNode, _ := subDAG.nodes.Get(subNodeKey)
-					renderEdges(&sb, subNode, "    ", prefix)
-				}
-				sb.WriteString("  }\n")
-				if startNodeKey := subDAG.TopologicalSort()[0]; startNodeKey != "" {
-					// Connect parent node to sub-DAG start node using correct prefix
-					sb.WriteString(fmt.Sprintf("  \"%s\" -> \"%s%s\" [label=\"Subconnect\", color=\"#16A085\", style=bold, fontsize=10];\n", nodeKey, prefix, startNodeKey))
-				}
-			}
-		}
-	}
-	// Render conditional edges with dotted style.
-	for fromNodeKey, conditions := range tm.conditions {
-		for when, then := range conditions {
-			if toNode, ok := tm.nodes.Get(then); ok {
-				sb.WriteString(fmt.Sprintf("  \"%s\" -> \"%s\" [label=\"%s\", color=\"#8E44AD\", style=dotted, fontsize=9, arrowsize=0.6];\n", fromNodeKey, toNode.ID, when))
-			}
-		}
-	}
+
+	// Edge defaults
+	sb.WriteString(`  edge [`)
+	sb.WriteString(`fontname="Arial", `)
+	sb.WriteString(`fontsize=10, `)
+	sb.WriteString(`arrowsize=0.8`)
+	sb.WriteString(`];`)
+	sb.WriteString("\n\n")
+
+	// Graph title
+	sb.WriteString(fmt.Sprintf(`  label="%s";`, tm.name))
+	sb.WriteString("\n\n")
+
+	// Render the DAG properly
+	tm.renderCleanDAG(&sb, "  ")
+
 	sb.WriteString("}\n")
 	return sb.String()
 }
 
-// Enhanced renderNode with a modern professional style.
-func renderNode(sb *strings.Builder, node *Node, indent string, prefix ...string) {
-	prefixedID := fmt.Sprintf("%s%s", strings.Join(prefix, ""), node.ID)
-	labelSuffix := ""
-	nodeFill := "#F0F3F4" // Default light tone
-	switch node.NodeType {
-	case Function:
-		nodeFill = "#D4EFDF" // soft green
-		labelSuffix = " ƒ(x)"
-	case Page:
-		nodeFill = "#FADBD8" // soft red
-		labelSuffix = " 📄"
-	default:
-		nodeFill = "#F0F3F4"
+// renderCleanDAG renders the DAG with proper sub-DAG integration
+func (tm *DAG) renderCleanDAG(sb *strings.Builder, indent string) {
+	sortedNodes := tm.TopologicalSort()
+
+	// Step 1: Render all main DAG nodes (including sub-DAG representative nodes)
+	sb.WriteString(fmt.Sprintf("%s// Main DAG Nodes\n", indent))
+	for _, nodeID := range sortedNodes {
+		node, _ := tm.nodes.Get(nodeID)
+		tm.renderCleanNode(sb, node, indent)
 	}
-	// Apply gradient simulation and enhanced border styling.
-	sb.WriteString(fmt.Sprintf("%s\"%s\" [label=\"%s%s\", fontcolor=\"#2C3E50\", fillcolor=\"%s\", style=\"filled,rounded\", penwidth=2, gradientangle=135];\n",
-		indent, prefixedID, node.Label, labelSuffix, nodeFill))
+	sb.WriteString("\n")
+
+	// Step 2: Render sub-DAG clusters (internal structure only)
+	sb.WriteString(fmt.Sprintf("%s// Sub-DAG Internal Structures\n", indent))
+	for _, nodeID := range sortedNodes {
+		node, _ := tm.nodes.Get(nodeID)
+		if subDAG, ok := isDAGNode(node); ok && subDAG.consumerTopic != "" {
+			tm.renderSubDAGCluster(sb, nodeID, subDAG, indent)
+		}
+	}
+	sb.WriteString("\n")
+
+	// Step 3: Render all edges (main DAG connections)
+	sb.WriteString(fmt.Sprintf("%s// Main DAG Edges\n", indent))
+	for _, nodeID := range sortedNodes {
+		node, _ := tm.nodes.Get(nodeID)
+		tm.renderCleanEdges(sb, node, indent)
+	}
+	sb.WriteString("\n")
+
+	// Step 4: Render conditional edges
+	sb.WriteString(fmt.Sprintf("%s// Conditional Edges\n", indent))
+	tm.renderCleanConditionalEdges(sb, indent)
 }
 
-// Refined renderEdges with modern aesthetics.
+// renderCleanNode renders a single node with appropriate styling
+func (tm *DAG) renderCleanNode(sb *strings.Builder, node *Node, indent string) {
+	var color, shape, icon string
+
+	// Check if this is a sub-DAG node
+	if subDAG, ok := isDAGNode(node); ok && subDAG.consumerTopic != "" {
+		color = "#E8F6F3"
+		shape = "box"
+		icon = "🔄"
+	} else {
+		switch node.NodeType {
+		case Function:
+			color = "#E8F6F3"
+			shape = "box"
+			icon = "⚙️"
+		case Page:
+			color = "#FEF9E7"
+			shape = "note"
+			icon = "📄"
+		default:
+			color = "#EBF5FB"
+			shape = "ellipse"
+			icon = "🔄"
+		}
+	}
+
+	label := fmt.Sprintf("%s %s", icon, node.Label)
+
+	sb.WriteString(fmt.Sprintf("%s\"%s\" [", indent, node.ID))
+	sb.WriteString(fmt.Sprintf(`label="%s", `, label))
+	sb.WriteString(fmt.Sprintf(`fillcolor="%s", `, color))
+	sb.WriteString(fmt.Sprintf(`shape=%s`, shape))
+	sb.WriteString("];\n")
+}
+
+// renderSubDAGCluster renders the internal structure of a sub-DAG
+func (tm *DAG) renderSubDAGCluster(sb *strings.Builder, parentNodeID string, subDAG *DAG, indent string) {
+	clusterName := fmt.Sprintf("cluster_%s", parentNodeID)
+
+	sb.WriteString(fmt.Sprintf("%ssubgraph \"%s\" {\n", indent, clusterName))
+	sb.WriteString(fmt.Sprintf("%s  label=\"Internal: %s\";\n", indent, subDAG.name))
+	sb.WriteString(fmt.Sprintf("%s  style=\"dashed\";\n", indent))
+	sb.WriteString(fmt.Sprintf("%s  color=\"#3498DB\";\n", indent))
+	sb.WriteString(fmt.Sprintf("%s  fontsize=10;\n", indent))
+	sb.WriteString("\n")
+
+	// Render sub-DAG nodes with prefix
+	subSortedNodes := subDAG.TopologicalSort()
+	for _, subNodeID := range subSortedNodes {
+		subNode, _ := subDAG.nodes.Get(subNodeID)
+		prefixedID := fmt.Sprintf("%s_%s", parentNodeID, subNodeID)
+		tm.renderPrefixedNode(sb, subNode, prefixedID, indent+"  ")
+	}
+
+	// Render sub-DAG edges
+	for _, subNodeID := range subSortedNodes {
+		subNode, _ := subDAG.nodes.Get(subNodeID)
+		tm.renderPrefixedEdges(sb, subNode, parentNodeID, indent+"  ")
+	}
+
+	// Render sub-DAG conditional edges
+	for fromNodeID, conditions := range subDAG.conditions {
+		for condition, toNodeID := range conditions {
+			fromPrefixed := fmt.Sprintf("%s_%s", parentNodeID, fromNodeID)
+			toPrefixed := fmt.Sprintf("%s_%s", parentNodeID, toNodeID)
+			sb.WriteString(fmt.Sprintf("%s\"%s\" -> \"%s\" [", indent+"  ", fromPrefixed, toPrefixed))
+			sb.WriteString(fmt.Sprintf(`label="[%s]", `, condition))
+			sb.WriteString(`color="#8E44AD", `)
+			sb.WriteString(`style=dashed`)
+			sb.WriteString("];\n")
+		}
+	}
+
+	sb.WriteString(fmt.Sprintf("%s}\n", indent))
+	sb.WriteString("\n")
+}
+
+// renderPrefixedNode renders a node with a prefix (for sub-DAG nodes)
+func (tm *DAG) renderPrefixedNode(sb *strings.Builder, node *Node, prefixedID, indent string) {
+	var color, shape, icon string
+
+	switch node.NodeType {
+	case Function:
+		color = "#D5E8D4"
+		shape = "box"
+		icon = "⚙️"
+	case Page:
+		color = "#FFE6CC"
+		shape = "note"
+		icon = "📄"
+	default:
+		color = "#DAE8FC"
+		shape = "ellipse"
+		icon = "🔄"
+	}
+
+	label := fmt.Sprintf("%s %s", icon, node.Label)
+
+	sb.WriteString(fmt.Sprintf("%s\"%s\" [", indent, prefixedID))
+	sb.WriteString(fmt.Sprintf(`label="%s", `, label))
+	sb.WriteString(fmt.Sprintf(`fillcolor="%s", `, color))
+	sb.WriteString(fmt.Sprintf(`shape=%s, `, shape))
+	sb.WriteString(`fontsize=9`)
+	sb.WriteString("];\n")
+}
+
+// renderCleanEdges renders edges for a node
+func (tm *DAG) renderCleanEdges(sb *strings.Builder, node *Node, indent string) {
+	for _, edge := range node.Edges {
+		sb.WriteString(fmt.Sprintf("%s\"%s\" -> \"%s\"", indent, node.ID, edge.To.ID))
+		if edge.Label != "" {
+			sb.WriteString(fmt.Sprintf(` [label="%s"]`, edge.Label))
+		}
+		sb.WriteString(";\n")
+	}
+}
+
+// renderPrefixedEdges renders edges with prefixes (for sub-DAG internal edges)
+func (tm *DAG) renderPrefixedEdges(sb *strings.Builder, node *Node, prefix, indent string) {
+	fromPrefixed := fmt.Sprintf("%s_%s", prefix, node.ID)
+	for _, edge := range node.Edges {
+		toPrefixed := fmt.Sprintf("%s_%s", prefix, edge.To.ID)
+		sb.WriteString(fmt.Sprintf("%s\"%s\" -> \"%s\"", indent, fromPrefixed, toPrefixed))
+		if edge.Label != "" {
+			sb.WriteString(fmt.Sprintf(` [label="%s"]`, edge.Label))
+		}
+		sb.WriteString(";\n")
+	}
+}
+
+// renderCleanConditionalEdges renders conditional edges
+func (tm *DAG) renderCleanConditionalEdges(sb *strings.Builder, indent string) {
+	for fromNodeID, conditions := range tm.conditions {
+		for condition, toNodeID := range conditions {
+			sb.WriteString(fmt.Sprintf("%s\"%s\" -> \"%s\" [", indent, fromNodeID, toNodeID))
+			sb.WriteString(fmt.Sprintf(`label="[%s]", `, condition))
+			sb.WriteString(`color="#8E44AD", `)
+			sb.WriteString(`style=dashed`)
+			sb.WriteString("];\n")
+		}
+	}
+}
+
+// renderComprehensiveDAG provides a complete rendering solution that handles overlapping and connections properly
+func (tm *DAG) renderComprehensiveDAG(sb *strings.Builder, prefix, indent string) {
+	sortedNodes := tm.TopologicalSort()
+
+	// Step 1: Render all regular nodes (not sub-DAGs)
+	sb.WriteString(fmt.Sprintf("%s// === MAIN DAG NODES ===\n", indent))
+	for _, nodeKey := range sortedNodes {
+		node, _ := tm.nodes.Get(nodeKey)
+		if !tm.isSubDAGNode(node) {
+			renderNode(sb, node, indent, prefix)
+		}
+	}
+	sb.WriteString("\n")
+
+	// Step 2: Render sub-DAG clusters AND their representative nodes
+	sb.WriteString(fmt.Sprintf("%s// === SUB-DAG CLUSTERS ===\n", indent))
+	for _, nodeKey := range sortedNodes {
+		node, _ := tm.nodes.Get(nodeKey)
+		if subDAG, ok := isDAGNode(node); ok && subDAG.consumerTopic != "" {
+			tm.renderSubDAGWithRepresentativeNode(sb, nodeKey, node, subDAG, prefix, indent)
+		}
+	}
+	sb.WriteString("\n")
+
+	// Step 3: Render all regular edges (including those connecting to sub-DAGs)
+	sb.WriteString(fmt.Sprintf("%s// === REGULAR EDGES ===\n", indent))
+	for _, nodeKey := range sortedNodes {
+		node, _ := tm.nodes.Get(nodeKey)
+		renderEdges(sb, node, indent, prefix)
+	}
+	sb.WriteString("\n")
+
+	// Step 4: Render all conditional edges
+	sb.WriteString(fmt.Sprintf("%s// === CONDITIONAL EDGES ===\n", indent))
+	tm.renderAllConditionalEdges(sb, prefix, indent, sortedNodes)
+}
+
+// renderAllConditionalEdges renders all conditional edges from main DAG
+func (tm *DAG) renderAllConditionalEdges(sb *strings.Builder, prefix, indent string, sortedNodes []string) {
+	if len(tm.conditions) > 0 {
+		for fromNodeKey, conditions := range tm.conditions {
+			for when, then := range conditions {
+				if toNode, ok := tm.nodes.Get(then); ok {
+					tm.renderConditionalEdge(sb, fromNodeKey, toNode.ID, when, prefix, indent)
+				}
+			}
+		}
+	}
+}
+
+// renderSubDAGWithRepresentativeNode renders both the cluster and a representative node for the sub-DAG
+func (tm *DAG) renderSubDAGWithRepresentativeNode(sb *strings.Builder, nodeKey string, node *Node, subDAG *DAG, prefix, indent string) {
+	subPrefix := fmt.Sprintf("%s%s_", prefix, subDAG.name)
+	clusterName := fmt.Sprintf("%s%s", prefix, subDAG.name)
+
+	// First, render the representative node for the sub-DAG (this is what edges connect to)
+	renderNode(sb, node, indent, prefix)
+
+	// Then render the sub-DAG cluster with internal structure
+	sb.WriteString(fmt.Sprintf("%ssubgraph \"cluster_%s\" {\n", indent, clusterName))
+	sb.WriteString(fmt.Sprintf("%s  // Sub-DAG cluster styling\n", indent))
+	sb.WriteString(fmt.Sprintf("%s  label=\"🔄 Sub-DAG: %s (Internal Structure)\";\n", indent, subDAG.name))
+	sb.WriteString(fmt.Sprintf("%s  style=\"filled,dashed\";\n", indent))
+	sb.WriteString(fmt.Sprintf("%s  fillcolor=\"#F0F8FF\";\n", indent))
+	sb.WriteString(fmt.Sprintf("%s  color=\"#4169E1\";\n", indent))
+	sb.WriteString(fmt.Sprintf("%s  penwidth=2;\n", indent))
+	sb.WriteString(fmt.Sprintf("%s  fontname=\"Arial Bold\";\n", indent))
+	sb.WriteString(fmt.Sprintf("%s  fontsize=12;\n", indent))
+	sb.WriteString(fmt.Sprintf("%s  fontcolor=\"#191970\";\n", indent))
+	sb.WriteString(fmt.Sprintf("%s  margin=15;\n", indent))
+	sb.WriteString("\n")
+
+	// Render sub-DAG internal nodes
+	subSortedNodes := subDAG.TopologicalSort()
+	for _, subNodeKey := range subSortedNodes {
+		subNode, _ := subDAG.nodes.Get(subNodeKey)
+		renderNode(sb, subNode, indent+"  ", subPrefix)
+	}
+
+	// Render sub-DAG internal edges
+	for _, subNodeKey := range subSortedNodes {
+		subNode, _ := subDAG.nodes.Get(subNodeKey)
+		renderEdges(sb, subNode, indent+"  ", subPrefix)
+	}
+
+	// Render sub-DAG internal conditional edges
+	if len(subDAG.conditions) > 0 {
+		for fromNodeKey, conditions := range subDAG.conditions {
+			for when, then := range conditions {
+				if toNode, ok := subDAG.nodes.Get(then); ok {
+					tm.renderConditionalEdge(sb, fromNodeKey, toNode.ID, when, subPrefix, indent+"  ")
+				}
+			}
+		}
+	}
+
+	sb.WriteString(fmt.Sprintf("%s}\n", indent))
+
+	// Add a visual connection from the representative node to the sub-DAG cluster
+	if len(subSortedNodes) > 0 {
+		startNodeKey := subSortedNodes[0]
+		representativeID := fmt.Sprintf("%s%s", prefix, nodeKey)
+		subStartID := fmt.Sprintf("%s%s", subPrefix, startNodeKey)
+
+		sb.WriteString(fmt.Sprintf("%s// Connection to sub-DAG internal structure\n", indent))
+		sb.WriteString(fmt.Sprintf("%s\"%s\" -> \"%s\" [\n", indent, representativeID, subStartID))
+		sb.WriteString(fmt.Sprintf("%s  label=\"📥 Internal Flow\",\n", indent))
+		sb.WriteString(fmt.Sprintf("%s  color=\"#FF6347\",\n", indent))
+		sb.WriteString(fmt.Sprintf("%s  style=\"dashed\",\n", indent))
+		sb.WriteString(fmt.Sprintf("%s  fontsize=10,\n", indent))
+		sb.WriteString(fmt.Sprintf("%s  fontcolor=\"#FF6347\",\n", indent))
+		sb.WriteString(fmt.Sprintf("%s  arrowsize=0.8,\n", indent))
+		sb.WriteString(fmt.Sprintf("%s  penwidth=2,\n", indent))
+		sb.WriteString(fmt.Sprintf("%s  constraint=false\n", indent)) // Don't affect layout
+		sb.WriteString(fmt.Sprintf("%s];\n", indent))
+	}
+}
+
+// isSubDAGNode checks if a node contains a sub-DAG
+func (tm *DAG) isSubDAGNode(node *Node) bool {
+	if node.processor == nil {
+		return false
+	}
+	_, ok := isDAGNode(node)
+	return ok
+}
+
+// renderConditionalEdge renders a single conditional edge with enhanced styling
+func (tm *DAG) renderConditionalEdge(sb *strings.Builder, fromNodeKey, toNodeKey, condition, prefix, indent string) {
+	fromID := fmt.Sprintf("%s%s", prefix, fromNodeKey)
+	toID := fmt.Sprintf("%s%s", prefix, toNodeKey)
+
+	sb.WriteString(fmt.Sprintf("%s\"%s\" -> \"%s\" [\n", indent, fromID, toID))
+	sb.WriteString(fmt.Sprintf("%s  label=\"🔀 [%s]\",\n", indent, condition))
+	sb.WriteString(fmt.Sprintf("%s  color=\"#8E44AD\",\n", indent))
+	sb.WriteString(fmt.Sprintf("%s  style=\"dashed,bold\",\n", indent))
+	sb.WriteString(fmt.Sprintf("%s  fontsize=11,\n", indent))
+	sb.WriteString(fmt.Sprintf("%s  fontcolor=\"#8E44AD\",\n", indent))
+	sb.WriteString(fmt.Sprintf("%s  arrowsize=1.0,\n", indent))
+	sb.WriteString(fmt.Sprintf("%s  penwidth=2.5,\n", indent))
+	sb.WriteString(fmt.Sprintf("%s  constraint=true\n", indent))
+	sb.WriteString(fmt.Sprintf("%s];\n", indent))
+}
+
+// renderNode creates a professional node representation with enhanced styling
+func renderNode(sb *strings.Builder, node *Node, indent string, prefix ...string) {
+	prefixedID := fmt.Sprintf("%s%s", strings.Join(prefix, ""), node.ID)
+
+	// Enhanced node styling based on type
+	var (
+		nodeFill    string
+		borderColor string
+		shape       string
+		icon        string
+		labelStyle  string
+	)
+
+	switch node.NodeType {
+	case Function:
+		nodeFill = "#E8F8F5"    // Light mint green
+		borderColor = "#27AE60" // Green border
+		shape = "box"
+		icon = "⚙️"
+		labelStyle = "bold"
+	case Page:
+		nodeFill = "#FEF9E7"    // Light yellow
+		borderColor = "#F39C12" // Orange border
+		shape = "note"
+		icon = "📄"
+		labelStyle = "bold"
+	default:
+		nodeFill = "#EBF5FB"    // Light blue
+		borderColor = "#3498DB" // Blue border
+		shape = "ellipse"
+		icon = "🔄"
+		labelStyle = "normal"
+	}
+
+	// Create enhanced label with icon and metadata
+	enhancedLabel := fmt.Sprintf("%s %s\\n(%s)", icon, node.Label, node.ID)
+
+	// Apply comprehensive styling with better spacing
+	sb.WriteString(fmt.Sprintf("%s\"%s\" [\n", indent, prefixedID))
+	sb.WriteString(fmt.Sprintf("%s  label=\"%s\",\n", indent, enhancedLabel))
+	sb.WriteString(fmt.Sprintf("%s  shape=%s,\n", indent, shape))
+	sb.WriteString(fmt.Sprintf("%s  style=\"filled,rounded,%s\",\n", indent, labelStyle))
+	sb.WriteString(fmt.Sprintf("%s  fillcolor=\"%s\",\n", indent, nodeFill))
+	sb.WriteString(fmt.Sprintf("%s  color=\"%s\",\n", indent, borderColor))
+	sb.WriteString(fmt.Sprintf("%s  fontcolor=\"#2C3E50\",\n", indent))
+	sb.WriteString(fmt.Sprintf("%s  penwidth=2.5,\n", indent))
+	sb.WriteString(fmt.Sprintf("%s  margin=0.6,\n", indent)) // Increased margin
+	sb.WriteString(fmt.Sprintf("%s  width=2.0,\n", indent))  // Minimum width
+	sb.WriteString(fmt.Sprintf("%s  height=1.0,\n", indent)) // Minimum height
+	sb.WriteString(fmt.Sprintf("%s  tooltip=\"%s: %s\"\n", indent, node.NodeType, node.Label))
+	sb.WriteString(fmt.Sprintf("%s];\n", indent))
+}
+
+// renderEdges creates professional edge representations with enhanced styling
 func renderEdges(sb *strings.Builder, node *Node, indent string, prefix ...string) {
 	prefixedID := fmt.Sprintf("%s%s", strings.Join(prefix, ""), node.ID)
-	for _, edge := range node.Edges {
-		edgeStyle := "solid"
-		edgeColor := "#7F8C8D"
-		labelSuffix := ""
+
+	for i, edge := range node.Edges {
+		var (
+			edgeStyle string
+			edgeColor string
+			penWidth  string
+			arrowSize string
+			edgeIcon  string
+		)
+
 		switch edge.Type {
 		case Iterator:
 			edgeStyle = "dashed"
 			edgeColor = "#5DADE2"
-			labelSuffix = " [Iter]"
+			penWidth = "2.0"
+			arrowSize = "1.0"
+			edgeIcon = "🔄"
 		case Simple:
 			edgeStyle = "solid"
 			edgeColor = "#7F8C8D"
+			penWidth = "1.8"
+			arrowSize = "0.9"
+			edgeIcon = "→"
+		default:
+			edgeStyle = "solid"
+			edgeColor = "#95A5A6"
+			penWidth = "1.5"
+			arrowSize = "0.8"
+			edgeIcon = "•"
 		}
+
 		toPrefixedID := fmt.Sprintf("%s%s", strings.Join(prefix, ""), edge.To.ID)
-		sb.WriteString(fmt.Sprintf("%s\"%s\" -> \"%s\" [label=\"%s%s\", color=\"%s\", style=\"%s\", penwidth=1];\n",
-			indent, prefixedID, toPrefixedID, edge.Label, labelSuffix, edgeColor, edgeStyle))
+
+		// Create enhanced edge label
+		edgeLabel := edge.Label
+		if edgeLabel == "" {
+			edgeLabel = fmt.Sprintf("Step %d", i+1)
+		}
+		enhancedLabel := fmt.Sprintf("%s %s", edgeIcon, edgeLabel)
+
+		sb.WriteString(fmt.Sprintf("%s\"%s\" -> \"%s\" [\n", indent, prefixedID, toPrefixedID))
+		sb.WriteString(fmt.Sprintf("%s  label=\"%s\",\n", indent, enhancedLabel))
+		sb.WriteString(fmt.Sprintf("%s  style=\"%s\",\n", indent, edgeStyle))
+		sb.WriteString(fmt.Sprintf("%s  color=\"%s\",\n", indent, edgeColor))
+		sb.WriteString(fmt.Sprintf("%s  penwidth=%s,\n", indent, penWidth))
+		sb.WriteString(fmt.Sprintf("%s  arrowsize=%s,\n", indent, arrowSize))
+		sb.WriteString(fmt.Sprintf("%s  fontcolor=\"%s\",\n", indent, edgeColor))
+		sb.WriteString(fmt.Sprintf("%s  fontsize=11,\n", indent))
+		sb.WriteString(fmt.Sprintf("%s  labeldistance=1.5,\n", indent)) // Better label positioning
+		sb.WriteString(fmt.Sprintf("%s  labelangle=0,\n", indent))      // Keep labels horizontal
+		sb.WriteString(fmt.Sprintf("%s  minlen=2,\n", indent))          // Minimum length for spacing
+		sb.WriteString(fmt.Sprintf("%s  tooltip=\"%s -> %s: %s\"\n", indent, node.Label, edge.To.Label, edgeLabel))
+		sb.WriteString(fmt.Sprintf("%s];\n", indent))
 	}
 }
 
@@ -268,7 +641,7 @@ func (tm *DAG) topologicalSortUtil(v string, visited map[string]bool, stack *[]s
 	visited[v] = true
 	node, ok := tm.nodes.Get(v)
 	if !ok {
-		fmt.Println("Not found", v)
+		fmt.Println("Not found", v, tm.key)
 	}
 	for _, edge := range node.Edges {
 		if !visited[edge.To.ID] {
