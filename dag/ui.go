@@ -175,21 +175,23 @@ func (tm *DAG) ExportDOT(direction ...Direction) string {
 		node, _ := tm.nodes.Get(nodeKey)
 		if node.processor != nil {
 			if subDAG, ok := isDAGNode(node); ok && subDAG.consumerTopic != "" {
-				sb.WriteString(fmt.Sprintf("  subgraph cluster_%s {\n", subDAG.name))
+				prefix := subDAG.name + "_"
+				sb.WriteString(fmt.Sprintf(`  subgraph "cluster_%s" {`+"\n", subDAG.name))
 				sb.WriteString(fmt.Sprintf("    label = \"Sub-DAG: %s\";\n", subDAG.name))
 				sb.WriteString("    style = dashed;\n")
 				sb.WriteString("    color = \"#A6ACAF\";\n")
 				for _, subNodeKey := range subDAG.TopologicalSort() {
 					subNode, _ := subDAG.nodes.Get(subNodeKey)
-					renderNode(&sb, subNode, "    ", subDAG.name+"_")
+					renderNode(&sb, subNode, "    ", prefix)
 				}
 				for _, subNodeKey := range subDAG.TopologicalSort() {
 					subNode, _ := subDAG.nodes.Get(subNodeKey)
-					renderEdges(&sb, subNode, "    ", subDAG.name+"_")
+					renderEdges(&sb, subNode, "    ", prefix)
 				}
 				sb.WriteString("  }\n")
 				if startNodeKey := subDAG.TopologicalSort()[0]; startNodeKey != "" {
-					sb.WriteString(fmt.Sprintf("  \"%s\" -> \"%s%s\" [label=\"Subconnect\", color=\"#16A085\", style=bold, fontsize=10];\n", nodeKey, subDAG.name+"_", startNodeKey))
+					// Connect parent node to sub-DAG start node using correct prefix
+					sb.WriteString(fmt.Sprintf("  \"%s\" -> \"%s%s\" [label=\"Subconnect\", color=\"#16A085\", style=bold, fontsize=10];\n", nodeKey, prefix, startNodeKey))
 				}
 			}
 		}
