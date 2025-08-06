@@ -142,108 +142,86 @@ func (tm *DAG) saveImage(fileName string, arg string) error {
 	return nil
 }
 
-// ExportDOT generates a clean, compact DOT graph with proper spacing
+// ExportDOT generates a DOT graph with orthogonal edges for straight arrows
 func (tm *DAG) ExportDOT(direction ...Direction) string {
 	rankDir := TB
 	if len(direction) > 0 && direction[0] != "" {
 		rankDir = direction[0]
 	}
-
 	var sb strings.Builder
 
-	// Compact graph with proper spacing
-	sb.WriteString(fmt.Sprintf(`digraph "%s" {`, tm.name))
-	sb.WriteString("\n")
+	// Graph header and global attributes
+	sb.WriteString(fmt.Sprintf("digraph \"%s\" {\n", tm.name))
+	sb.WriteString("  graph [")
+	sb.WriteString("rankdir=" + string(rankDir) + ", ")
+	sb.WriteString("bgcolor=\"white\", ")
+	sb.WriteString("pad=\"0.2\", ")
+	sb.WriteString("nodesep=\"0.5\", ")
+	sb.WriteString("ranksep=\"0.75\", ")
+	sb.WriteString("splines=\"ortho\", ") // orthogonal straight segments
+	sb.WriteString("overlap=\"false\", ")
+	sb.WriteString("sep=\"+0.2\" ")
+	sb.WriteString("];\n")
 
-	// Optimized graph attributes for compact, clean layout
-	sb.WriteString(`  graph [`)
-	sb.WriteString(`rankdir=` + string(rankDir) + `, `)
-	sb.WriteString(`bgcolor="white", `)
-	sb.WriteString(`pad="0.2", `)
-	sb.WriteString(`nodesep="0.3", `)
-	sb.WriteString(`ranksep="0.5", `)
-	sb.WriteString(`splines="ortho", `)
-	sb.WriteString(`concentrate="true", `)
-	sb.WriteString(`overlap="false", `)
-	sb.WriteString(`packmode="graph"`)
-	sb.WriteString(`];`)
-	sb.WriteString("\n")
+	// Node styling
+	sb.WriteString("  node [")
+	sb.WriteString("fontname=\"Arial\", ")
+	sb.WriteString("fontsize=10, ")
+	sb.WriteString("style=\"filled,rounded\", ")
+	sb.WriteString("penwidth=1, ")
+	sb.WriteString("margin=\"0.1,0.05\", ")
+	sb.WriteString("width=0, height=0, fixedsize=false")
+	sb.WriteString("];\n")
 
-	// Compact node styling
-	sb.WriteString(`  node [`)
-	sb.WriteString(`fontname="Arial", `)
-	sb.WriteString(`fontsize=10, `)
-	sb.WriteString(`style="filled,rounded", `)
-	sb.WriteString(`penwidth=1, `)
-	sb.WriteString(`margin="0.1,0.05", `)
-	sb.WriteString(`width="0", `)
-	sb.WriteString(`height="0", `)
-	sb.WriteString(`fixedsize="false"`)
-	sb.WriteString(`];`)
-	sb.WriteString("\n")
+	// Edge styling
+	sb.WriteString("  edge [")
+	sb.WriteString("fontname=\"Arial\", ")
+	sb.WriteString("fontsize=8, ")
+	sb.WriteString("color=\"#666666\", ")
+	sb.WriteString("penwidth=1.5, ")
+	sb.WriteString("arrowsize=0.7, ")
+	sb.WriteString("minlen=1")
+	sb.WriteString("];\n\n")
 
-	// Clean edge styling
-	sb.WriteString(`  edge [`)
-	sb.WriteString(`fontname="Arial", `)
-	sb.WriteString(`fontsize=8, `)
-	sb.WriteString(`color="#666666", `)
-	sb.WriteString(`penwidth=1.5, `)
-	sb.WriteString(`arrowsize=0.7`)
-	sb.WriteString(`];`)
-	sb.WriteString("\n\n")
-
-	// Render the DAG with compact styling
+	// Render all nodes and edges
 	tm.renderCompactDAG(&sb, "  ")
-
 	sb.WriteString("}\n")
 	return sb.String()
 }
 
-// renderCompactDAG renders the DAG with clean, compact styling
+// renderCompactDAG is responsible for outputting nodes, clusters, and edges
 func (tm *DAG) renderCompactDAG(sb *strings.Builder, indent string) {
-	sortedNodes := tm.TopologicalSort()
+	sorted := tm.TopologicalSort()
 
-	// Render nodes with compact styling
-	for _, nodeID := range sortedNodes {
-		node, exists := tm.nodes.Get(nodeID)
-		if !exists {
+	// Nodes
+	for _, id := range sorted {
+		node, ok := tm.nodes.Get(id)
+		if !ok || tm.isSubDAGNode(node) {
 			continue
 		}
-		if !tm.isSubDAGNode(node) {
-			tm.renderCompactNode(sb, node, indent)
-		}
+		tm.renderCompactNode(sb, node, indent)
 	}
-	sb.WriteString("\n")
 
-	// Render sub-DAG clusters if any
-	hasSubDAGs := false
-	for _, nodeID := range sortedNodes {
-		node, exists := tm.nodes.Get(nodeID)
-		if !exists {
-			continue
-		}
-		if subDAG, ok := isDAGNode(node); ok && subDAG.consumerTopic != "" {
-			if !hasSubDAGs {
-				sb.WriteString(fmt.Sprintf("%s// Sub-workflows\n", indent))
-				hasSubDAGs = true
+	// Sub-DAG clusters
+	hasSub := false
+	for _, id := range sorted {
+		node, _ := tm.nodes.Get(id)
+		if sub, ok := isDAGNode(node); ok && sub.consumerTopic != "" {
+			if !hasSub {
+				sb.WriteString(indent + "// Sub-workflows\n")
+				hasSub = true
 			}
-			tm.renderCompactSubDAGCluster(sb, nodeID, subDAG, indent)
+			tm.renderCompactSubDAGCluster(sb, id, sub, indent)
 		}
-	}
-	if hasSubDAGs {
-		sb.WriteString("\n")
 	}
 
-	// Render regular edges
-	for _, nodeID := range sortedNodes {
-		node, exists := tm.nodes.Get(nodeID)
-		if !exists {
-			continue
-		}
+	// Edges
+	for _, id := range sorted {
+		node, _ := tm.nodes.Get(id)
 		tm.renderCompactEdges(sb, node, indent)
 	}
 
-	// Render conditional edges if any
+	// Conditional edges
 	if len(tm.conditions) > 0 {
 		sb.WriteString("\n")
 		tm.renderCompactConditionalEdges(sb, indent)
