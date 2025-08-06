@@ -141,6 +141,7 @@ func testSplitJoinHandler() {
 	splitHandler := handlers.NewSplitHandler("split-test")
 	splitConfig := dag.Payload{
 		Data: map[string]any{
+			"operation": "split",
 			"fields":    []string{"full_name", "skills"},
 			"separator": " ",
 		},
@@ -155,6 +156,7 @@ func testSplitJoinHandler() {
 	splitHandler2 := handlers.NewSplitHandler("split-test-2")
 	splitConfig2 := dag.Payload{
 		Data: map[string]any{
+			"operation": "split",
 			"fields":    []string{"tags"},
 			"separator": ",",
 		},
@@ -176,6 +178,7 @@ func testSplitJoinHandler() {
 	joinHandler := handlers.NewJoinHandler("join-test")
 	joinConfig := dag.Payload{
 		Data: map[string]any{
+			"operation":     "join",
 			"source_fields": []string{"title", "first_name", "middle_name", "last_name"},
 			"target_field":  "full_name_with_title",
 			"separator":     " ",
@@ -186,6 +189,18 @@ func testSplitJoinHandler() {
 	result = runHandler(joinHandler, joinData, "Join Operation")
 	printResult("String joining", result)
 	printRequestConfigResult(joinData, joinConfig, result)
+
+	fmt.Printf("Split Test Data: %+v\n", testData)
+	fmt.Printf("Split Config: %+v\n", splitConfig.Data)
+	fmt.Printf("Split Result: %+v\n", result)
+
+	fmt.Printf("Split Test Data (comma): %+v\n", testData)
+	fmt.Printf("Split Config (comma): %+v\n", splitConfig2.Data)
+	fmt.Printf("Split Result (comma): %+v\n", result)
+
+	fmt.Printf("Join Test Data: %+v\n", joinData)
+	fmt.Printf("Join Config: %+v\n", joinConfig.Data)
+	fmt.Printf("Join Result: %+v\n", result)
 }
 
 func testFlattenHandler() {

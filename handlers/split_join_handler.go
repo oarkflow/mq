@@ -49,14 +49,16 @@ func (h *SplitHandler) splitOperation(data map[string]any) map[string]any {
 	result := make(map[string]any)
 	fields := h.getTargetFields()
 	separator := h.getSeparator()
+	targetField := h.getTargetField()
 
-	fmt.Printf("Split Operation: Fields=%v, Separator='%s'\n", fields, separator)
+	fmt.Printf("Split Operation: Fields=%v, Separator='%s', TargetField='%s'\n", fields, separator, targetField)
 
 	// Copy all original data
 	for key, value := range data {
 		result[key] = value
 	}
 
+	var allParts []string
 	for _, field := range fields {
 		if val, ok := data[field]; ok {
 			if str, ok := val.(string); ok {
@@ -67,14 +69,14 @@ func (h *SplitHandler) splitOperation(data map[string]any) map[string]any {
 				// Create individual fields for each part
 				for i, part := range parts {
 					result[fmt.Sprintf("%s_%d", field, i)] = strings.TrimSpace(part)
+					allParts = append(allParts, strings.TrimSpace(part))
 				}
-
-				// Also store as array
-				result[field+"_parts"] = parts
-				result[field+"_count"] = len(parts)
 			}
 		}
 	}
+
+	// Store all parts in the target field
+	result[targetField] = allParts
 
 	return result
 }
@@ -119,6 +121,13 @@ func (h *SplitHandler) getTargetFields() []string {
 		return result
 	}
 	return nil
+}
+
+func (h *SplitHandler) getTargetField() string {
+	if field, ok := h.Payload.Data["target_field"].(string); ok {
+		return field
+	}
+	return "split_result" // Default target field
 }
 
 func (h *SplitHandler) getSeparator() string {
@@ -239,6 +248,9 @@ func (h *JoinHandler) getSourceField() string {
 }
 
 func (h *JoinHandler) getSourceFields() []string {
+	if fields, ok := h.Payload.Data["source_fields"].([]string); ok {
+		return fields
+	}
 	if fields, ok := h.Payload.Data["source_fields"].([]interface{}); ok {
 		var result []string
 		for _, field := range fields {
