@@ -40,8 +40,8 @@ github.com/oarkflow/form v0.0.0-20241203111156-b1be5636af43 h1:AjNCAnpzDi6BYVUfX
 github.com/oarkflow/form v0.0.0-20241203111156-b1be5636af43/go.mod h1:fYwqhq8Sig9y0cmgO6q6WN8SP/rrsi7h2Yyk+Ufrne8=
 github.com/oarkflow/jet v0.0.4 h1:rs0nTzodye/9zhrSX7FlR80Gjaty6ei2Ln0pmaUrdwg=
 github.com/oarkflow/jet v0.0.4/go.mod h1:YXIc47aYyx1xKpnmuz1Z9o88cxxa47r7X3lfUAxZ0Qg=
-github.com/oarkflow/json v0.0.21 h1:tBx4ufwC48UAd3fUCqLVH/dERpnZ85Dgw5/h7H2HMoM=
-github.com/oarkflow/json v0.0.21/go.mod h1:maoLmQZJ/8pF1MugtpVqzHJ59dH1Z7xFSNkhl9BQjYo=
+github.com/oarkflow/json v0.0.28 h1:pCt7yezRDJeSdSu2OZ6Aai0F4J9qCwmPWRsCmfaH8Ds=
+github.com/oarkflow/json v0.0.28/go.mod h1:E6Mg4LoY1PHCntfAegZmECc6Ux24sBpXJAu2lwZUe74=
 github.com/oarkflow/jsonschema v0.0.4 h1:n5Sb7WVb7NNQzn/ei9++4VPqKXCPJhhsHeTGJkIuwmM=
 github.com/oarkflow/jsonschema v0.0.4/go.mod h1:AxNG3Nk7KZxnnjRJlHLmS1wE9brtARu5caTFuicCtnA=
 github.com/oarkflow/log v1.0.79 h1:DxhtkBGG+pUu6cudSVw5g75FbKEQJkij5w7n5AEN00M=

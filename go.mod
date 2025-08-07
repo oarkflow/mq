@@ -11,7 +11,7 @@ require (
 	github.com/oarkflow/expr v0.0.11
 	github.com/oarkflow/form v0.0.0-20241203111156-b1be5636af43
 	github.com/oarkflow/jet v0.0.4
-	github.com/oarkflow/json v0.0.21
+	github.com/oarkflow/json v0.0.28
 	github.com/oarkflow/log v1.0.79
 	github.com/oarkflow/xid v1.2.8
 	golang.org/x/crypto v0.33.0

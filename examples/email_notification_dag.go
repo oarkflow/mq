@@ -66,7 +66,8 @@ func loginDAG() *dag.DAG {
 	}, mq.WithSyncMode(true), mq.WithLogger(nil))
 	renderHTML := handlers.NewRenderHTMLNode("render-html")
 	renderHTML.Payload.Data = map[string]any{
-		"schema_file": "login.json",
+		"schema_file":   "login.json",
+		"template_file": "app/templates/basic.html",
 	}
 	flow.AddNode(dag.Page, "Login Form", "LoginForm", renderHTML, true)
 	flow.AddNode(dag.Function, "Validate Login", "ValidateLogin", &ValidateLoginNode{})
@@ -87,7 +88,8 @@ func main() {
 
 	renderHTML := handlers.NewRenderHTMLNode("render-html")
 	renderHTML.Payload.Data = map[string]any{
-		"schema_file": "schema.json",
+		"schema_file":   "schema.json",
+		"template_file": "app/templates/basic.html",
 	}
 	flow.AddDAGNode(dag.Page, "Check Login", "Login", loginDAG(), true)
 	flow.AddNode(dag.Page, "Contact Form", "ContactForm", renderHTML)
