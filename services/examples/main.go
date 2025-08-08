@@ -18,7 +18,7 @@ func main() {
 	serverAddr := ":3000"
 	loader := services.NewLoader("config")
 	loader.Load()
-	serverApp := fiber.New()
+	serverApp := fiber.New(fiber.Config{EnablePrintRoutes: true})
 	services.Setup(loader, serverApp, brokerAddr)
 	cli.Run("mq", "0.0.1", func(client contracts.Cli) []contracts.Command {
 		return []contracts.Command{
