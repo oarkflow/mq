@@ -14,6 +14,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+var userConfig *UserConfig
+
 type Loader struct {
 	path       string
 	configFile string
@@ -43,6 +45,7 @@ func (l *Loader) Load() {
 		panic(err)
 	}
 	l.UserConfig = cfg
+	userConfig = cfg // Set the global userConfig variable
 }
 
 func (l *Loader) prepareConfigPath() string {

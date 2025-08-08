@@ -1,14 +1,32 @@
 package services
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
 
+	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/basicauth"
+	"github.com/gofiber/fiber/v2/middleware/cors"
+	"github.com/gofiber/fiber/v2/middleware/limiter"
 	"github.com/oarkflow/filters"
+	"github.com/oarkflow/json"
+	v2 "github.com/oarkflow/jsonschema"
 	"github.com/oarkflow/log"
 	"github.com/oarkflow/mq"
+	"github.com/oarkflow/mq/consts"
 	"github.com/oarkflow/mq/dag"
+	"github.com/oarkflow/mq/services/http/responses"
+	"github.com/oarkflow/mq/services/middlewares"
+	"github.com/oarkflow/mq/services/utils"
+	"github.com/oarkflow/protocol/utils/str"
 )
+
+var ValidationInstance Validation
 
 func SetupHandler(handler Handler, brokerAddr string, async ...bool) *dag.DAG {
 	syncMode := true
@@ -115,4 +133,412 @@ func mapProviders(dataProviders interface{}) []dag.Provider {
 		log.Warn().Err(err).Msg("Unable to map providers")
 	}
 	return providers
+}
+
+func SetupServices(prefix string, router fiber.Router, brokerAddr string) {
+	if router == nil {
+		return
+	}
+	SetupAPI(prefix, router, brokerAddr)
+}
+
+func SetupAPI(prefix string, router fiber.Router, brokerAddr string) {
+	if prefix != "" {
+		prefix = "/" + prefix
+	}
+	api := router.Group(prefix)
+	for _, configRoute := range userConfig.Policy.Web.Apis {
+		routeGroup := api.Group(configRoute.Prefix)
+		mws := setupMiddlewares(configRoute.Middlewares)
+		if len(mws) > 0 {
+			routeGroup.Use(mws...)
+		}
+		for _, route := range configRoute.Routes {
+			switch route.Operation {
+			case "custom":
+				flow := setupFlow(route, routeGroup, brokerAddr)
+				routeMiddlewares := setupMiddlewares(route.Middlewares)
+				if len(routeMiddlewares) > 0 {
+					routeGroup.Use(routeMiddlewares...)
+				}
+				routeGroup.Add("GET", CleanAndMergePaths(route.Uri, "/metadata"), func(ctx *fiber.Ctx) error {
+					return getDAGPage(ctx, flow, route.Handler)
+				})
+				routeGroup.Add(strings.ToUpper(route.Method), route.Uri,
+					requestMiddleware(CleanAndMergePaths(prefix, configRoute.Prefix), route),
+					ruleMiddleware(route.Rules),
+					customRuleMiddleware(route, route.CustomRules),
+					customHandler(flow),
+				)
+			}
+		}
+	}
+}
+
+// GetRulesFromKeys returns the custom rules from the provided keys.
+// It is used by the CustomRuleMiddleware to get the custom rules from the provided keys.
+func GetRulesFromKeys(ruleKeys []string) (rulesArray []*filters.RuleRequest) {
+	for _, ruleKey := range ruleKeys {
+		appRules := userConfig.GetApplicationRule(ruleKey)
+		if appRules == nil {
+			panic(fmt.Sprintf("Rule %v not found", ruleKey))
+		}
+		if appRules.Rule != nil {
+			rulesArray = append(rulesArray, appRules.Rule)
+		}
+	}
+	return
+}
+
+// customRuleMiddleware validates the request body with the provided custom rules.
+// It is passed after the ruleMiddleware to validate the request body with the custom rules.
+func customRuleMiddleware(route *Route, ruleKeys []string) fiber.Handler {
+	rules := GetRulesFromKeys(ruleKeys)
+	return func(ctx *fiber.Ctx) error {
+		c, requestData, err := getLessRequestData(ctx, route)
+		ctx.SetUserContext(c)
+		if err != nil {
+			return responses.Abort(ctx, 400, "invalid request", err.Error())
+		}
+		if len(requestData) > 0 {
+			header, ok := ctx.Context().Value("header").(map[string]any)
+			if ok {
+				requestData["header"] = header
+			}
+			data := map[string]any{
+				"data": requestData,
+			}
+			for _, r := range rules {
+				_, err := r.Validate(data)
+				if err != nil {
+					var errResponse *filters.ErrorResponse
+					errors.As(err, &errResponse)
+					if slices.Contains([]string{"DENY", "DENY_WITH_WARNING"}, errResponse.ErrorAction) {
+						return responses.Abort(ctx, 400, "Invalid data for the request", err.Error())
+					} else {
+						ctx.Set("error_msg", errResponse.ErrorMsg)
+					}
+				}
+			}
+		}
+		return ctx.Next()
+	}
+}
+
+// getLessRequestData returns request data with param, query, body, enums, consts except
+// restricted_field, scopes and queues
+func getLessRequestData(ctx *fiber.Ctx, route *Route) (context.Context, map[string]any, error) {
+	request, header, err := prepareHeader(ctx, route)
+	if header != nil {
+		header["route_model"] = route.Model
+	}
+	ctx.Set("route_model", route.Model)
+	if err != nil {
+		return ctx.UserContext(), nil, err
+	}
+	c := context.WithValue(ctx.UserContext(), "header", header)
+	return c, request, nil
+}
+
+func prepareHeader(ctx *fiber.Ctx, route *Route) (map[string]any, map[string]any, error) {
+	var request map[string]any
+	bodyRaw := ctx.BodyRaw()
+	if str.FromByte(bodyRaw) != "" {
+		err := json.Unmarshal(bodyRaw, &request)
+		if err != nil {
+			form, err := ctx.MultipartForm()
+			if err == nil || form != nil {
+				return nil, nil, errors.New("invalid json request")
+			}
+		}
+	}
+	if request == nil {
+		request = make(map[string]any)
+	}
+	requiredBody := make(map[string]bool)
+	header := make(map[string]any)
+	param := make(map[string]any)
+	query := make(map[string]any)
+	if route.Schema != nil {
+		schema := route.GetSchema()
+		if schema != nil {
+			if schema.Properties != nil {
+				for key, property := range *schema.Properties {
+					if property.In != nil {
+						for _, in := range property.In {
+							switch in {
+							case "param":
+								param[key] = ctx.Params(key)
+							case "query":
+								query[key] = ctx.Query(key)
+							case "body":
+								requiredBody[key] = true
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	header["param"] = param
+	header["query"] = query
+	header["route_model"] = route.Model
+	ctx.Set("route_model", route.Model)
+	for k := range requiredBody {
+		if _, ok := request[k]; !ok {
+			delete(request, k)
+		}
+	}
+	header["request_id"] = ctx.Get("X-Schema-Id")
+	// add consts and enums to request
+	header["consts"] = userConfig.Core.Consts
+	header["enums"] = userConfig.Core.Enums
+	return request, header, nil
+}
+
+func customHandler(flow *dag.DAG) fiber.Handler {
+	return func(ctx *fiber.Ctx) error {
+		result := flow.Process(ctx.UserContext(), ctx.BodyRaw())
+		if result.Error != nil {
+			return result.Error
+		}
+		contentType := result.Ctx.Value(consts.ContentType)
+		if contentType == nil {
+			return ctx.JSON(result)
+		}
+		if contentType == fiber.MIMEApplicationJSON || contentType == fiber.MIMEApplicationJSONCharsetUTF8 {
+			return ctx.JSON(result)
+		}
+		ctx.Set(consts.ContentType, contentType.(string))
+		return ctx.Send(result.Payload)
+	}
+}
+
+func getDAGPage(ctx *fiber.Ctx, flow *dag.DAG, handler Handler) error {
+	// Save the SVG to a temporary file
+	image := fmt.Sprintf("%s.svg", mq.NewID())
+	if err := flow.SaveSVG(image); err != nil {
+		return err
+	}
+	// Ensure the file is removed after reading its content
+	defer func() {
+		_ = os.Remove(image)
+	}()
+
+	// Read the SVG file bytes
+	svgBytes, err := os.ReadFile(image)
+	if err != nil {
+		return err
+	}
+
+	// Marshal the handler details into pretty printed JSON
+	handlerData, err := json.MarshalIndent(handler, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	// Build an HTML page with a two-column layout:
+	// Left column: SVG, Right column: Handler details (displayed as preformatted text)
+	html := fmt.Sprintf(`<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <title>DAG Visualization and Handler Details</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 20px;
+        background: #f4f4f4;
+      }
+      .header {
+        text-align: center;
+        margin-bottom: 20px;
+      }
+      .container {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 20px;
+      }
+      .column {
+        flex: 1;
+        min-width: 300px;
+        background: #fff;
+        padding: 15px;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      }
+      .svg-container {
+        text-align: center;
+      }
+      h1, h2 {
+        color: #333;
+      }
+      pre {
+        background: #f7f7f7;
+        padding: 10px;
+        border-radius: 4px;
+        overflow-x: auto;
+      }
+      a {
+        color: #007BFF;
+        text-decoration: none;
+      }
+      a:hover {
+        text-decoration: underline;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="header">
+      <h1>DAG Visualization and Handler Details</h1>
+      <p>URI: <a href="%s">%s</a></p>
+    </div>
+    <div class="container">
+      <div class="column">
+        <div class="svg-container">
+          %s
+        </div>
+      </div>
+      <div class="column">
+        <h2>Handler Details</h2>
+        <pre>%s</pre>
+      </div>
+    </div>
+  </body>
+</html>`, flow.BaseURI(), flow.BaseURI(), svgBytes, string(handlerData))
+
+	// Set the content type as HTML and send the response
+	ctx.Set("Content-Type", "text/html")
+	return ctx.SendString(html)
+}
+
+// ruleMiddleware validates the request body with the provided rules.
+// It is passed after the requestMiddleware to ensure that the request body is valid.
+func ruleMiddleware(rules map[string]string) fiber.Handler {
+	return func(ctx *fiber.Ctx) error {
+		body := ctx.Body()
+		if len(body) == 0 {
+			return ctx.Next()
+		}
+		var requestData map[string]any
+		err := ctx.BodyParser(&requestData)
+		if err != nil && body != nil {
+			return responses.Abort(ctx, 400, "Invalid request bind", nil)
+		}
+		if len(rules) > 0 && ValidationInstance != nil {
+			validator, err := ValidationInstance.Make(ctx, requestData, rules)
+			if err != nil {
+				return responses.Abort(ctx, 400, "Validation Error", err.Error())
+			}
+			if validator.Fails() {
+				return responses.Abort(ctx, 400, "Validation Error", validator.Errors().All())
+			}
+		}
+		return ctx.Next()
+	}
+}
+
+// requestMiddleware validates the request body in the original form of byte array
+// against the provided request JSON schema to ensure that the request body is valid.
+func requestMiddleware(prefix string, route *Route) fiber.Handler {
+	path := CleanAndMergePaths(prefix, route.Uri)
+	var schema *v2.Schema
+	var err error
+	if route.Schema != nil {
+		schema, err = utils.CompileSchema(path, strings.ToUpper(route.Method), route.Schema)
+		if err != nil {
+			panic(err)
+		}
+		route.SetSchema(schema)
+	}
+	return func(ctx *fiber.Ctx) error {
+		if route.Schema == nil {
+			return ctx.Next()
+		}
+		requestSchema := ctx.Query("request-schema")
+		if requestSchema != "" {
+			return ctx.JSON(fiber.Map{
+				"success": true,
+				"code":    200,
+				"data": fiber.Map{
+					"schema": schema,
+					"rules":  route.Rules,
+				},
+			})
+		}
+		for _, r := range userConfig.Policy.Models {
+			if r.Name == route.Model {
+				db := r.Database
+				source := route.Model
+				ctx.Locals("database_connection", db)
+				ctx.Locals("database_source", source)
+				break
+			}
+		}
+		form, _ := ctx.MultipartForm()
+		if form != nil {
+			return ctx.Next()
+		}
+		return middlewares.ValidateRequestBySchema(ctx)
+	}
+}
+
+func setupMiddlewares(middlewares []Middleware) (mid []any) {
+	for _, middleware := range middlewares {
+		switch middleware.Name {
+		case "cors":
+			mid = append(mid, cors.New(cors.Config{ExposeHeaders: "frame-session"}))
+		case "basic-auth":
+			options := struct {
+				Users map[string]string `json:"users"`
+			}{}
+			err := json.Unmarshal(middleware.Options, &options)
+			if err != nil {
+				panic(err)
+			}
+			mid = append(mid, basicauth.New(basicauth.Config{Users: options.Users}))
+		case "rate-limit":
+			options := struct {
+				Max        int    `json:"max"`
+				Expiration string `json:"expiration"`
+			}{}
+			err := json.Unmarshal(middleware.Options, &options)
+			if err != nil {
+				panic(err)
+			}
+
+			expiration, err := utils.ParseDuration(options.Expiration)
+			if err != nil {
+				panic(err)
+			}
+			throttle := limiter.New(limiter.Config{Max: options.Max, Expiration: expiration})
+			mid = append(mid, throttle)
+		}
+	}
+	return
+}
+
+func setupFlow(route *Route, group fiber.Router, brokerAddr string) *dag.DAG {
+	if route.Handler.Key == "" && route.HandlerKey != "" {
+		handler := userConfig.GetHandler(route.HandlerKey)
+		if handler == nil {
+			panic(fmt.Sprintf("Handler not found %s", route.HandlerKey))
+		}
+		route.Handler = *handler
+	}
+	flow := SetupHandler(route.Handler, brokerAddr)
+	if flow.Error != nil {
+		panic(flow.Error)
+	}
+	return flow
+}
+
+func CleanAndMergePaths(uri ...string) string {
+	paths := make([]string, 0)
+	for _, u := range uri {
+		if u != "" {
+			paths = append(paths, strings.TrimPrefix(u, "/"))
+		}
+	}
+	return "/" + filepath.Clean(strings.Join(paths, "/"))
 }
