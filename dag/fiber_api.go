@@ -203,8 +203,8 @@ func (tm *DAG) processSVGContent(svgContent string) string {
 	return processedSVG
 }
 
-// generateSVGViewerHTML creates the HTML with advanced SVG zoom and pan functionality
-func (tm *DAG) generateSVGViewerHTML(svgContent string) string {
+// SVGViewerHTML creates the HTML with advanced SVG zoom and pan functionality
+func (tm *DAG) SVGViewerHTML(svgContent string) string {
 	// Process SVG to ensure proper scaling
 	processedSVG := tm.processSVGContent(svgContent)
 	return fmt.Sprintf(`
@@ -415,16 +415,6 @@ func (tm *DAG) generateSVGViewerHTML(svgContent string) string {
                 </div>
             </div>
         </div>
-    </div>
-
-    <div class="actions">
-        <a href="/process" class="btn">🚀 Execute Pipeline</a>
-        <a href="/metrics" class="btn btn-secondary">📊 View Metrics</a>
-        <a href="/dot" class="btn btn-secondary">📝 Export DOT</a>
-    </div>
-
-    <div class="info">
-        <p><strong>💡 Ready to Execute:</strong> Click "Execute Pipeline" to start processing your workflow. The system will guide you through each step of the pipeline.</p>
     </div>
 
     <script>
@@ -691,7 +681,7 @@ func (tm *DAG) Handlers(app any, prefix string) {
 			}
 
 			// Generate HTML with advanced SVG viewer
-			htmlContent := tm.generateSVGViewerHTML(string(svgBytes))
+			htmlContent := tm.SVGViewerHTML(string(svgBytes))
 
 			c.Set(fiber.HeaderContentType, fiber.MIMETextHTMLCharsetUTF8)
 			return c.SendString(htmlContent)
@@ -738,7 +728,7 @@ func (tm *DAG) Handlers(app any, prefix string) {
 			}
 
 			// Generate HTML with advanced SVG viewer
-			htmlContent := tm.generateSVGViewerHTML(string(svgBytes))
+			htmlContent := tm.SVGViewerHTML(string(svgBytes))
 
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			if _, err := w.Write([]byte(htmlContent)); err != nil {

@@ -170,7 +170,7 @@ func SetupAPI(prefix string, router fiber.Router, brokerAddr string) {
 					routeGroup.Use(routeMiddlewares...)
 				}
 				routeGroup.Add("GET", CleanAndMergePaths(route.Uri, "/metadata"), func(ctx *fiber.Ctx) error {
-					return getDAGPage(ctx, flow, route.Handler)
+					return getDAGPage(ctx, flow)
 				})
 				routeGroup.Add(strings.ToUpper(route.Method), route.Uri,
 					requestMiddleware(CleanAndMergePaths(prefix, configRoute.Prefix), route),
@@ -322,102 +322,21 @@ func customHandler(flow *dag.DAG) fiber.Handler {
 	}
 }
 
-func getDAGPage(ctx *fiber.Ctx, flow *dag.DAG, handler Handler) error {
-	// Save the SVG to a temporary file
+func getDAGPage(ctx *fiber.Ctx, flow *dag.DAG) error {
 	image := fmt.Sprintf("%s.svg", mq.NewID())
 	if err := flow.SaveSVG(image); err != nil {
 		return err
 	}
-	// Ensure the file is removed after reading its content
 	defer func() {
 		_ = os.Remove(image)
 	}()
-
-	// Read the SVG file bytes
 	svgBytes, err := os.ReadFile(image)
 	if err != nil {
 		return err
 	}
-
-	// Marshal the handler details into pretty printed JSON
-	handlerData, err := json.MarshalIndent(handler, "", "  ")
-	if err != nil {
-		return err
-	}
-
-	// Build an HTML page with a two-column layout:
-	// Left column: SVG, Right column: Handler details (displayed as preformatted text)
-	html := fmt.Sprintf(`<!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8">
-    <title>DAG Visualization and Handler Details</title>
-    <style>
-      body {
-        font-family: Arial, sans-serif;
-        margin: 20px;
-        background: #f4f4f4;
-      }
-      .header {
-        text-align: center;
-        margin-bottom: 20px;
-      }
-      .container {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 20px;
-      }
-      .column {
-        flex: 1;
-        min-width: 300px;
-        background: #fff;
-        padding: 15px;
-        border-radius: 8px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-      }
-      .svg-container {
-        text-align: center;
-      }
-      h1, h2 {
-        color: #333;
-      }
-      pre {
-        background: #f7f7f7;
-        padding: 10px;
-        border-radius: 4px;
-        overflow-x: auto;
-      }
-      a {
-        color: #007BFF;
-        text-decoration: none;
-      }
-      a:hover {
-        text-decoration: underline;
-      }
-    </style>
-  </head>
-  <body>
-    <div class="header">
-      <h1>DAG Visualization and Handler Details</h1>
-      <p>URI: <a href="%s">%s</a></p>
-    </div>
-    <div class="container">
-      <div class="column">
-        <div class="svg-container">
-          %s
-        </div>
-      </div>
-      <div class="column">
-        <h2>Handler Details</h2>
-        <pre>%s</pre>
-      </div>
-    </div>
-  </body>
-</html>`, flow.BaseURI(), flow.BaseURI(), svgBytes, string(handlerData))
-
-	// Set the content type as HTML and send the response
-	ctx.Set("Content-Type", "text/html")
-	return ctx.SendString(html)
+	htmlContent := flow.SVGViewerHTML(string(svgBytes))
+	ctx.Set(fiber.HeaderContentType, fiber.MIMETextHTMLCharsetUTF8)
+	return ctx.SendString(htmlContent)
 }
 
 // ruleMiddleware validates the request body with the provided rules.
