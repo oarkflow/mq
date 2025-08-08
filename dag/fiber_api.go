@@ -253,7 +253,6 @@ func (tm *DAG) generateSVGViewerHTML(svgContent string) string {
             border-radius: 15px;
             padding: 20px;
             box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
-            margin-bottom: 30px;
             position: relative;
         }
 
@@ -270,13 +269,16 @@ func (tm *DAG) generateSVGViewerHTML(svgContent string) string {
         .controls {
             display: flex;
             justify-content: center;
-            gap: 10px;
+            gap: 5px;
             flex-wrap: wrap;
+			bottom: 40px;
+			position: absolute;
+			right: 45px;
+			z-index: 10;
         }
 
         .control-btn {
-            padding: 8px 16px;
-            background-color: #4CAF50;
+            padding: 8px;
             color: white;
             border: none;
             border-radius: 5px;
@@ -287,19 +289,11 @@ func (tm *DAG) generateSVGViewerHTML(svgContent string) string {
         }
 
         .control-btn:hover {
-            background-color: #45a049;
+            background-color:rgb(214, 218, 214);
         }
 
         .control-btn:active {
-            background-color: #3d8b40;
-        }
-
-        .zoom-info {
-            text-align: center;
-            margin: 10px 0;
-            font-weight: bold;
-            color: #333;
-            font-size: 14px;
+            background-color:rgb(188, 192, 188);
         }
 
         .svg-container {
@@ -405,16 +399,12 @@ func (tm *DAG) generateSVGViewerHTML(svgContent string) string {
         <p>%s - Workflow Visualization</p>
     </div>
 
-    <div class="svg-viewer-container">
+    <div class="svg-viewer-container relative">
 
         <div class="controls">
-            <button class="control-btn" onclick="zoomIn()">🔍 Zoom In</button>
-            <button class="control-btn" onclick="zoomOut()">🔍 Zoom Out</button>
-            <button class="control-btn" onclick="resetView()">🔄 Reset View</button>
-        </div>
-
-        <div class="zoom-info">
-            Zoom: <span id="zoomLevel">100%%</span>
+            <button class="control-btn" onclick="zoomIn()" title="Zoom In">➕</button>
+            <button class="control-btn" onclick="zoomOut()" title="Zoom Out">➖</button>
+            <button class="control-btn" onclick="resetView()" title="Reset View">🔄</button>
         </div>
 
         <div class="viewer-container" id="viewerContainer">
@@ -444,7 +434,6 @@ func (tm *DAG) generateSVGViewerHTML(svgContent string) string {
 
         const svgWrapper = document.getElementById('svgWrapper');
         const svgContainer = document.getElementById('svgContainer');
-        const zoomLevelDisplay = document.getElementById('zoomLevel');
         const viewerContainer = document.getElementById('viewerContainer');
         const mainSvg = document.querySelector('#svgWrapper svg');
 
@@ -494,7 +483,6 @@ func (tm *DAG) generateSVGViewerHTML(svgContent string) string {
 
             currentZoom = initialScale;
             updateTransform();
-            updateZoomDisplay();
 
             console.log('SVG initialized:', {
                 svgWidth: svgWidth,
@@ -511,20 +499,14 @@ func (tm *DAG) generateSVGViewerHTML(svgContent string) string {
             svgWrapper.style.transform = 'translate(' + currentX + 'px, ' + currentY + 'px) scale(' + currentZoom + ')';
         }
 
-        function updateZoomDisplay() {
-            zoomLevelDisplay.textContent = Math.round((currentZoom / initialScale) * 100) + '%%';
-        }
-
         function zoomIn() {
             currentZoom *= 1.2;
             updateTransform();
-            updateZoomDisplay();
         }
 
         function zoomOut() {
             currentZoom = Math.max(currentZoom / 1.2, initialScale * 0.1); // Don't zoom out too much
             updateTransform();
-            updateZoomDisplay();
         }
 
         function resetView() {
@@ -564,7 +546,6 @@ func (tm *DAG) generateSVGViewerHTML(svgContent string) string {
 
             currentZoom = initialScale;
             updateTransform();
-            updateZoomDisplay();
         }
 
         // Mouse events for dragging
@@ -640,7 +621,6 @@ func (tm *DAG) generateSVGViewerHTML(svgContent string) string {
                 currentZoom = newZoom;
 
                 updateTransform();
-                updateZoomDisplay();
             }
         });
 
