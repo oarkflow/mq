@@ -115,6 +115,574 @@ func (tm *DAG) BaseURI() string {
 	return tm.httpPrefix
 }
 
+// processSVGContent processes SVG to ensure proper scaling using viewBox
+func (tm *DAG) processSVGContent(svgContent string) string {
+	// Extract width and height from SVG
+	var width, height string
+	var widthVal, heightVal float64
+
+	// Find width attribute
+	if strings.Contains(svgContent, `width="`) {
+		start := strings.Index(svgContent, `width="`) + 7
+		end := strings.Index(svgContent[start:], `"`)
+		if end > 0 {
+			width = svgContent[start : start+end]
+			// Remove pt, px, or other units and convert to float
+			cleanWidth := strings.TrimSuffix(strings.TrimSuffix(strings.TrimSuffix(width, "pt"), "px"), "in")
+			if val, err := fmt.Sscanf(cleanWidth, "%f", &widthVal); err == nil && val == 1 {
+				// Convert pt to pixels (1pt = 1.33px approximately)
+				if strings.HasSuffix(width, "pt") {
+					widthVal *= 1.33
+				}
+			}
+		}
+	}
+
+	// Find height attribute
+	if strings.Contains(svgContent, `height="`) {
+		start := strings.Index(svgContent, `height="`) + 8
+		end := strings.Index(svgContent[start:], `"`)
+		if end > 0 {
+			height = svgContent[start : start+end]
+			// Remove pt, px, or other units and convert to float
+			cleanHeight := strings.TrimSuffix(strings.TrimSuffix(strings.TrimSuffix(height, "pt"), "px"), "in")
+			if val, err := fmt.Sscanf(cleanHeight, "%f", &heightVal); err == nil && val == 1 {
+				// Convert pt to pixels (1pt = 1.33px approximately)
+				if strings.HasSuffix(height, "pt") {
+					heightVal *= 1.33
+				}
+			}
+		}
+	}
+
+	// Create viewBox if it doesn't exist
+	viewBox := fmt.Sprintf("0 0 %.0f %.0f", widthVal, heightVal)
+	if widthVal == 0 || heightVal == 0 {
+		// Fallback dimensions
+		viewBox = "0 0 800 600"
+		widthVal = 800
+		heightVal = 600
+	}
+
+	// Process the SVG content
+	processedSVG := svgContent
+
+	// Add or update viewBox
+	if strings.Contains(processedSVG, `viewBox="`) {
+		// Replace existing viewBox
+		start := strings.Index(processedSVG, `viewBox="`)
+		end := strings.Index(processedSVG[start:], `"`) + start + 1
+		nextQuote := strings.Index(processedSVG[end:], `"`) + end
+		processedSVG = processedSVG[:start] + fmt.Sprintf(`viewBox="%s"`, viewBox) + processedSVG[nextQuote+1:]
+	} else {
+		// Add viewBox to opening svg tag
+		svgStart := strings.Index(processedSVG, "<svg")
+		if svgStart >= 0 {
+			// Find the end of the opening tag
+			tagEnd := strings.Index(processedSVG[svgStart:], ">") + svgStart
+			// Insert viewBox before the closing >
+			processedSVG = processedSVG[:tagEnd] + fmt.Sprintf(` viewBox="%s"`, viewBox) + processedSVG[tagEnd:]
+		}
+	}
+
+	// Remove or replace width and height with 100% for responsive scaling
+	if strings.Contains(processedSVG, `width="`) {
+		start := strings.Index(processedSVG, `width="`)
+		end := strings.Index(processedSVG[start:], `"`) + start
+		nextQuote := strings.Index(processedSVG[end+1:], `"`) + end + 1
+		processedSVG = processedSVG[:start] + `width="100%"` + processedSVG[nextQuote+1:]
+	}
+
+	if strings.Contains(processedSVG, `height="`) {
+		start := strings.Index(processedSVG, `height="`)
+		end := strings.Index(processedSVG[start:], `"`) + start
+		nextQuote := strings.Index(processedSVG[end+1:], `"`) + end + 1
+		processedSVG = processedSVG[:start] + `height="100%"` + processedSVG[nextQuote+1:]
+	}
+
+	return processedSVG
+}
+
+// generateSVGViewerHTML creates the HTML with advanced SVG zoom and pan functionality
+func (tm *DAG) generateSVGViewerHTML(svgContent string) string {
+	// Process SVG to ensure proper scaling
+	processedSVG := tm.processSVGContent(svgContent)
+	return fmt.Sprintf(`
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DAG Pipeline - %s</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            background: linear-gradient(135deg, #667eea 0%%, #764ba2 100%%);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .header {
+            text-align: center;
+            color: white;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-top: 10px;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            font-size: 1.2em;
+            opacity: 0.9;
+            margin-top: 10px;
+            margin-bottom: 10px;
+        }
+
+        .svg-viewer-container {
+            background: white;
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+            margin-bottom: 30px;
+            position: relative;
+        }
+
+        .viewer-container {
+            width: 1000px;
+            height: 650px;
+            border: 2px solid #ddd;
+            background-color: #fafafa;
+            position: relative;
+            overflow: hidden;
+            border-radius: 8px;
+        }
+
+        .controls {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .control-btn {
+            padding: 8px 16px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background-color 0.3s;
+            font-weight: 500;
+        }
+
+        .control-btn:hover {
+            background-color: #45a049;
+        }
+
+        .control-btn:active {
+            background-color: #3d8b40;
+        }
+
+        .zoom-info {
+            text-align: center;
+            margin: 10px 0;
+            font-weight: bold;
+            color: #333;
+            font-size: 14px;
+        }
+
+        .svg-container {
+            width: 100%%;
+            height: 100%%;
+            cursor: grab;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .svg-container:active {
+            cursor: grabbing;
+        }
+
+        .svg-wrapper {
+            transform-origin: 0 0;
+            transition: transform 0.2s ease-out;
+        }
+
+        .instructions {
+            text-align: center;
+            margin: 10px 0;
+            color: white;
+            font-size: 14px;
+            opacity: 0.9;
+        }
+
+        .actions {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            justify-content: center;
+            margin-top: 20px;
+        }
+
+        .btn {
+            background: linear-gradient(45deg, #FF6B6B, #4ECDC4);
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            text-decoration: none;
+            display: inline-block;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+        }
+
+        .btn-secondary {
+            background: linear-gradient(45deg, #4ECDC4, #44A08D);
+        }
+
+        .info {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 20px;
+            border-radius: 12px;
+            margin-top: 20px;
+            color: white;
+            text-align: center;
+            max-width: 600px;
+        }
+
+        @media (max-width: 1100px) {
+            .viewer-container {
+                width: 90vw;
+                height: 60vh;
+            }
+        }
+
+        @media (max-width: 768px) {
+            body {
+                padding: 10px;
+            }
+
+            .viewer-container {
+                width: 95vw;
+                height: 50vh;
+            }
+
+            .controls {
+                gap: 5px;
+            }
+
+            .control-btn {
+                padding: 6px 12px;
+                font-size: 12px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🔄 DAG Pipeline</h1>
+        <p>%s - Workflow Visualization</p>
+    </div>
+
+    <div class="svg-viewer-container">
+
+        <div class="controls">
+            <button class="control-btn" onclick="zoomIn()">🔍 Zoom In</button>
+            <button class="control-btn" onclick="zoomOut()">🔍 Zoom Out</button>
+            <button class="control-btn" onclick="resetView()">🔄 Reset View</button>
+        </div>
+
+        <div class="zoom-info">
+            Zoom: <span id="zoomLevel">100%%</span>
+        </div>
+
+        <div class="viewer-container" id="viewerContainer">
+            <div class="svg-container" id="svgContainer">
+                <div class="svg-wrapper" id="svgWrapper">
+                    %s
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="actions">
+        <a href="/process" class="btn">🚀 Execute Pipeline</a>
+        <a href="/metrics" class="btn btn-secondary">📊 View Metrics</a>
+        <a href="/dot" class="btn btn-secondary">📝 Export DOT</a>
+    </div>
+
+    <div class="info">
+        <p><strong>💡 Ready to Execute:</strong> Click "Execute Pipeline" to start processing your workflow. The system will guide you through each step of the pipeline.</p>
+    </div>
+
+    <script>
+        let currentZoom = 1;
+        let initialScale = 1;
+        let isDragging = false;
+        let startX, startY, currentX = 0, currentY = 0;
+
+        const svgWrapper = document.getElementById('svgWrapper');
+        const svgContainer = document.getElementById('svgContainer');
+        const zoomLevelDisplay = document.getElementById('zoomLevel');
+        const viewerContainer = document.getElementById('viewerContainer');
+        const mainSvg = document.querySelector('#svgWrapper svg');
+
+        // Initialize the viewer
+        function initializeViewer() {
+            const mainSvg = document.querySelector('#svgWrapper svg');
+            if (!mainSvg) {
+                console.error('SVG element not found');
+                setTimeout(initializeViewer, 100);
+                return;
+            }
+
+            // Get SVG viewBox or fall back to width/height
+            let svgWidth, svgHeight;
+
+            const viewBox = mainSvg.getAttribute('viewBox');
+            if (viewBox) {
+                const viewBoxValues = viewBox.split(' ');
+                svgWidth = parseFloat(viewBoxValues[2]);
+                svgHeight = parseFloat(viewBoxValues[3]);
+            } else {
+                // Fallback to getBBox or default dimensions
+                try {
+                    const bbox = mainSvg.getBBox();
+                    svgWidth = bbox.width;
+                    svgHeight = bbox.height;
+                } catch (e) {
+                    svgWidth = 800;
+                    svgHeight = 600;
+                }
+            }
+
+            // Get container dimensions
+            const containerWidth = viewerContainer.clientWidth;
+            const containerHeight = viewerContainer.clientHeight;
+
+            // Calculate scale to fit SVG entirely within container (with padding)
+            const scaleX = (containerWidth * 0.9) / svgWidth;  // 90% of container width
+            const scaleY = (containerHeight * 0.9) / svgHeight; // 90% of container height
+            initialScale = Math.min(scaleX, scaleY); // Use min to ensure it fits completely
+
+            // Center the SVG in the container
+            const scaledWidth = svgWidth * initialScale;
+            const scaledHeight = svgHeight * initialScale;
+            currentX = (containerWidth - scaledWidth) / 2;
+            currentY = (containerHeight - scaledHeight) / 2;
+
+            currentZoom = initialScale;
+            updateTransform();
+            updateZoomDisplay();
+
+            console.log('SVG initialized:', {
+                svgWidth: svgWidth,
+                svgHeight: svgHeight,
+                containerWidth: containerWidth,
+                containerHeight: containerHeight,
+                initialScale: initialScale,
+                initialX: currentX,
+                initialY: currentY
+            });
+        }
+
+        function updateTransform() {
+            svgWrapper.style.transform = 'translate(' + currentX + 'px, ' + currentY + 'px) scale(' + currentZoom + ')';
+        }
+
+        function updateZoomDisplay() {
+            zoomLevelDisplay.textContent = Math.round((currentZoom / initialScale) * 100) + '%%';
+        }
+
+        function zoomIn() {
+            currentZoom *= 1.2;
+            updateTransform();
+            updateZoomDisplay();
+        }
+
+        function zoomOut() {
+            currentZoom = Math.max(currentZoom / 1.2, initialScale * 0.1); // Don't zoom out too much
+            updateTransform();
+            updateZoomDisplay();
+        }
+
+        function resetView() {
+            // Get container dimensions
+            const containerWidth = viewerContainer.clientWidth;
+            const containerHeight = viewerContainer.clientHeight;
+
+            // Get SVG dimensions
+            const mainSvg = document.querySelector('#svgWrapper svg');
+            let svgWidth, svgHeight;
+
+            const viewBox = mainSvg.getAttribute('viewBox');
+            if (viewBox) {
+                const viewBoxValues = viewBox.split(' ');
+                svgWidth = parseFloat(viewBoxValues[2]);
+                svgHeight = parseFloat(viewBoxValues[3]);
+            } else {
+                try {
+                    const bbox = mainSvg.getBBox();
+                    svgWidth = bbox.width;
+                    svgHeight = bbox.height;
+                } catch (e) {
+                    svgWidth = 800;
+                    svgHeight = 600;
+                }
+            }
+
+            // Recalculate initial scale and position
+            const scaleX = (containerWidth * 0.9) / svgWidth;
+            const scaleY = (containerHeight * 0.9) / svgHeight;
+            initialScale = Math.min(scaleX, scaleY);
+
+            const scaledWidth = svgWidth * initialScale;
+            const scaledHeight = svgHeight * initialScale;
+            currentX = (containerWidth - scaledWidth) / 2;
+            currentY = (containerHeight - scaledHeight) / 2;
+
+            currentZoom = initialScale;
+            updateTransform();
+            updateZoomDisplay();
+        }
+
+        // Mouse events for dragging
+        svgContainer.addEventListener('mousedown', function(e) {
+            if (currentZoom > initialScale) { // Only allow dragging when zoomed in
+                isDragging = true;
+                startX = e.clientX - currentX;
+                startY = e.clientY - currentY;
+                svgContainer.style.cursor = 'grabbing';
+                e.preventDefault();
+            }
+        });
+
+        document.addEventListener('mousemove', function(e) {
+            if (isDragging) {
+                currentX = e.clientX - startX;
+                currentY = e.clientY - startY;
+                updateTransform();
+            }
+        });
+
+        document.addEventListener('mouseup', function() {
+            isDragging = false;
+            svgContainer.style.cursor = 'grab';
+        });
+
+        // Touch events for mobile
+        svgContainer.addEventListener('touchstart', function(e) {
+            if (currentZoom > initialScale && e.touches.length === 1) {
+                isDragging = true;
+                const touch = e.touches[0];
+                startX = touch.clientX - currentX;
+                startY = touch.clientY - currentY;
+                e.preventDefault();
+            }
+        });
+
+        document.addEventListener('touchmove', function(e) {
+            if (isDragging && e.touches.length === 1) {
+                const touch = e.touches[0];
+                currentX = touch.clientX - startX;
+                currentY = touch.clientY - startY;
+                updateTransform();
+                e.preventDefault();
+            }
+        });
+
+        document.addEventListener('touchend', function() {
+            isDragging = false;
+        });
+
+        // Wheel zoom
+        svgContainer.addEventListener('wheel', function(e) {
+            e.preventDefault();
+            const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
+
+            // Get mouse position relative to container
+            const rect = svgContainer.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+
+            // Calculate zoom point
+            const zoomPointX = (mouseX - currentX) / currentZoom;
+            const zoomPointY = (mouseY - currentY) / currentZoom;
+
+            // Apply zoom
+            const newZoom = Math.max(currentZoom * zoomFactor, initialScale * 0.1);
+
+            if (newZoom !== currentZoom) {
+                // Adjust position to zoom around mouse point
+                currentX = mouseX - zoomPointX * newZoom;
+                currentY = mouseY - zoomPointY * newZoom;
+                currentZoom = newZoom;
+
+                updateTransform();
+                updateZoomDisplay();
+            }
+        });
+
+        // Keyboard shortcuts
+        document.addEventListener('keydown', function(e) {
+            switch(e.key) {
+                case '+':
+                case '=':
+                    e.preventDefault();
+                    zoomIn();
+                    break;
+                case '-':
+                    e.preventDefault();
+                    zoomOut();
+                    break;
+                case '0':
+                    e.preventDefault();
+                    resetView();
+                    break;
+            }
+        });
+
+        // Initialize when page loads
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initializeViewer);
+        } else {
+            initializeViewer();
+        }
+
+        window.addEventListener('resize', initializeViewer);
+
+        // Fallback initialization with timeout
+        setTimeout(function() {
+            if (currentZoom === 1 && initialScale === 1) {
+                initializeViewer();
+            }
+        }, 500);
+    </script>
+</body>
+</html>`, tm.name, tm.name, processedSVG)
+}
+
 // Handlers initializes route handlers.
 func (tm *DAG) Handlers(app any, prefix string) {
 	if prefix != "" && prefix != "/" {
@@ -137,169 +705,12 @@ func (tm *DAG) Handlers(app any, prefix string) {
 			}
 
 			svgBytes, err := os.ReadFile(image)
-			err = nil
 			if err != nil {
 				return c.Status(fiber.StatusInternalServerError).SendString("Could not read SVG file")
 			}
 
-			// Create HTML page with SVG and Execute Pipeline link
-			htmlContent := fmt.Sprintf(`
-<!DOCTYPE html>
-<html>
-<head>
-    <title>DAG Pipeline - %s</title>
-    <style>
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            margin: 0;
-            padding: 20px;
-            background: linear-gradient(135deg, #667eea 0%%, #764ba2 100%%);
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-        }
-        .header {
-            text-align: center;
-            margin-bottom: 30px;
-            color: white;
-            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
-        }
-        .header h1 {
-            font-size: 2.5em;
-            margin-bottom: 10px;
-        }
-        .header p {
-            font-size: 1.2em;
-            opacity: 0.9;
-        }
-        .svg-container {
-            background: white;
-            border-radius: 15px;
-            padding: 30px;
-            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
-            margin-bottom: 30px;
-            max-width: 100%%;
-            overflow: auto;
-            transform-origin: center;
-            transform: scale(1);
-            position: relative; /* Added for positioning child elements */
-        }
-        .zoom-controls {
-            position: fixed; /* Changed from absolute to fixed */
-            bottom: 10px;
-            right: 10px;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            background: rgba(255, 255, 255, 0.8);
-            padding: 10px;
-            border-radius: 8px;
-            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
-        }
-        .zoom-controls button {
-            background: none;
-            border: none;
-            cursor: pointer;
-            font-size: 20px;
-            color: #333;
-        }
-        .zoom-controls input[type="range"] {
-            width: 100px;
-        }
-        .actions {
-            display: flex;
-            gap: 20px;
-            flex-wrap: wrap;
-            justify-content: center;
-        }
-        .btn {
-            background: linear-gradient(45deg, #FF6B6B, #4ECDC4);
-            color: white;
-            padding: 15px 30px;
-            border: none;
-            border-radius: 25px;
-            cursor: pointer;
-            font-size: 18px;
-            font-weight: bold;
-            text-decoration: none;
-            display: inline-block;
-            transition: all 0.3s ease;
-            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
-            text-transform: uppercase;
-            letter-spacing: 1px;
-        }
-        .btn:hover {
-            transform: translateY(-3px);
-            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.4);
-        }
-        .btn-secondary {
-            background: linear-gradient(45deg, #4ECDC4, #44A08D);
-        }
-        .info {
-            background: rgba(255, 255, 255, 0.1);
-            padding: 20px;
-            border-radius: 12px;
-            margin-top: 20px;
-            color: white;
-            text-align: center;
-            max-width: 600px;
-        }
-    </style>
-</head>
-<body>
-    <div class="header">
-        <h1>🔄 DAG Pipeline</h1>
-        <p>%s - Workflow Visualization</p>
-    </div>
-
-    <div class="svg-container">
-        %s
-        <div class="zoom-controls">
-            <button onclick="zoomOut()">➖</button>
-            <input type="range" min="0.1" max="2" step="0.1" value="1" onchange="setZoom(this.value)">
-            <button onclick="zoomIn()">➕</button>
-        </div>
-    </div>
-
-    <div class="actions">
-        <a href="/process" class="btn">🚀 Execute Pipeline</a>
-        <a href="/metrics" class="btn btn-secondary">📊 View Metrics</a>
-        <a href="/dot" class="btn btn-secondary">📝 Export DOT</a>
-    </div>
-
-    <div class="info">
-        <p><strong>💡 Ready to Execute:</strong> Click "Execute Pipeline" to start processing your workflow. The system will guide you through each step of the pipeline.</p>
-    </div>
-
-    <script>
-        function setZoom(value) {
-            const svgElement = document.querySelector('.svg-container svg');
-            svgElement.style.transform = 'scale(' + value + ')';
-        }
-
-        function zoomIn() {
-            const slider = document.querySelector('.zoom-controls input[type="range"]');
-            let value = parseFloat(slider.value);
-            if (value < 2) {
-                value += 0.1;
-                slider.value = value.toFixed(1);
-                setZoom(value);
-            }
-        }
-
-        function zoomOut() {
-            const slider = document.querySelector('.zoom-controls input[type="range"]');
-            let value = parseFloat(slider.value);
-            if (value > 0.1) {
-                value -= 0.1;
-                slider.value = value.toFixed(1);
-                setZoom(value);
-            }
-        }
-    </script>
-</body>
-</html>`, tm.name, tm.name, string(svgBytes))
+			// Generate HTML with advanced SVG viewer
+			htmlContent := tm.generateSVGViewerHTML(string(svgBytes))
 
 			c.Set(fiber.HeaderContentType, fiber.MIMETextHTMLCharsetUTF8)
 			return c.SendString(htmlContent)
@@ -345,164 +756,8 @@ func (tm *DAG) Handlers(app any, prefix string) {
 				return
 			}
 
-			// Create HTML page with SVG and Execute Pipeline link
-			htmlContent := fmt.Sprintf(`
-<!DOCTYPE html>
-<html>
-<head>
-    <title>DAG Pipeline - %s</title>
-    <style>
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            margin: 0;
-            padding: 20px;
-            background: linear-gradient(135deg, #667eea 0%%, #764ba2 100%%);
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-        }
-        .header {
-            text-align: center;
-            margin-bottom: 30px;
-            color: white;
-            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
-        }
-        .header h1 {
-            font-size: 2.5em;
-            margin-bottom: 10px;
-        }
-        .header p {
-            font-size: 1.2em;
-            opacity: 0.9;
-        }
-        .svg-container {
-            background: white;
-            border-radius: 15px;
-            padding: 30px;
-            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
-            margin-bottom: 30px;
-            max-width: 100%%;
-            overflow: auto;
-            transform-origin: center;
-            transform: scale(1);
-            position: relative; /* Added for positioning child elements */
-        }
-        .zoom-controls {
-            position: fixed; /* Changed from absolute to fixed */
-            bottom: 10px;
-            right: 10px;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            background: rgba(255, 255, 255, 0.8);
-            padding: 10px;
-            border-radius: 8px;
-            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
-        }
-        .zoom-controls button {
-            background: none;
-            border: none;
-            cursor: pointer;
-            font-size: 20px;
-            color: #333;
-        }
-        .zoom-controls input[type="range"] {
-            width: 100px;
-        }
-        .actions {
-            display: flex;
-            gap: 20px;
-            flex-wrap: wrap;
-            justify-content: center;
-        }
-        .btn {
-            background: linear-gradient(45deg, #FF6B6B, #4ECDC4);
-            color: white;
-            padding: 15px 30px;
-            border: none;
-            border-radius: 25px;
-            cursor: pointer;
-            font-size: 18px;
-            font-weight: bold;
-            text-decoration: none;
-            display: inline-block;
-            transition: all 0.3s ease;
-            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
-            text-transform: uppercase;
-            letter-spacing: 1px;
-        }
-        .btn:hover {
-            transform: translateY(-3px);
-            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.4);
-        }
-        .btn-secondary {
-            background: linear-gradient(45deg, #4ECDC4, #44A08D);
-        }
-        .info {
-            background: rgba(255, 255, 255, 0.1);
-            padding: 20px;
-            border-radius: 12px;
-            margin-top: 20px;
-            color: white;
-            text-align: center;
-            max-width: 600px;
-        }
-    </style>
-</head>
-<body>
-    <div class="header">
-        <h1>🔄 DAG Pipeline</h1>
-        <p>%s - Workflow Visualization</p>
-    </div>
-
-    <div class="svg-container">
-        %s
-        <div class="zoom-controls">
-            <button onclick="zoomOut()">➖</button>
-            <input type="range" min="0.1" max="2" step="0.1" value="1" onchange="setZoom(this.value)">
-            <button onclick="zoomIn()">➕</button>
-        </div>
-    </div>
-
-    <div class="actions">
-        <a href="/process" class="btn">🚀 Execute Pipeline</a>
-        <a href="/metrics" class="btn btn-secondary">📊 View Metrics</a>
-        <a href="/dot" class="btn btn-secondary">📝 Export DOT</a>
-    </div>
-
-    <div class="info">
-        <p><strong>💡 Ready to Execute:</strong> Click "Execute Pipeline" to start processing your workflow. The system will guide you through each step of the pipeline.</p>
-    </div>
-
-    <script>
-        function setZoom(value) {
-            const svgElement = document.querySelector('.svg-container svg');
-            svgElement.style.transform = 'scale(' + value + ')';
-        }
-
-        function zoomIn() {
-            const slider = document.querySelector('.zoom-controls input[type="range"]');
-            let value = parseFloat(slider.value);
-            if (value < 2) {
-                value += 0.1;
-                slider.value = value.toFixed(1);
-                setZoom(value);
-            }
-        }
-
-        function zoomOut() {
-            const slider = document.querySelector('.zoom-controls input[type="range"]');
-            let value = parseFloat(slider.value);
-            if (value > 0.1) {
-                value -= 0.1;
-                slider.value = value.toFixed(1);
-                setZoom(value);
-            }
-        }
-    </script>
-</body>
-</html>`, tm.name, tm.name, string(svgBytes))
+			// Generate HTML with advanced SVG viewer
+			htmlContent := tm.generateSVGViewerHTML(string(svgBytes))
 
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			if _, err := w.Write([]byte(htmlContent)); err != nil {
