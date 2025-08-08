@@ -309,6 +309,7 @@ func (tm *DAG) generateSVGViewerHTML(svgContent string) string {
         }
 
         .svg-wrapper {
+			user-select: none;
             transform-origin: 0 0;
             transition: transform 0.2s ease-out;
         }
@@ -395,7 +396,7 @@ func (tm *DAG) generateSVGViewerHTML(svgContent string) string {
 </head>
 <body>
     <div class="header">
-        <h1>🔄 DAG Pipeline</h1>
+        <h1>DAG Pipeline</h1>
         <p>%s - Workflow Visualization</p>
     </div>
 
