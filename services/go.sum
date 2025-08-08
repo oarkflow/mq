@@ -34,8 +34,6 @@ github.com/goccy/go-reflect v1.2.0 h1:O0T8rZCuNmGXewnATuKYnkL0xm6o8UNOJZd/gOkb9m
 github.com/goccy/go-reflect v1.2.0/go.mod h1:n0oYZn8VcV2CkWTxi8B9QjkCoq6GTtCEdfmR66YhFtE=
 github.com/goccy/go-yaml v1.18.0 h1:8W7wMFS12Pcas7KU+VVkaiCng+kG8QiFeFwzFb+rwuw=
 github.com/goccy/go-yaml v1.18.0/go.mod h1:XBurs7gK8ATbW4ZPGKgcbrY1Br56PdM69F7LkFRi1kA=
-github.com/gofiber/fiber/v2 v2.52.6 h1:Rfp+ILPiYSvvVuIPvxrBns+HJp8qGLDnLJawAu27XVI=
-github.com/gofiber/fiber/v2 v2.52.6/go.mod h1:YEcBbO/FB+5M1IZNBP9FO3J9281zgPAreiI1oqg8nDw=
 github.com/gofiber/fiber/v2 v2.52.9 h1:YjKl5DOiyP3j0mO61u3NTmK7or8GzzWzCFzkboyP5cw=
 github.com/gofiber/fiber/v2 v2.52.9/go.mod h1:YEcBbO/FB+5M1IZNBP9FO3J9281zgPAreiI1oqg8nDw=
 github.com/golang-jwt/jwt/v5 v5.2.1 h1:OuVbFODueb089Lh128TAcimifWaLhJwVflnrgM17wHk=
@@ -82,8 +80,8 @@ github.com/mattn/go-runewidth v0.0.16 h1:E5ScNMtiwvlvB5paMFdw9p4kSQzbXFikJ5SQO6T
 github.com/mattn/go-runewidth v0.0.16/go.mod h1:Jdepj2loyihRzMpdS35Xk/zdY8IAYHsh153qUoGf23w=
 github.com/microsoft/go-mssqldb v1.8.0 h1:7cyZ/AT7ycDsEoWPIXibd+aVKFtteUNhDGf3aobP+tw=
 github.com/microsoft/go-mssqldb v1.8.0/go.mod h1:6znkekS3T2vp0waiMhen4GPU1BiAsrP+iXHcE7a7rFo=
-github.com/oarkflow/cli v0.0.0-20250313133305-8d14a63c1883 h1:N0Mroo3lyZTcVUyPAAO40mhgVicrweifMNnOrXQxt+A=
-github.com/oarkflow/cli v0.0.0-20250313133305-8d14a63c1883/go.mod h1:8APSp4HJyCyh7R17XHQYSNz69N7+73S1z+/N8xhC6vo=
+github.com/oarkflow/cli v0.0.1 h1:4yUf/CPXODOyoTgVjPUGMhTv/8I1cV6zlIs9KdXSjB0=
+github.com/oarkflow/cli v0.0.1/go.mod h1:8APSp4HJyCyh7R17XHQYSNz69N7+73S1z+/N8xhC6vo=
 github.com/oarkflow/convert v0.0.5 h1:5s5DlnZLSUweB+EDUjynj0Eput7AkGUEQUvs/j4CWmM=
 github.com/oarkflow/convert v0.0.5/go.mod h1:/N8EEJiKUCtYS//+UfS3IX3ej7K1wIPgW/1nBhbeEXs=
 github.com/oarkflow/date v0.0.4 h1:EwY/wiS3CqZNBx7b2x+3kkJwVNuGk+G0dls76kL/fhU=

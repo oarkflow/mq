@@ -28,6 +28,14 @@ import (
 
 var ValidationInstance Validation
 
+func Setup(loader *Loader, serverApp *fiber.App, brokerAddr string) *fiber.App {
+	if loader.UserConfig == nil {
+		return nil
+	}
+	SetupServices(loader.Prefix(), serverApp, brokerAddr)
+	return serverApp
+}
+
 func SetupHandler(handler Handler, brokerAddr string, async ...bool) *dag.DAG {
 	syncMode := true
 	if len(async) > 0 {

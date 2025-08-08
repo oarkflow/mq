@@ -5,7 +5,7 @@ go 1.24.2
 replace github.com/oarkflow/mq => ../
 
 require (
-	github.com/oarkflow/cli v0.0.0-20250313133305-8d14a63c1883
+	github.com/oarkflow/cli v0.0.1
 	github.com/oarkflow/errors v0.0.6
 	github.com/oarkflow/filters v0.0.36
 	github.com/oarkflow/jenv v0.0.2
@@ -27,7 +27,7 @@ require (
 	github.com/goccy/go-json v0.10.5 // indirect
 	github.com/goccy/go-reflect v1.2.0 // indirect
 	github.com/goccy/go-yaml v1.18.0 // indirect
-	github.com/gofiber/fiber/v2 v2.52.9 // indirect
+	github.com/gofiber/fiber/v2 v2.52.9
 	github.com/golang-sql/civil v0.0.0-20220223132316-b832511892a9 // indirect
 	github.com/golang-sql/sqlexp v0.1.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
@@ -53,7 +53,7 @@ require (
 	github.com/oarkflow/expr v0.0.11 // indirect
 	github.com/oarkflow/form v0.0.0-20241203111156-b1be5636af43 // indirect
 	github.com/oarkflow/jet v0.0.4 // indirect
-	github.com/oarkflow/protocol v0.0.16 // indirect
+	github.com/oarkflow/protocol v0.0.16
 	github.com/oarkflow/render v0.0.1 // indirect
 	github.com/oarkflow/squealx v0.0.36 // indirect
 	github.com/oarkflow/xid v1.2.8 // indirect
