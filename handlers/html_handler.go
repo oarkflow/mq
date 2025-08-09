@@ -8,6 +8,7 @@ import (
 	"html/template"
 	"os"
 
+	"github.com/oarkflow/jet"
 	"github.com/oarkflow/mq"
 	"github.com/oarkflow/mq/consts"
 	"github.com/oarkflow/mq/dag"
@@ -26,24 +27,30 @@ func (c *RenderHTMLNode) ProcessTask(ctx context.Context, task *mq.Task) mq.Resu
 		templateStr, _  = data["template"].(string)
 		templateFile, _ = data["template_file"].(string)
 	)
-
 	var templateData map[string]any
 	if len(task.Payload) > 0 {
 		if err := json.Unmarshal(task.Payload, &templateData); err != nil {
-			return mq.Result{Payload: task.Payload, Error: err, Ctx: ctx, ConditionStatus: "invalid"}
+			return mq.Result{Payload: task.Payload, Error: err, Ctx: ctx}
 		}
 	}
 	if templateData == nil {
 		templateData = make(map[string]any)
 	}
+	delete(templateData, "html_content")
+	if c.Payload.Mapping != nil {
+		for k, v := range c.Payload.Mapping {
+			_, val := dag.GetVal(ctx, v, templateData)
+			templateData[k] = val
+		}
+	}
 	templateData["task_id"] = ctx.Value("task_id")
-
 	var renderedHTML string
 	var err error
-
+	parser := jet.NewWithMemory(jet.WithDelims("{{", "}}"))
 	switch {
 	// 1. JSONSchema + HTML Template
-	case schemaFile != "" && templateStr != "":
+	case schemaFile != "" && templateStr != "" && templateFile == "":
+		fmt.Println("Using JSONSchema and inline HTML template", c.ID)
 		if c.renderer == nil {
 			renderer, err := renderer.GetFromFile(schemaFile, templateStr)
 			if err != nil {
@@ -53,7 +60,8 @@ func (c *RenderHTMLNode) ProcessTask(ctx context.Context, task *mq.Task) mq.Resu
 		}
 		renderedHTML, err = c.renderer.RenderFields(templateData)
 	// 2. JSONSchema + HTML File
-	case schemaFile != "" && templateFile != "":
+	case schemaFile != "" && templateFile != "" && templateStr == "":
+		fmt.Println("Using JSONSchema and HTML file", c.ID)
 		if c.renderer == nil {
 			renderer, err := renderer.GetFromFile(schemaFile, "", templateFile)
 			if err != nil {
@@ -63,7 +71,8 @@ func (c *RenderHTMLNode) ProcessTask(ctx context.Context, task *mq.Task) mq.Resu
 		}
 		renderedHTML, err = c.renderer.RenderFields(templateData)
 	// 3. Only JSONSchema
-	case schemaFile != "" || c.renderer != nil:
+	case (schemaFile != "" || c.renderer != nil) && templateStr == "" && templateFile == "":
+		fmt.Println("Using only JSONSchema", c.ID)
 		if c.renderer == nil {
 			renderer, err := renderer.GetFromFile(schemaFile, "")
 			if err != nil {
@@ -73,7 +82,8 @@ func (c *RenderHTMLNode) ProcessTask(ctx context.Context, task *mq.Task) mq.Resu
 		}
 		renderedHTML, err = c.renderer.RenderFields(templateData)
 	// 4. Only HTML Template
-	case templateStr != "":
+	case templateStr != "" && templateFile == "" && schemaFile == "":
+		fmt.Println("Using inline HTML template", c.ID)
 		tmpl, err := template.New("inline").Parse(templateStr)
 		if err != nil {
 			return mq.Result{Error: fmt.Errorf("failed to parse template: %v", err), Ctx: ctx}
@@ -85,21 +95,16 @@ func (c *RenderHTMLNode) ProcessTask(ctx context.Context, task *mq.Task) mq.Resu
 		}
 		renderedHTML = buf.String()
 	// 5. Only HTML File
-	case templateFile != "":
+	case templateFile != "" && templateStr == "" && schemaFile == "":
+		fmt.Println("Using HTML file", c.ID)
 		fileContent, err := os.ReadFile(templateFile)
 		if err != nil {
 			return mq.Result{Error: fmt.Errorf("failed to read template file: %v", err), Ctx: ctx}
 		}
-		tmpl, err := template.New("file").Parse(string(fileContent))
+		renderedHTML, err = parser.ParseTemplate(string(fileContent), templateData)
 		if err != nil {
-			return mq.Result{Error: fmt.Errorf("failed to parse template file: %v", err), Ctx: ctx}
+			return mq.Result{Error: err, Ctx: ctx}
 		}
-		var buf bytes.Buffer
-		err = tmpl.Execute(&buf, templateData)
-		if err != nil {
-			return mq.Result{Error: fmt.Errorf("failed to execute template file: %v", err), Ctx: ctx}
-		}
-		renderedHTML = buf.String()
 	default:
 		return mq.Result{Error: fmt.Errorf("no valid rendering approach found"), Ctx: ctx}
 	}

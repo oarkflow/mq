@@ -77,10 +77,17 @@ func SetupHandler(handler Handler, brokerAddr string, async ...bool) *dag.DAG {
 	return flow
 }
 
+type FilterGroup struct {
+	Operator string            `json:"operator"`
+	Reverse  bool              `json:"reverse"`
+	Filters  []*filters.Filter `json:"filters"`
+}
+
 type Filter struct {
-	Filter *filters.Filter `json:"condition"`
-	Node   string          `json:"node"`
-	ID     string          `json:"id"`
+	Filter      *filters.Filter `json:"condition"`
+	FilterGroup *FilterGroup    `json:"group"`
+	Node        string          `json:"node"`
+	ID          string          `json:"id"`
 }
 
 func prepareNode(flow *dag.DAG, node Node) error {
@@ -108,7 +115,25 @@ func prepareNode(flow *dag.DAG, node Node) error {
 			conditions := make(map[string]dag.Condition)
 			for key, cond := range fil {
 				condition[key] = cond.Node
-				conditions[key] = cond.Filter
+				if cond.Filter != nil {
+					conditions[key] = cond.Filter
+				} else if cond.FilterGroup != nil {
+					cond.FilterGroup.Operator = strings.ToUpper(cond.FilterGroup.Operator)
+					if !slices.Contains([]string{"AND", "OR"}, cond.FilterGroup.Operator) {
+						cond.FilterGroup.Operator = "AND"
+					}
+					var fillers []filters.Condition
+					for _, f := range cond.FilterGroup.Filters {
+						if f != nil {
+							fillers = append(fillers, f)
+						}
+					}
+					conditions[key] = &filters.FilterGroup{
+						Operator: filters.Boolean(cond.FilterGroup.Operator),
+						Reverse:  cond.FilterGroup.Reverse,
+						Filters:  fillers,
+					}
+				}
 			}
 			flow.AddCondition(node.ID, condition)
 			nodeHandler.SetConditions(conditions)

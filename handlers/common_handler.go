@@ -44,7 +44,7 @@ func (e *Condition) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 	var conditionStatus string
 	_, ok := e.conditions[defaultKey]
 	for status, condition := range e.conditions {
-		if status != defaultKey {
+		if status != defaultKey && condition != nil {
 			if condition.Match(data) {
 				conditionStatus = status
 			}

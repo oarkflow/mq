@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Email Error</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 700px;
+            margin: 50px auto;
+            padding: 20px;
+            background: linear-gradient(135deg, #FF6B6B 0%, #FF5722 100%);
+            color: white;
+        }
+
+        .error-container {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 40px;
+            border-radius: 20px;
+            backdrop-filter: blur(15px);
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+            text-align: center;
+        }
+
+        .error-icon {
+            font-size: 80px;
+            margin-bottom: 20px;
+            animation: shake 0.5s ease-in-out infinite alternate;
+        }
+
+        @keyframes shake {
+            0% {
+                transform: translateX(0);
+            }
+
+            100% {
+                transform: translateX(5px);
+            }
+        }
+
+        h1 {
+            margin-bottom: 30px;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+            font-size: 2.5em;
+        }
+
+        .error-message {
+            background: rgba(255, 255, 255, 0.2);
+            padding: 25px;
+            border-radius: 12px;
+            margin: 25px 0;
+            font-size: 18px;
+            border-left: 6px solid #FFB6B6;
+            line-height: 1.6;
+        }
+
+        .error-details {
+            background: rgba(255, 255, 255, 0.15);
+            padding: 20px;
+            border-radius: 12px;
+            margin: 25px 0;
+            text-align: left;
+        }
+
+        .actions {
+            margin-top: 40px;
+        }
+
+        .btn {
+            background: linear-gradient(45deg, #4ECDC4, #44A08D);
+            color: white;
+            padding: 15px 30px;
+            border: none;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            margin: 0 15px;
+            text-decoration: none;
+            display: inline-block;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .btn:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
+        }
+
+        .retry-btn {
+            background: linear-gradient(45deg, #FFA726, #FF9800);
+        }
+    </style>
+</head>
+
+<body>
+    <div class="error-container">
+        <div class="error-icon">❌</div>
+        <h1>Email Processing Error</h1>
+
+        <div class="error-message">
+            {{error_message}}
+        </div>
+
+        {{if error_field}}
+        <div class="error-details">
+            <strong>🎯 Error Field:</strong> {{error_field}}<br>
+            <strong>⚡ Action Required:</strong> Please correct the highlighted field and try again.<br>
+            <strong>💡 Tip:</strong> Make sure all required fields are properly filled out.
+        </div>
+        {{end}}
+
+        {{if retry_suggested}}
+        <div class="error-details">
+            <strong>⚠️ Temporary Issue:</strong> This appears to be a temporary system issue.
+            Please try sending your message again in a few moments.<br>
+            <strong>🔄 Auto-Retry:</strong> Our system will automatically retry failed deliveries.
+        </div>
+        {{end}}
+
+        <div class="actions">
+            <a href="/" class="btn retry-btn">🔄 Try Again</a>
+            <a href="/api/status" class="btn">📊 Check Status</a>
+        </div>
+
+        <div style="margin-top: 30px; font-size: 14px; opacity: 0.8;">
+            🔄 DAG Error Handler | Email Notification Workflow Failed<br>
+            Our advanced routing system ensures reliable message delivery.
+        </div>
+    </div>
+</body>
+
+</html>
