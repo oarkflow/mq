@@ -75,3 +75,23 @@ func AvailableDAG() []string {
 	}
 	return op
 }
+
+// HasPageNode checks if the DAG contains any Page nodes
+func (d *DAG) HasPageNode() bool {
+	return d.hasPageNode
+}
+
+// ContainsPageNodes iterates through all nodes to check if any are Page nodes
+// This method provides an alternative way to check for Page nodes by examining
+// the actual nodes rather than relying on the cached hasPageNode field
+func (d *DAG) ContainsPageNodes() bool {
+	var hasPage bool
+	d.nodes.ForEach(func(_ string, node *Node) bool {
+		if node.NodeType == Page {
+			hasPage = true
+			return false // Stop iteration when found
+		}
+		return true // Continue iteration
+	})
+	return hasPage
+}

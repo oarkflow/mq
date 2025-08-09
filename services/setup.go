@@ -41,17 +41,35 @@ func SetupHandler(handler Handler, brokerAddr string, async ...bool) *dag.DAG {
 	if len(async) > 0 {
 		syncMode = async[0]
 	}
-	key := fmt.Sprintf(`%s-%v`, handler.Key, syncMode)
+	key := handler.Key
 	existingDAG := dag.GetDAG(key)
 	if existingDAG != nil {
 		return existingDAG
 	}
 	flow := dag.NewDAG(handler.Name, handler.Key, nil, mq.WithSyncMode(syncMode), mq.WithBrokerURL(brokerAddr))
 	for _, node := range handler.Nodes {
-		err := prepareNode(flow, node)
-		if err != nil {
-			flow.Error = err
+		if node.Node == "" && node.NodeKey == "" {
+			flow.Error = errors.New("Node not defined " + node.ID)
 			return flow
+		}
+		if node.Node != "" {
+			err := prepareNode(flow, node)
+			if err != nil {
+				flow.Error = err
+				return flow
+			}
+		} else if node.NodeKey != "" {
+			newDag := dag.GetDAG(node.NodeKey)
+			if newDag == nil {
+				flow.Error = errors.New("DAG not found " + node.NodeKey)
+				return flow
+			}
+			nodeType := dag.Function
+			if newDag.HasPageNode() {
+				nodeType = dag.Page
+			}
+			fmt.Println(node.Name, node.ID, node.NodeKey, node.FirstNode)
+			flow.AddDAGNode(nodeType, node.Name, node.ID, newDag, node.FirstNode)
 		}
 	}
 	for _, edge := range handler.Edges {
@@ -133,6 +151,8 @@ func prepareNode(flow *dag.DAG, node Node) error {
 						Reverse:  cond.FilterGroup.Reverse,
 						Filters:  fillers,
 					}
+				} else {
+					conditions[key] = nil
 				}
 			}
 			flow.AddCondition(node.ID, condition)

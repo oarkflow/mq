@@ -136,6 +136,7 @@ type Data struct {
 type Node struct {
 	Name      string `json:"name,omitempty" yaml:"name,omitempty"`
 	ID        string `json:"id" yaml:"id"`
+	NodeKey   string `json:"node_key" yaml:"node_key"`
 	Node      string `json:"node" yaml:"node"`
 	Data      Data   `json:"data" yaml:"data"`
 	FirstNode bool   `json:"first_node" yaml:"first_node"`

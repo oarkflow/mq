@@ -23,6 +23,10 @@
                 },
                 "additional_data": {
                     "conditions": {
+                        "default": {
+                            "id": "condition:default",
+                            "node": "output"
+                        },
                         "invalid": {
                             "id": "condition:invalid_login",
                             "node": "error-page",
@@ -57,6 +61,15 @@
                 },
                 "additional_data": {
                     "template_file": "app/templates/error.html"
+                }
+            }
+        },
+        {
+            "id": "output",
+            "node": "output",
+            "data": {
+                "mapping": {
+                    "login_message": "eval.{{'Login successful!'}}"
                 }
             }
         }
