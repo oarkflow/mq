@@ -76,7 +76,6 @@ func SetupHandler(handler Handler, brokerAddr string, async ...bool) *dag.DAG {
 			if newDag.HasPageNode() {
 				nodeType = dag.Page
 			}
-			fmt.Println(node.Name, node.ID, node.NodeKey, node.FirstNode)
 			flow.AddDAGNode(nodeType, node.Name, node.ID, newDag, node.FirstNode)
 		}
 	}

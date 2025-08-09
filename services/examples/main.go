@@ -1,8 +1,6 @@
 package main
 
 import (
-	"fmt"
-
 	"github.com/gofiber/fiber/v2"
 	"github.com/oarkflow/cli"
 	"github.com/oarkflow/cli/console"
@@ -15,7 +13,6 @@ import (
 func main() {
 	handlers.Init()
 	brokerAddr := ":5051"
-	serverAddr := ":3000"
 	loader := services.NewLoader("config")
 	loader.Load()
 	serverApp := fiber.New(fiber.Config{EnablePrintRoutes: true})
@@ -24,13 +21,7 @@ func main() {
 		return []contracts.Command{
 			console.NewListCommand(client),
 			dagConsole.NewRunHandler(loader.UserConfig, loader.ParsedPath, brokerAddr),
-			dagConsole.NewRunServer(serverApp, serverAddr),
+			dagConsole.NewRunServer(serverApp, ":3000"),
 		}
 	})
-}
-
-func mai1n() {
-	loader := services.NewLoader("config")
-	loader.Load()
-	fmt.Println(loader.UserConfig)
 }
