@@ -2,9 +2,7 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"os"
 
 	"github.com/oarkflow/mq"
 	"github.com/oarkflow/mq/dag"
@@ -17,34 +15,14 @@ var availableHandlers = map[string]bool{
 	"json/send-email.json": true,
 }
 
-func SetupHandler() (*dag.DAG, error) {
-	var flowToServe *dag.DAG
-	brokerAddr := ":8081"
-	for file, serve := range availableHandlers {
-		handlerBytes, err := os.ReadFile(file)
-		if err != nil {
-			panic(err)
-		}
-		var handler services.Handler
-		err = json.Unmarshal(handlerBytes, &handler)
-		if err != nil {
-			panic(err)
-		}
-		flow := services.SetupHandler(handler, brokerAddr)
-		if flow.Error != nil {
-			return nil, flow.Error
-		}
-		if serve {
-			flowToServe = flow
-		}
-	}
-	return flowToServe, nil
-}
-
 func main() {
-	flow, err := SetupHandler()
+	flow, err := services.SetupHandlers(availableHandlers, ":8081")
 	if err != nil {
 		fmt.Println("Error setting up handlers:", err)
+		return
+	}
+	if flow == nil {
+		fmt.Println("Flow is configured but not started.")
 		return
 	}
 	flow.Start(context.Background(), ":5000")

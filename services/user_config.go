@@ -160,12 +160,13 @@ type Branch struct {
 }
 
 type Handler struct {
-	Name     string   `json:"name" yaml:"name"`
-	Key      string   `json:"key" yaml:"key"`
-	Nodes    []Node   `json:"nodes,omitempty" yaml:"nodes,omitempty"`
-	Edges    []Edge   `json:"edges,omitempty" yaml:"edges,omitempty"`
-	Branches []Branch `json:"branches,omitempty" yaml:"branches,omitempty"`
-	Loops    []Loop   `json:"loops,omitempty" yaml:"loops,omitempty"`
+	Name       string   `json:"name" yaml:"name"`
+	Key        string   `json:"key" yaml:"key"`
+	DisableLog bool     `json:"disable_log" yaml:"disable_log"`
+	Nodes      []Node   `json:"nodes,omitempty" yaml:"nodes,omitempty"`
+	Edges      []Edge   `json:"edges,omitempty" yaml:"edges,omitempty"`
+	Branches   []Branch `json:"branches,omitempty" yaml:"branches,omitempty"`
+	Loops      []Loop   `json:"loops,omitempty" yaml:"loops,omitempty"`
 }
 
 type RequestSchema struct {

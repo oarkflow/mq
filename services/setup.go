@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sort"
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
@@ -46,7 +47,14 @@ func SetupHandler(handler Handler, brokerAddr string, async ...bool) *dag.DAG {
 	if existingDAG != nil {
 		return existingDAG
 	}
-	flow := dag.NewDAG(handler.Name, handler.Key, nil, mq.WithSyncMode(syncMode), mq.WithBrokerURL(brokerAddr))
+	opts := []mq.Option{
+		mq.WithSyncMode(syncMode),
+		mq.WithBrokerURL(brokerAddr),
+	}
+	if handler.DisableLog {
+		opts = append(opts, mq.WithLogger(nil))
+	}
+	flow := dag.NewDAG(handler.Name, handler.Key, nil, opts...)
 	for _, node := range handler.Nodes {
 		if node.Node == "" && node.NodeKey == "" {
 			flow.Error = errors.New("Node not defined " + node.ID)
@@ -490,7 +498,7 @@ func setupMiddlewares(middlewares []Middleware) (mid []any) {
 	return
 }
 
-func setupFlow(route *Route, group fiber.Router, brokerAddr string) *dag.DAG {
+func setupFlow(route *Route, _ fiber.Router, brokerAddr string) *dag.DAG {
 	if route.Handler.Key == "" && route.HandlerKey != "" {
 		handler := userConfig.GetHandler(route.HandlerKey)
 		if handler == nil {
@@ -513,4 +521,118 @@ func CleanAndMergePaths(uri ...string) string {
 		}
 	}
 	return "/" + filepath.Clean(strings.Join(paths, "/"))
+}
+
+// HandlerInfo holds handler data and its dependencies
+type HandlerInfo struct {
+	FilePath     string
+	Handler      Handler
+	Dependencies []string
+	Serve        bool
+}
+
+func SetupHandlers(availableHandlers map[string]bool, brokerAddr string) (*dag.DAG, error) {
+	var flowToServe *dag.DAG
+	handlerInfos, err := PrepareDependencies(availableHandlers)
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare handler dependencies: %w", err)
+	}
+	setupOrder, err := TopologicalSort(handlerInfos)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve handler dependencies: %w", err)
+	}
+	for _, file := range setupOrder {
+		info := handlerInfos[file]
+		fmt.Printf("Setting up handler: %s (key: %s)\n", file, info.Handler.Key)
+		flow := SetupHandler(info.Handler, brokerAddr)
+		if flow.Error != nil {
+			return nil, fmt.Errorf("failed to setup handler %s: %w", file, flow.Error)
+		}
+		if info.Serve {
+			flowToServe = flow
+			fmt.Printf("Will serve handler: %s\n", file)
+		}
+	}
+	return flowToServe, nil
+}
+
+func PrepareDependencies(availableHandlers map[string]bool) (map[string]*HandlerInfo, error) {
+	handlerInfos := make(map[string]*HandlerInfo)
+	for file, serve := range availableHandlers {
+		handlerBytes, err := os.ReadFile(file)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read handler file %s: %w", file, err)
+		}
+		var handler Handler
+		err = json.Unmarshal(handlerBytes, &handler)
+		if err != nil {
+			return nil, fmt.Errorf("failed to unmarshal handler from %s: %w", file, err)
+		}
+		dependencies := GetDependencies(handler)
+		handlerInfos[file] = &HandlerInfo{
+			FilePath:     file,
+			Handler:      handler,
+			Dependencies: dependencies,
+			Serve:        serve,
+		}
+	}
+	return handlerInfos, nil
+}
+
+// GetDependencies extracts node_key dependencies from a handler
+func GetDependencies(handler Handler) []string {
+	var deps []string
+	for _, node := range handler.Nodes {
+		if node.NodeKey != "" {
+			deps = append(deps, node.NodeKey)
+		}
+	}
+	return deps
+}
+
+// TopologicalSort performs dependency-based ordering of handlers
+func TopologicalSort(handlers map[string]*HandlerInfo) ([]string, error) {
+	inDegree := make(map[string]int)
+	adjList := make(map[string][]string)
+	for key := range handlers {
+		inDegree[key] = 0
+		adjList[key] = []string{}
+	}
+	for key, info := range handlers {
+		for _, dep := range info.Dependencies {
+			for depKey, depInfo := range handlers {
+				if depInfo.Handler.Key == dep {
+					adjList[depKey] = append(adjList[depKey], key)
+					inDegree[key]++
+					break
+				}
+			}
+		}
+	}
+	queue := []string{}
+	result := []string{}
+	for key, degree := range inDegree {
+		if degree == 0 {
+			queue = append(queue, key)
+		}
+	}
+	sort.Strings(queue)
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		result = append(result, current)
+		neighbors := adjList[current]
+		sort.Strings(neighbors)
+		for _, neighbor := range neighbors {
+			inDegree[neighbor]--
+			if inDegree[neighbor] == 0 {
+				queue = append(queue, neighbor)
+				sort.Strings(queue)
+			}
+		}
+	}
+	if len(result) != len(handlers) {
+		return nil, fmt.Errorf("circular dependency detected in handlers")
+	}
+	return result, nil
 }
