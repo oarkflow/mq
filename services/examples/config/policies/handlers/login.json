@@ -1,0 +1,88 @@
+{
+	"name": "Login Flow",
+	"key": "login:flow",
+	"nodes": [
+		{
+			"id": "LoginForm",
+			"first_node": true,
+			"node": "render-html",
+			"data": {
+				"additional_data": {
+					"schema_file": "login.json",
+					"template_file": "app/templates/basic.html"
+				}
+			}
+		},
+		{
+			"id": "ValidateLogin",
+			"node": "condition",
+			"data": {
+				"mapping": {
+					"username": "username",
+					"password": "password"
+				},
+				"additional_data": {
+					"conditions": {
+						"default": {
+							"id": "condition:default",
+							"node": "output"
+						},
+						"invalid": {
+							"id": "condition:invalid_login",
+							"node": "error-page",
+							"group": {
+								"reverse": true,
+								"filters": [
+									{
+										"field": "username",
+										"operator": "eq",
+										"value": "admin"
+									},
+									{
+										"field": "password",
+										"operator": "eq",
+										"value": "password"
+									}
+								]
+							}
+						}
+					}
+				}
+			}
+		},
+		{
+			"id": "error-page",
+			"node": "render-html",
+			"data": {
+				"mapping": {
+					"error_message": "eval.{{'Invalid login credentials.'}}",
+					"error_field": "eval.{{'username'}}",
+					"retry_suggested": "eval.{{true}}"
+				},
+				"additional_data": {
+					"template_file": "app/templates/error.html"
+				}
+			}
+		},
+		{
+			"id": "output",
+			"node": "output",
+			"data": {
+				"additional_data": {
+					"output_type": "file",
+					"file_path": "app/data/login_output.json"
+				},
+				"mapping": {
+					"login_message": "eval.{{'Login successful!'}}"
+				}
+			}
+		}
+	],
+	"edges": [
+		{
+			"source": "LoginForm",
+			"target": [ "ValidateLogin" ]
+		}
+	]
+	
+}

@@ -1,0 +1,11 @@
+{
+    "name": "Sample Print",
+    "key": "print:check",
+    "nodes": [
+        {
+            "id": "print1",
+            "node": "print",
+            "first_node": true
+        }
+    ]
+}
