@@ -121,18 +121,19 @@ func (tm *DAG) BaseURI() string {
 // processSVGContent processes SVG to ensure proper scaling using viewBox
 func (tm *DAG) processSVGContent(svgContent string) string {
 	// Extract width and height from SVG
-	var width, height string
 	var widthVal, heightVal float64
+	var hasWidth, hasHeight bool
 
 	// Find width attribute
 	if strings.Contains(svgContent, `width="`) {
 		start := strings.Index(svgContent, `width="`) + 7
 		end := strings.Index(svgContent[start:], `"`)
 		if end > 0 {
-			width = svgContent[start : start+end]
+			width := svgContent[start : start+end]
 			// Remove pt, px, or other units and convert to float
 			cleanWidth := strings.TrimSuffix(strings.TrimSuffix(strings.TrimSuffix(width, "pt"), "px"), "in")
-			if val, err := fmt.Sscanf(cleanWidth, "%f", &widthVal); err == nil && val == 1 {
+			if _, err := fmt.Sscanf(cleanWidth, "%f", &widthVal); err == nil {
+				hasWidth = true
 				// Convert pt to pixels (1pt = 1.33px approximately)
 				if strings.HasSuffix(width, "pt") {
 					widthVal *= 1.33
@@ -146,10 +147,11 @@ func (tm *DAG) processSVGContent(svgContent string) string {
 		start := strings.Index(svgContent, `height="`) + 8
 		end := strings.Index(svgContent[start:], `"`)
 		if end > 0 {
-			height = svgContent[start : start+end]
+			height := svgContent[start : start+end]
 			// Remove pt, px, or other units and convert to float
 			cleanHeight := strings.TrimSuffix(strings.TrimSuffix(strings.TrimSuffix(height, "pt"), "px"), "in")
-			if val, err := fmt.Sscanf(cleanHeight, "%f", &heightVal); err == nil && val == 1 {
+			if _, err := fmt.Sscanf(cleanHeight, "%f", &heightVal); err == nil {
+				hasHeight = true
 				// Convert pt to pixels (1pt = 1.33px approximately)
 				if strings.HasSuffix(height, "pt") {
 					heightVal *= 1.33
@@ -158,14 +160,37 @@ func (tm *DAG) processSVGContent(svgContent string) string {
 		}
 	}
 
-	// Create viewBox if it doesn't exist
-	viewBox := fmt.Sprintf("0 0 %.0f %.0f", widthVal, heightVal)
-	if widthVal == 0 || heightVal == 0 {
-		// Fallback dimensions
-		viewBox = "0 0 800 600"
-		widthVal = 800
-		heightVal = 600
+	// If we don't have both dimensions, use fallback values
+	if !hasWidth || !hasHeight || widthVal <= 0 || heightVal <= 0 {
+		// Try to extract from viewBox first
+		if strings.Contains(svgContent, `viewBox="`) {
+			start := strings.Index(svgContent, `viewBox="`) + 9
+			end := strings.Index(svgContent[start:], `"`)
+			if end > 0 {
+				viewBox := svgContent[start : start+end]
+				parts := strings.Fields(viewBox)
+				if len(parts) >= 4 {
+					if w, err := fmt.Sscanf(parts[2], "%f", &widthVal); err == nil && w == 1 && widthVal > 0 {
+						hasWidth = true
+					}
+					if h, err := fmt.Sscanf(parts[3], "%f", &heightVal); err == nil && h == 1 && heightVal > 0 {
+						hasHeight = true
+					}
+				}
+			}
+		}
+
+		// Final fallback
+		if !hasWidth || widthVal <= 0 {
+			widthVal = 800
+		}
+		if !hasHeight || heightVal <= 0 {
+			heightVal = 600
+		}
 	}
+
+	// Create viewBox
+	viewBox := fmt.Sprintf("0 0 %.0f %.0f", widthVal, heightVal)
 
 	// Process the SVG content
 	processedSVG := svgContent
@@ -174,9 +199,8 @@ func (tm *DAG) processSVGContent(svgContent string) string {
 	if strings.Contains(processedSVG, `viewBox="`) {
 		// Replace existing viewBox
 		start := strings.Index(processedSVG, `viewBox="`)
-		end := strings.Index(processedSVG[start:], `"`) + start + 1
-		nextQuote := strings.Index(processedSVG[end:], `"`) + end
-		processedSVG = processedSVG[:start] + fmt.Sprintf(`viewBox="%s"`, viewBox) + processedSVG[nextQuote+1:]
+		end := strings.Index(processedSVG[start+9:], `"`) + start + 9
+		processedSVG = processedSVG[:start] + fmt.Sprintf(`viewBox="%s"`, viewBox) + processedSVG[end+1:]
 	} else {
 		// Add viewBox to opening svg tag
 		svgStart := strings.Index(processedSVG, "<svg")
@@ -191,16 +215,28 @@ func (tm *DAG) processSVGContent(svgContent string) string {
 	// Remove or replace width and height with 100% for responsive scaling
 	if strings.Contains(processedSVG, `width="`) {
 		start := strings.Index(processedSVG, `width="`)
-		end := strings.Index(processedSVG[start:], `"`) + start
-		nextQuote := strings.Index(processedSVG[end+1:], `"`) + end + 1
-		processedSVG = processedSVG[:start] + `width="100%"` + processedSVG[nextQuote+1:]
+		end := strings.Index(processedSVG[start+7:], `"`) + start + 7
+		processedSVG = processedSVG[:start] + `width="100%"` + processedSVG[end+1:]
+	} else {
+		// Add width if it doesn't exist
+		svgStart := strings.Index(processedSVG, "<svg")
+		if svgStart >= 0 {
+			tagEnd := strings.Index(processedSVG[svgStart:], ">") + svgStart
+			processedSVG = processedSVG[:tagEnd] + ` width="100%"` + processedSVG[tagEnd:]
+		}
 	}
 
 	if strings.Contains(processedSVG, `height="`) {
 		start := strings.Index(processedSVG, `height="`)
-		end := strings.Index(processedSVG[start:], `"`) + start
-		nextQuote := strings.Index(processedSVG[end+1:], `"`) + end + 1
-		processedSVG = processedSVG[:start] + `height="100%"` + processedSVG[nextQuote+1:]
+		end := strings.Index(processedSVG[start+8:], `"`) + start + 8
+		processedSVG = processedSVG[:start] + `height="100%"` + processedSVG[end+1:]
+	} else {
+		// Add height if it doesn't exist
+		svgStart := strings.Index(processedSVG, "<svg")
+		if svgStart >= 0 {
+			tagEnd := strings.Index(processedSVG[svgStart:], ">") + svgStart
+			processedSVG = processedSVG[:tagEnd] + ` height="100%"` + processedSVG[tagEnd:]
+		}
 	}
 
 	return processedSVG
@@ -282,21 +318,22 @@ func (tm *DAG) SVGViewerHTML(svgContent string) string {
 
         .control-btn {
             padding: 8px;
-            color: white;
+            color: rgba(0, 0, 0, 0.6);
             border: none;
             border-radius: 5px;
             cursor: pointer;
             font-size: 14px;
             transition: background-color 0.3s;
             font-weight: 500;
+            background-color: white;
         }
 
         .control-btn:hover {
-            background-color:rgb(214, 218, 214);
+            color: rgba(0, 0, 0, 0.8);
         }
 
         .control-btn:active {
-            background-color:rgb(188, 192, 188);
+            color: rgba(0, 0, 0, 0.9);
         }
 
         .svg-container {
@@ -305,6 +342,9 @@ func (tm *DAG) SVGViewerHTML(svgContent string) string {
             cursor: grab;
             position: relative;
             overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
 
         .svg-container:active {
@@ -313,8 +353,14 @@ func (tm *DAG) SVGViewerHTML(svgContent string) string {
 
         .svg-wrapper {
 			user-select: none;
-            transform-origin: 0 0;
+            transform-origin: center center;
             transition: transform 0.2s ease-out;
+            max-width: 100%%;
+            max-height: 100%%;
+        }
+
+        .svg-wrapper svg {
+            display: block;
         }
 
         .instructions {
@@ -429,7 +475,6 @@ func (tm *DAG) SVGViewerHTML(svgContent string) string {
         const svgWrapper = document.getElementById('svgWrapper');
         const svgContainer = document.getElementById('svgContainer');
         const viewerContainer = document.getElementById('viewerContainer');
-        const mainSvg = document.querySelector('#svgWrapper svg');
 
         // Initialize the viewer
         function initializeViewer() {
@@ -440,42 +485,50 @@ func (tm *DAG) SVGViewerHTML(svgContent string) string {
                 return;
             }
 
-            // Get SVG viewBox or fall back to width/height
-            let svgWidth, svgHeight;
+            // Get container dimensions
+            const containerWidth = viewerContainer.clientWidth - 4; // Account for border
+            const containerHeight = viewerContainer.clientHeight - 4;
 
+            // Get SVG viewBox dimensions
+            let svgWidth, svgHeight;
             const viewBox = mainSvg.getAttribute('viewBox');
+
             if (viewBox) {
-                const viewBoxValues = viewBox.split(' ');
-                svgWidth = parseFloat(viewBoxValues[2]);
-                svgHeight = parseFloat(viewBoxValues[3]);
-            } else {
-                // Fallback to getBBox or default dimensions
+                const viewBoxValues = viewBox.split(' ').map(v => parseFloat(v.trim()));
+                if (viewBoxValues.length >= 4) {
+                    svgWidth = viewBoxValues[2];
+                    svgHeight = viewBoxValues[3];
+                }
+            }
+
+            // Fallback to getBBox if viewBox is not available or invalid
+            if (!svgWidth || !svgHeight || svgWidth <= 0 || svgHeight <= 0) {
                 try {
                     const bbox = mainSvg.getBBox();
                     svgWidth = bbox.width;
                     svgHeight = bbox.height;
                 } catch (e) {
+                    console.warn('Could not get SVG bbox, using default dimensions');
                     svgWidth = 800;
                     svgHeight = 600;
                 }
             }
 
-            // Get container dimensions
-            const containerWidth = viewerContainer.clientWidth;
-            const containerHeight = viewerContainer.clientHeight;
+            // Calculate scale to fit SVG entirely within container with padding
+            const padding = 20; // 20px padding on all sides
+            const availableWidth = containerWidth - padding * 2;
+            const availableHeight = containerHeight - padding * 2;
 
-            // Calculate scale to fit SVG entirely within container (with padding)
-            const scaleX = (containerWidth * 0.9) / svgWidth;  // 90% of container width
-            const scaleY = (containerHeight * 0.9) / svgHeight; // 90% of container height
-            initialScale = Math.min(scaleX, scaleY); // Use min to ensure it fits completely
+            const scaleX = availableWidth / svgWidth;
+            const scaleY = availableHeight / svgHeight;
+            initialScale = Math.min(scaleX, scaleY, 1); // Don't scale up beyond 100%
 
-            // Center the SVG in the container
-            const scaledWidth = svgWidth * initialScale;
-            const scaledHeight = svgHeight * initialScale;
-            currentX = (containerWidth - scaledWidth) / 2;
-            currentY = (containerHeight - scaledHeight) / 2;
-
+            // Reset position
+            currentX = 0;
+            currentY = 0;
             currentZoom = initialScale;
+
+            // Apply initial transform
             updateTransform();
 
             console.log('SVG initialized:', {
@@ -483,9 +536,11 @@ func (tm *DAG) SVGViewerHTML(svgContent string) string {
                 svgHeight: svgHeight,
                 containerWidth: containerWidth,
                 containerHeight: containerHeight,
-                initialScale: initialScale,
-                initialX: currentX,
-                initialY: currentY
+                availableWidth: availableWidth,
+                availableHeight: availableHeight,
+                scaleX: scaleX,
+                scaleY: scaleY,
+                initialScale: initialScale
             });
         }
 
@@ -494,7 +549,7 @@ func (tm *DAG) SVGViewerHTML(svgContent string) string {
         }
 
         function zoomIn() {
-            currentZoom *= 1.2;
+            currentZoom = Math.min(currentZoom * 1.2, 10); // Max 10x zoom
             updateTransform();
         }
 
@@ -504,40 +559,8 @@ func (tm *DAG) SVGViewerHTML(svgContent string) string {
         }
 
         function resetView() {
-            // Get container dimensions
-            const containerWidth = viewerContainer.clientWidth;
-            const containerHeight = viewerContainer.clientHeight;
-
-            // Get SVG dimensions
-            const mainSvg = document.querySelector('#svgWrapper svg');
-            let svgWidth, svgHeight;
-
-            const viewBox = mainSvg.getAttribute('viewBox');
-            if (viewBox) {
-                const viewBoxValues = viewBox.split(' ');
-                svgWidth = parseFloat(viewBoxValues[2]);
-                svgHeight = parseFloat(viewBoxValues[3]);
-            } else {
-                try {
-                    const bbox = mainSvg.getBBox();
-                    svgWidth = bbox.width;
-                    svgHeight = bbox.height;
-                } catch (e) {
-                    svgWidth = 800;
-                    svgHeight = 600;
-                }
-            }
-
-            // Recalculate initial scale and position
-            const scaleX = (containerWidth * 0.9) / svgWidth;
-            const scaleY = (containerHeight * 0.9) / svgHeight;
-            initialScale = Math.min(scaleX, scaleY);
-
-            const scaledWidth = svgWidth * initialScale;
-            const scaledHeight = svgHeight * initialScale;
-            currentX = (containerWidth - scaledWidth) / 2;
-            currentY = (containerHeight - scaledHeight) / 2;
-
+            currentX = 0;
+            currentY = 0;
             currentZoom = initialScale;
             updateTransform();
         }
@@ -596,17 +619,19 @@ func (tm *DAG) SVGViewerHTML(svgContent string) string {
             e.preventDefault();
             const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
 
-            // Get mouse position relative to container
+            // Get mouse position relative to container center
             const rect = svgContainer.getBoundingClientRect();
-            const mouseX = e.clientX - rect.left;
-            const mouseY = e.clientY - rect.top;
+            const centerX = rect.width / 2;
+            const centerY = rect.height / 2;
+            const mouseX = e.clientX - rect.left - centerX;
+            const mouseY = e.clientY - rect.top - centerY;
 
-            // Calculate zoom point
+            // Calculate zoom point relative to current transform
             const zoomPointX = (mouseX - currentX) / currentZoom;
             const zoomPointY = (mouseY - currentY) / currentZoom;
 
             // Apply zoom
-            const newZoom = Math.max(currentZoom * zoomFactor, initialScale * 0.1);
+            const newZoom = Math.max(Math.min(currentZoom * zoomFactor, 10), initialScale * 0.1);
 
             if (newZoom !== currentZoom) {
                 // Adjust position to zoom around mouse point
@@ -644,12 +669,14 @@ func (tm *DAG) SVGViewerHTML(svgContent string) string {
             initializeViewer();
         }
 
-        window.addEventListener('resize', initializeViewer);
+        window.addEventListener('resize', function() {
+            setTimeout(initializeViewer, 100);
+        });
 
         // Fallback initialization with timeout
         setTimeout(function() {
             if (currentZoom === 1 && initialScale === 1) {
-                initializeViewer();
+                initializeViserver();
             }
         }, 500);
     </script>
