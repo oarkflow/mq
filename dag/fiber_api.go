@@ -28,7 +28,7 @@ func renderFiberNotFound(c *fiber.Ctx) error {
 }
 
 // Render handles process and request routes.
-func (tm *DAG) renderFiber(c *fiber.Ctx) error {
+func (tm *DAG) RenderFiber(c *fiber.Ctx) error {
 	ctx, data, err := form.ParseBodyAsJSON(c.UserContext(), c.Get("Content-Type"), c.Body(), c.Queries())
 	if err != nil {
 		return c.Status(fiber.StatusNotFound).SendString(err.Error())
@@ -62,6 +62,9 @@ func (tm *DAG) renderFiber(c *fiber.Ctx) error {
 		htmlContent, err := jsonparser.GetString(result.Payload, "html_content")
 		if err != nil {
 			return err
+		}
+		if strings.Contains(htmlContent, "{{current_uri}}") {
+			htmlContent = strings.ReplaceAll(htmlContent, "{{current_uri}}", c.Path())
 		}
 		c.Set(fiber.HeaderContentType, fiber.MIMETextHTMLCharsetUTF8)
 		return c.SendString(htmlContent)
@@ -661,8 +664,8 @@ func (tm *DAG) Handlers(app any, prefix string) {
 	}
 	switch a := app.(type) {
 	case fiber.Router:
-		a.All("/process", tm.renderFiber)
-		a.Get("/request", tm.renderFiber)
+		a.All("/process", tm.RenderFiber)
+		a.Get("/request", tm.RenderFiber)
 		a.Get("/task/status", tm.fiberTaskStatusHandler)
 		a.Get("/dot", func(c *fiber.Ctx) error {
 			return c.Type(fiber.MIMETextPlain).SendString(tm.ExportDOT())

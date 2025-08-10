@@ -56,6 +56,18 @@ func (receiver *RunHandler) Extend() contracts.Extend {
 				Usage:   "Data to be passed to the handler",
 			},
 			{
+				Name:    "serve",
+				Value:   "false",
+				Aliases: []string{"s"},
+				Usage:   "Run the handler as a server",
+			},
+			{
+				Name:    "port",
+				Value:   "",
+				Aliases: []string{"p"},
+				Usage:   "Port for the handler to be running",
+			},
+			{
 				Name:    "data-file",
 				Value:   "",
 				Aliases: []string{"f"},
@@ -80,6 +92,10 @@ func (receiver *RunHandler) Extend() contracts.Extend {
 // Handle Execute the console command.
 func (receiver *RunHandler) Handle(ctx contracts.Context) error {
 	name := ctx.Option("name")
+	serve := ctx.Option("serve")
+	if serve == "" {
+		serve = "false"
+	}
 	if name == "" {
 		return errors.New("Handler name has to be provided")
 	}
@@ -90,6 +106,17 @@ func (receiver *RunHandler) Handle(ctx contracts.Context) error {
 	flow := services.SetupHandler(*handler, receiver.brokerAddr)
 	if flow.Error != nil {
 		panic(flow.Error)
+	}
+	port := ctx.Option("port")
+	if port == "" {
+		port = "8080"
+	}
+
+	if serve != "false" {
+		if err := flow.Start(context.Background(), ":"+port); err != nil {
+			return fmt.Errorf("error starting handler: %w", err)
+		}
+		return nil
 	}
 	data, err := receiver.getData(ctx, "data", "data-file", "test/data", false)
 	if err != nil {

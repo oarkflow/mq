@@ -40,7 +40,7 @@
     "required": [ "username", "password" ],
     "form": {
         "class": "form-horizontal",
-        "action": "/process?task_id={{task_id}}&next=true",
+        "action": "{{current_uri}}?task_id={{task_id}}&next=true",
         "method": "POST",
         "enctype": "application/x-www-form-urlencoded",
         "groups": [

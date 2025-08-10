@@ -15,6 +15,7 @@ import (
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/limiter"
 	"github.com/oarkflow/filters"
+	"github.com/oarkflow/form"
 	"github.com/oarkflow/json"
 	v2 "github.com/oarkflow/jsonschema"
 	"github.com/oarkflow/log"
@@ -29,12 +30,11 @@ import (
 
 var ValidationInstance Validation
 
-func Setup(loader *Loader, serverApp *fiber.App, brokerAddr string) *fiber.App {
+func Setup(loader *Loader, serverApp *fiber.App, brokerAddr string) {
 	if loader.UserConfig == nil {
-		return nil
+		return
 	}
 	SetupServices(loader.Prefix(), serverApp, brokerAddr)
-	return serverApp
 }
 
 func SetupHandler(handler Handler, brokerAddr string, async ...bool) *dag.DAG {
@@ -70,7 +70,7 @@ func SetupHandler(handler Handler, brokerAddr string, async ...bool) *dag.DAG {
 		} else if node.NodeKey != "" {
 			newDag := dag.GetDAG(node.NodeKey)
 			if newDag == nil {
-				flow.Error = errors.New("DAG not found " + node.NodeKey)
+				flow.Error = errors.New("DAG not found " + node.NodeKey + " inside flow " + flow.GetKey())
 				return flow
 			}
 			nodeType := dag.Function
@@ -98,6 +98,7 @@ func SetupHandler(handler Handler, brokerAddr string, async ...bool) *dag.DAG {
 	err := flow.Validate()
 	if err != nil {
 		flow.Error = err
+		return flow
 	}
 	dag.AddDAG(key, flow)
 	return flow
@@ -196,14 +197,18 @@ func mapProviders(dataProviders interface{}) []dag.Provider {
 	return providers
 }
 
-func SetupServices(prefix string, router fiber.Router, brokerAddr string) {
+func SetupServices(prefix string, router fiber.Router, brokerAddr string) error {
 	if router == nil {
-		return
+		return nil
 	}
-	SetupAPI(prefix, router, brokerAddr)
+	err := SetupHandlers(userConfig.Policy.Handlers, brokerAddr)
+	if err != nil {
+		return err
+	}
+	return SetupAPI(prefix, router, brokerAddr)
 }
 
-func SetupAPI(prefix string, router fiber.Router, brokerAddr string) {
+func SetupAPI(prefix string, router fiber.Router, brokerAddr string) error {
 	if prefix != "" {
 		prefix = "/" + prefix
 	}
@@ -225,15 +230,23 @@ func SetupAPI(prefix string, router fiber.Router, brokerAddr string) {
 				routeGroup.Add("GET", CleanAndMergePaths(route.Uri, "/metadata"), func(ctx *fiber.Ctx) error {
 					return getDAGPage(ctx, flow)
 				})
-				routeGroup.Add(strings.ToUpper(route.Method), route.Uri,
+				mw := []fiber.Handler{
 					requestMiddleware(CleanAndMergePaths(prefix, configRoute.Prefix), route),
 					ruleMiddleware(route.Rules),
 					customRuleMiddleware(route, route.CustomRules),
-					customHandler(flow),
-				)
+				}
+				if flow.HasPageNode() {
+					mw = append(mw, flow.RenderFiber)
+					routeGroup.All(route.Uri, mw...)
+
+				} else {
+					mw = append(mw, customHandler(flow))
+					routeGroup.Add(strings.ToUpper(route.Method), route.Uri, mw...)
+				}
 			}
 		}
 	}
+	return nil
 }
 
 // GetRulesFromKeys returns the custom rules from the provided keys.
@@ -370,8 +383,13 @@ func customHandler(flow *dag.DAG) fiber.Handler {
 		if contentType == fiber.MIMEApplicationJSON || contentType == fiber.MIMEApplicationJSONCharsetUTF8 {
 			return ctx.JSON(result)
 		}
+		var resultData map[string]any
+		if err := json.Unmarshal(result.Payload, &resultData); err != nil {
+			return ctx.JSON(fiber.Map{"success": false, "error": "Invalid response payload"})
+		}
 		ctx.Set(consts.ContentType, contentType.(string))
-		return ctx.Send(result.Payload)
+		html, _ := resultData["html_content"].(string)
+		return ctx.SendString(html)
 	}
 }
 
@@ -400,8 +418,7 @@ func ruleMiddleware(rules map[string]string) fiber.Handler {
 		if len(body) == 0 {
 			return ctx.Next()
 		}
-		var requestData map[string]any
-		err := ctx.BodyParser(&requestData)
+		requestData, err := form.DecodeForm(body)
 		if err != nil && body != nil {
 			return responses.Abort(ctx, 400, "Invalid request bind", nil)
 		}
@@ -525,55 +542,37 @@ func CleanAndMergePaths(uri ...string) string {
 
 // HandlerInfo holds handler data and its dependencies
 type HandlerInfo struct {
-	FilePath     string
 	Handler      Handler
 	Dependencies []string
-	Serve        bool
 }
 
-func SetupHandlers(availableHandlers map[string]bool, brokerAddr string) (*dag.DAG, error) {
-	var flowToServe *dag.DAG
+func SetupHandlers(availableHandlers []Handler, brokerAddr string) error {
 	handlerInfos, err := PrepareDependencies(availableHandlers)
 	if err != nil {
-		return nil, fmt.Errorf("failed to prepare handler dependencies: %w", err)
+		return fmt.Errorf("failed to prepare handler dependencies: %w", err)
 	}
 	setupOrder, err := TopologicalSort(handlerInfos)
 	if err != nil {
-		return nil, fmt.Errorf("failed to resolve handler dependencies: %w", err)
+		return fmt.Errorf("failed to resolve handler dependencies: %w", err)
 	}
 	for _, file := range setupOrder {
 		info := handlerInfos[file]
 		fmt.Printf("Setting up handler: %s (key: %s)\n", file, info.Handler.Key)
 		flow := SetupHandler(info.Handler, brokerAddr)
 		if flow.Error != nil {
-			return nil, fmt.Errorf("failed to setup handler %s: %w", file, flow.Error)
-		}
-		if info.Serve {
-			flowToServe = flow
-			fmt.Printf("Will serve handler: %s\n", file)
+			return fmt.Errorf("failed to setup handler %s: %w", file, flow.Error)
 		}
 	}
-	return flowToServe, nil
+	return nil
 }
 
-func PrepareDependencies(availableHandlers map[string]bool) (map[string]*HandlerInfo, error) {
+func PrepareDependencies(availableHandlers []Handler) (map[string]*HandlerInfo, error) {
 	handlerInfos := make(map[string]*HandlerInfo)
-	for file, serve := range availableHandlers {
-		handlerBytes, err := os.ReadFile(file)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read handler file %s: %w", file, err)
-		}
-		var handler Handler
-		err = json.Unmarshal(handlerBytes, &handler)
-		if err != nil {
-			return nil, fmt.Errorf("failed to unmarshal handler from %s: %w", file, err)
-		}
+	for _, handler := range availableHandlers {
 		dependencies := GetDependencies(handler)
-		handlerInfos[file] = &HandlerInfo{
-			FilePath:     file,
+		handlerInfos[handler.Key] = &HandlerInfo{
 			Handler:      handler,
 			Dependencies: dependencies,
-			Serve:        serve,
 		}
 	}
 	return handlerInfos, nil

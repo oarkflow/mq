@@ -5,6 +5,8 @@ import (
 	"github.com/oarkflow/cli"
 	"github.com/oarkflow/cli/console"
 	"github.com/oarkflow/cli/contracts"
+	"github.com/oarkflow/mq"
+	"github.com/oarkflow/mq/dag"
 	"github.com/oarkflow/mq/handlers"
 	"github.com/oarkflow/mq/services"
 	dagConsole "github.com/oarkflow/mq/services/console"
@@ -24,4 +26,10 @@ func main() {
 			dagConsole.NewRunServer(serverApp, ":3000"),
 		}
 	})
+}
+
+func init() {
+	dag.AddHandler("render-html", func(id string) mq.Processor { return handlers.NewRenderHTMLNode(id) })
+	dag.AddHandler("condition", func(id string) mq.Processor { return handlers.NewCondition(id) })
+	dag.AddHandler("output", func(id string) mq.Processor { return handlers.NewOutputHandler(id) })
 }
