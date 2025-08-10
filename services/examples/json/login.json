@@ -69,6 +69,10 @@
             "id": "output",
             "node": "output",
             "data": {
+                "additional_data": {
+                    "output_type": "file",
+                    "file_path": "app/data/login_output.json"
+                },
                 "mapping": {
                     "login_message": "eval.{{'Login successful!'}}"
                 }

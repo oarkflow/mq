@@ -25,7 +25,11 @@ func main() {
 		fmt.Println("Flow is configured but not started.")
 		return
 	}
-	flow.Start(context.Background(), ":5000")
+	err = flow.Start(context.Background(), ":5005")
+	if err != nil {
+		fmt.Println("Error starting flow:", err)
+		return
+	}
 }
 
 func init() {
