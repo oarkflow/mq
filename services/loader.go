@@ -10,11 +10,17 @@ import (
 	"github.com/oarkflow/filters"
 	"github.com/oarkflow/jenv"
 	"github.com/oarkflow/json"
+	"github.com/oarkflow/jsonschema"
 	"github.com/oarkflow/metadata"
 	"gopkg.in/yaml.v3"
 )
 
 var userConfig *UserConfig
+var ConfigPath string
+
+func GetUserConfig() *UserConfig {
+	return userConfig
+}
 
 type Loader struct {
 	path       string
@@ -75,10 +81,15 @@ func (l *Loader) loadConfig() (*UserConfig, error) {
 			return nil, err
 		}
 	}
+	ConfigPath = l.ParsedPath
 	return cfg, nil
 }
 
 func readPath(path string, cfg *UserConfig) error {
+	err := readSchemas(path, cfg)
+	if err != nil {
+		return err
+	}
 	readers := []func(string, *UserConfig) error{
 		readConfig, readCredentials, readConditions, readHandlers,
 		readModels, readApplicationRules, readCommands, readBackgroundTasks,
@@ -210,6 +221,33 @@ func readConditions(path string, cfg *UserConfig) error {
 	return readConfigFile(path, func(data []*filters.Filter) {
 		cfg.Policy.Conditions = append(cfg.Policy.Conditions, data...)
 	})
+}
+
+func readSchemas(path string, cfg *UserConfig) error {
+	path = filepath.Join(path, "policies", "schemas")
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return err
+	}
+	compiler := jsonschema.NewCompiler()
+	for _, entry := range entries {
+		if !entry.IsDir() && isSupportedExt(filepath.Ext(entry.Name())) {
+			file := filepath.Join(path, entry.Name())
+			content, err := os.ReadFile(file)
+			if err != nil {
+				return err
+			}
+			schema, err := compiler.Compile(content)
+			if err != nil {
+				return err
+			}
+			if schema == nil {
+				return errors.New("compiled schema is nil")
+			}
+			cfg.Policy.Schemas = append(cfg.Policy.Schemas, Schema{File: entry.Name(), Instance: schema})
+		}
+	}
+	return nil
 }
 
 func readApplicationRules(path string, cfg *UserConfig) error {

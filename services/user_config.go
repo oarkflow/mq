@@ -194,6 +194,7 @@ type Route struct {
 	HandlerKey       string `json:"handler_key" yaml:"handler_key"`
 	Method           string `json:"route_method" yaml:"route_method"`
 	Schema           []byte `json:"schema" yaml:"schema"`
+	SchemaFile       string `json:"schema_file" yaml:"schema_file"`
 	schema           *v2.Schema
 	Rules            map[string]string `json:"rules" yaml:"rules"`
 	CustomRules      []string          `json:"custom_rules" yaml:"custom_rules"`
@@ -309,11 +310,17 @@ type Web struct {
 	Apis        []Api           `json:"apis" yaml:"apis"`
 }
 
+type Schema struct {
+	File     string `json:"file" yaml:"file"`
+	Instance *v2.Schema
+}
+
 type Policy struct {
 	Web                Web                        `json:"web" yaml:"web"`
 	Models             []Model                    `json:"models" yaml:"models"`
 	BackgroundHandlers []*BackgroundHandler       `json:"background_handlers" yaml:"background_handlers"`
 	Commands           []*GenericCommand          `json:"commands"`
+	Schemas            []Schema                   `json:"schemas" yaml:"schemas"`
 	Conditions         []*filters.Filter          `json:"conditions" yaml:"conditions"`
 	ApplicationRules   []*filters.ApplicationRule `json:"application_rules" yaml:"application_rules"`
 	Handlers           []Handler                  `json:"handlers" yaml:"handlers"`
@@ -329,6 +336,15 @@ func (c *UserConfig) GetModel(source string) *Model {
 	for _, model := range c.Policy.Models {
 		if model.Name == source {
 			return &model
+		}
+	}
+	return nil
+}
+
+func (c *UserConfig) GetSchemaInstance(source string) *Schema {
+	for _, schema := range c.Policy.Schemas {
+		if schema.File == source {
+			return &schema
 		}
 	}
 	return nil

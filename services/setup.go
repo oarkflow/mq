@@ -124,6 +124,14 @@ func prepareNode(flow *dag.DAG, node Node) error {
 	}
 	nodeHandler := newHandler(node.ID)
 	providers := mapProviders(node.Data.Providers)
+	schemaFile, ok := node.Data.AdditionalData["schema_file"].(string)
+	if ok && schemaFile != "" {
+		schema := GetUserConfig().GetSchemaInstance(schemaFile)
+		if schema == nil {
+			return fmt.Errorf("schema file %s not found", schemaFile)
+		}
+		node.Data.AdditionalData["__schema"] = schema.Instance
+	}
 	switch nodeHandler := nodeHandler.(type) {
 	case dag.ConditionProcessor:
 		nodeHandler.SetConfig(dag.Payload{

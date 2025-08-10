@@ -9,6 +9,7 @@ import (
 	"os"
 
 	"github.com/oarkflow/jet"
+	"github.com/oarkflow/jsonschema"
 	"github.com/oarkflow/mq"
 	"github.com/oarkflow/mq/consts"
 	"github.com/oarkflow/mq/dag"
@@ -18,6 +19,28 @@ import (
 type RenderHTMLNode struct {
 	dag.Operation
 	renderer *renderer.JSONSchemaRenderer
+}
+
+func (c *RenderHTMLNode) prepareRenderer(schemaFile string, data, templateData map[string]any, template string, templateFiles ...string) (string, error) {
+	if c.renderer == nil {
+		var templateFile string
+		if len(templateFiles) > 0 {
+			templateFile = templateFiles[0]
+		}
+		schema, ok := data["__schema"].(*jsonschema.Schema)
+		if !ok {
+			return "", fmt.Errorf("schema file %s not found in context", schemaFile)
+		}
+		if schema == nil {
+			return "", fmt.Errorf("schema file %s not found", schemaFile)
+		}
+		renderer, err := renderer.GetFromSchema(schema, template, templateFile)
+		if err != nil {
+			return "", fmt.Errorf("failed to get renderer from file %s: %v", schemaFile, err)
+		}
+		c.renderer = renderer.Renderer
+	}
+	return c.renderer.RenderFields(templateData)
 }
 
 func (c *RenderHTMLNode) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
@@ -51,36 +74,15 @@ func (c *RenderHTMLNode) ProcessTask(ctx context.Context, task *mq.Task) mq.Resu
 	// 1. JSONSchema + HTML Template
 	case schemaFile != "" && templateStr != "" && templateFile == "":
 		fmt.Println("Using JSONSchema and inline HTML template", c.ID)
-		if c.renderer == nil {
-			renderer, err := renderer.GetFromFile(schemaFile, templateStr)
-			if err != nil {
-				return mq.Result{Error: fmt.Errorf("failed to get renderer from file %s: %v", schemaFile, err), Ctx: ctx}
-			}
-			c.renderer = renderer
-		}
-		renderedHTML, err = c.renderer.RenderFields(templateData)
+		renderedHTML, err = c.prepareRenderer(schemaFile, data, templateData, templateStr)
 	// 2. JSONSchema + HTML File
 	case schemaFile != "" && templateFile != "" && templateStr == "":
 		fmt.Println("Using JSONSchema and HTML file", c.ID)
-		if c.renderer == nil {
-			renderer, err := renderer.GetFromFile(schemaFile, "", templateFile)
-			if err != nil {
-				return mq.Result{Error: fmt.Errorf("failed to get renderer from file %s: %v", schemaFile, err), Ctx: ctx}
-			}
-			c.renderer = renderer
-		}
-		renderedHTML, err = c.renderer.RenderFields(templateData)
+		renderedHTML, err = c.prepareRenderer(schemaFile, data, templateData, "", templateFile)
 	// 3. Only JSONSchema
 	case (schemaFile != "" || c.renderer != nil) && templateStr == "" && templateFile == "":
 		fmt.Println("Using only JSONSchema", c.ID)
-		if c.renderer == nil {
-			renderer, err := renderer.GetFromFile(schemaFile, "")
-			if err != nil {
-				return mq.Result{Error: fmt.Errorf("failed to get renderer from file %s: %v", schemaFile, err), Ctx: ctx}
-			}
-			c.renderer = renderer
-		}
-		renderedHTML, err = c.renderer.RenderFields(templateData)
+		renderedHTML, err = c.prepareRenderer(schemaFile, data, templateData, "")
 	// 4. Only HTML Template
 	case templateStr != "" && templateFile == "" && schemaFile == "":
 		fmt.Println("Using inline HTML template", c.ID)

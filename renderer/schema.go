@@ -1246,6 +1246,45 @@ func GetFromBytes(schemaContent []byte, template string, templateFiles ...string
 	return cachedTemplate, nil
 }
 
+func GetFromSchema(schema *jsonschema.Schema, template string, templateFiles ...string) (*RequestSchemaTemplate, error) {
+	template = strings.TrimSpace(template)
+	var htmlLayout []byte
+	var err error
+	if len(templateFiles) > 0 && templateFiles[0] != "" {
+		templateFile := templateFiles[0]
+		if !strings.Contains(templateFile, "/") {
+			template = fmt.Sprintf("%s/%s", BaseTemplateDir, templateFile)
+		}
+		if !strings.HasSuffix(templateFile, ".html") {
+			template += ".html"
+		}
+		htmlLayout, err = os.ReadFile(templateFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load template: %w", err)
+		}
+	} else if template != "" {
+		htmlLayout = []byte(template)
+	} else {
+		htmlLayout = []byte(`
+	<form {{form_attributes}}>
+		<div>
+			{{form_groups}}
+			<div>
+				{{form_buttons}}
+			</div>
+		</div>
+	</form>
+	`)
+	}
+
+	renderer := NewJSONSchemaRenderer(schema, string(htmlLayout))
+	cachedTemplate := &RequestSchemaTemplate{
+		Schema:   schema,
+		Renderer: renderer,
+	}
+	return cachedTemplate, nil
+}
+
 func GetFromFile(schemaPath, template string, templateFiles ...string) (*JSONSchemaRenderer, error) {
 	path := schemaPath
 	if len(templateFiles) > 0 {
