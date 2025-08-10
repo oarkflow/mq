@@ -5,6 +5,7 @@ import (
 	"github.com/oarkflow/cli"
 	"github.com/oarkflow/cli/console"
 	"github.com/oarkflow/cli/contracts"
+
 	"github.com/oarkflow/mq"
 	"github.com/oarkflow/mq/dag"
 	"github.com/oarkflow/mq/handlers"
@@ -23,7 +24,7 @@ func main() {
 		return []contracts.Command{
 			console.NewListCommand(client),
 			dagConsole.NewRunHandler(loader.UserConfig, loader.ParsedPath, brokerAddr),
-			dagConsole.NewRunServer(serverApp, ":3000"),
+			dagConsole.NewRunServer(serverApp),
 		}
 	})
 }
