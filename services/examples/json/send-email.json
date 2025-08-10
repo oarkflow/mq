@@ -1,7 +1,6 @@
 {
     "name": "Email Notification System",
     "key": "email:notification",
-    "disable_log": true,
     "nodes": [
         {
             "id": "Login",

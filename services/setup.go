@@ -55,6 +55,7 @@ func SetupHandler(handler Handler, brokerAddr string, async ...bool) *dag.DAG {
 		opts = append(opts, mq.WithLogger(nil))
 	}
 	flow := dag.NewDAG(handler.Name, handler.Key, nil, opts...)
+	flow.SetDebug(handler.Debug)
 	for _, node := range handler.Nodes {
 		if node.Node == "" && node.NodeKey == "" {
 			flow.Error = errors.New("Node not defined " + node.ID)
@@ -182,7 +183,7 @@ func prepareNode(flow *dag.DAG, node Node) error {
 	if node.Name == "" {
 		node.Name = node.ID
 	}
-	flow.AddNode(nodeType, node.Name, node.ID, nodeHandler, node.FirstNode)
+	flow.AddNodeWithDebug(nodeType, node.Name, node.ID, nodeHandler, node.Debug, node.FirstNode)
 	return nil
 }
 

@@ -45,7 +45,6 @@ func main() {
 		panic(flow.Error)
 	}
 
-	fmt.Println(flow.ExportDOT())
 	rs := flow.Process(context.Background(), data)
 	if rs.Error != nil {
 		panic(rs.Error)

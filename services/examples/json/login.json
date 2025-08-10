@@ -1,7 +1,6 @@
 {
     "name": "Login Flow",
     "key": "login:flow",
-    "disable_log": true,
     "nodes": [
         {
             "id": "LoginForm",

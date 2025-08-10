@@ -139,6 +139,7 @@ type Node struct {
 	NodeKey   string `json:"node_key" yaml:"node_key"`
 	Node      string `json:"node" yaml:"node"`
 	Data      Data   `json:"data" yaml:"data"`
+	Debug     bool   `json:"debug" yaml:"debug"`
 	FirstNode bool   `json:"first_node" yaml:"first_node"`
 }
 
@@ -163,6 +164,7 @@ type Handler struct {
 	Name       string   `json:"name" yaml:"name"`
 	Key        string   `json:"key" yaml:"key"`
 	DisableLog bool     `json:"disable_log" yaml:"disable_log"`
+	Debug      bool     `json:"debug" yaml:"debug"`
 	Nodes      []Node   `json:"nodes,omitempty" yaml:"nodes,omitempty"`
 	Edges      []Edge   `json:"edges,omitempty" yaml:"edges,omitempty"`
 	Branches   []Branch `json:"branches,omitempty" yaml:"branches,omitempty"`

@@ -40,11 +40,22 @@ type Node struct {
 	NodeType  NodeType
 	isReady   bool
 	Timeout   time.Duration // ...new field for node-level timeout...
+	Debug     bool          // Individual node debug mode
 }
 
 // SetTimeout allows setting a maximum processing duration for the node.
 func (n *Node) SetTimeout(d time.Duration) {
 	n.Timeout = d
+}
+
+// SetDebug enables or disables debug mode for this specific node.
+func (n *Node) SetDebug(enabled bool) {
+	n.Debug = enabled
+}
+
+// IsDebugEnabled checks if debug is enabled for this node or globally.
+func (n *Node) IsDebugEnabled(dagDebug bool) bool {
+	return n.Debug || dagDebug
 }
 
 type Edge struct {
@@ -100,6 +111,9 @@ type DAG struct {
 	// Circuit breakers per node
 	circuitBreakers   map[string]*CircuitBreaker
 	circuitBreakersMu sync.RWMutex
+
+	// Debug configuration
+	debug bool // Global debug mode for the entire DAG
 }
 
 // SetPreProcessHook configures a function to be called before each node is processed.
@@ -110,6 +124,63 @@ func (tm *DAG) SetPreProcessHook(hook func(ctx context.Context, node *Node, task
 // SetPostProcessHook configures a function to be called after each node is processed.
 func (tm *DAG) SetPostProcessHook(hook func(ctx context.Context, node *Node, taskID string, result mq.Result)) {
 	tm.PostProcessHook = hook
+}
+
+// SetDebug enables or disables debug mode for the entire DAG.
+func (tm *DAG) SetDebug(enabled bool) {
+	tm.debug = enabled
+}
+
+// IsDebugEnabled returns whether debug mode is enabled for the DAG.
+func (tm *DAG) IsDebugEnabled() bool {
+	return tm.debug
+}
+
+// SetNodeDebug enables or disables debug mode for a specific node.
+func (tm *DAG) SetNodeDebug(nodeID string, enabled bool) error {
+	node, exists := tm.nodes.Get(nodeID)
+	if !exists {
+		return fmt.Errorf("node with ID '%s' not found", nodeID)
+	}
+	node.SetDebug(enabled)
+	return nil
+}
+
+// SetAllNodesDebug enables or disables debug mode for all nodes in the DAG.
+func (tm *DAG) SetAllNodesDebug(enabled bool) {
+	tm.nodes.ForEach(func(nodeID string, node *Node) bool {
+		node.SetDebug(enabled)
+		return true
+	})
+}
+
+// GetDebugInfo returns debug information about the DAG and its nodes.
+func (tm *DAG) GetDebugInfo() map[string]interface{} {
+	debugInfo := map[string]interface{}{
+		"dag_name":          tm.name,
+		"dag_key":           tm.key,
+		"dag_debug_enabled": tm.debug,
+		"start_node":        tm.startNode,
+		"has_page_node":     tm.hasPageNode,
+		"is_paused":         tm.paused,
+		"nodes":             make(map[string]map[string]interface{}),
+	}
+
+	nodesInfo := debugInfo["nodes"].(map[string]map[string]interface{})
+	tm.nodes.ForEach(func(nodeID string, node *Node) bool {
+		nodesInfo[nodeID] = map[string]interface{}{
+			"id":            node.ID,
+			"label":         node.Label,
+			"type":          node.NodeType.String(),
+			"debug_enabled": node.Debug,
+			"has_timeout":   node.Timeout > 0,
+			"timeout":       node.Timeout.String(),
+			"edge_count":    len(node.Edges),
+		}
+		return true
+	})
+
+	return debugInfo
 }
 
 func NewDAG(name, key string, finalResultCallback func(taskID string, result mq.Result), opts ...mq.Option) *DAG {
@@ -284,6 +355,15 @@ func (tm *DAG) AddNode(nodeType NodeType, name, nodeID string, handler mq.Proces
 	return tm
 }
 
+// AddNodeWithDebug adds a node to the DAG with optional debug mode enabled
+func (tm *DAG) AddNodeWithDebug(nodeType NodeType, name, nodeID string, handler mq.Processor, debug bool, startNode ...bool) *DAG {
+	dag := tm.AddNode(nodeType, name, nodeID, handler, startNode...)
+	if dag.Error == nil {
+		dag.SetNodeDebug(nodeID, debug)
+	}
+	return dag
+}
+
 func (tm *DAG) AddDeferredNode(nodeType NodeType, name, key string, firstNode ...bool) error {
 	if tm.server.SyncMode() {
 		return fmt.Errorf("DAG cannot have deferred node in Sync Mode")
@@ -361,6 +441,11 @@ func (tm *DAG) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 	// Enhanced processing with monitoring and rate limiting
 	startTime := time.Now()
 
+	// Debug logging at DAG level
+	if tm.IsDebugEnabled() {
+		tm.debugDAGTaskStart(ctx, task, startTime)
+	}
+
 	// Record task start in monitoring
 	if tm.monitor != nil {
 		tm.monitor.metrics.RecordTaskStart(task.ID)
@@ -401,6 +486,11 @@ func (tm *DAG) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 
 	// Update internal metrics
 	tm.updateTaskMetrics(task.ID, result, duration)
+
+	// Debug logging at DAG level for task completion
+	if tm.IsDebugEnabled() {
+		tm.debugDAGTaskComplete(ctx, task, result, duration, startTime)
+	}
 
 	// Trigger webhooks if configured
 	if tm.webhookManager != nil {
@@ -1607,4 +1697,89 @@ func (h *ActivityAlertHandler) HandleAlert(alert Alert) error {
 		)
 	}
 	return nil
+}
+
+// debugDAGTaskStart logs debug information when a task starts at DAG level
+func (tm *DAG) debugDAGTaskStart(ctx context.Context, task *mq.Task, startTime time.Time) {
+	var payload map[string]any
+	if err := json.Unmarshal(task.Payload, &payload); err != nil {
+		payload = map[string]any{"raw_payload": string(task.Payload)}
+	}
+	tm.Logger().Info("🚀 [DEBUG] DAG task processing started",
+		logger.Field{Key: "dag_name", Value: tm.name},
+		logger.Field{Key: "dag_key", Value: tm.key},
+		logger.Field{Key: "task_id", Value: task.ID},
+		logger.Field{Key: "task_topic", Value: task.Topic},
+		logger.Field{Key: "timestamp", Value: startTime.Format(time.RFC3339)},
+		logger.Field{Key: "start_node", Value: tm.startNode},
+		logger.Field{Key: "has_page_node", Value: tm.hasPageNode},
+		logger.Field{Key: "is_paused", Value: tm.paused},
+		logger.Field{Key: "payload_size", Value: len(task.Payload)},
+		logger.Field{Key: "payload_preview", Value: tm.getDAGPayloadPreview(payload)},
+		logger.Field{Key: "debug_enabled", Value: tm.debug},
+	)
+}
+
+// debugDAGTaskComplete logs debug information when a task completes at DAG level
+func (tm *DAG) debugDAGTaskComplete(ctx context.Context, task *mq.Task, result mq.Result, duration time.Duration, startTime time.Time) {
+	var resultPayload map[string]any
+	if len(result.Payload) > 0 {
+		if err := json.Unmarshal(result.Payload, &resultPayload); err != nil {
+			resultPayload = map[string]any{"raw_payload": string(result.Payload)}
+		}
+	}
+
+	tm.Logger().Info("🏁 [DEBUG] DAG task processing completed",
+		logger.Field{Key: "dag_name", Value: tm.name},
+		logger.Field{Key: "dag_key", Value: tm.key},
+		logger.Field{Key: "task_id", Value: task.ID},
+		logger.Field{Key: "task_topic", Value: task.Topic},
+		logger.Field{Key: "result_topic", Value: result.Topic},
+		logger.Field{Key: "timestamp", Value: time.Now().Format(time.RFC3339)},
+		logger.Field{Key: "total_duration", Value: duration.String()},
+		logger.Field{Key: "status", Value: string(result.Status)},
+		logger.Field{Key: "has_error", Value: result.Error != nil},
+		logger.Field{Key: "error_message", Value: tm.getDAGErrorMessage(result.Error)},
+		logger.Field{Key: "result_size", Value: len(result.Payload)},
+		logger.Field{Key: "result_preview", Value: tm.getDAGPayloadPreview(resultPayload)},
+		logger.Field{Key: "is_last", Value: result.Last},
+		logger.Field{Key: "metrics", Value: tm.GetTaskMetrics()},
+	)
+}
+
+// getDAGPayloadPreview returns a truncated version of the payload for debug logging
+func (tm *DAG) getDAGPayloadPreview(payload map[string]any) string {
+	if payload == nil {
+		return "null"
+	}
+
+	preview := make(map[string]any)
+	count := 0
+	maxFields := 3 // Limit to first 3 fields for DAG level logging
+
+	for key, value := range payload {
+		if count >= maxFields {
+			preview["..."] = fmt.Sprintf("and %d more fields", len(payload)-maxFields)
+			break
+		}
+
+		// Truncate string values if they're too long
+		if strVal, ok := value.(string); ok && len(strVal) > 50 {
+			preview[key] = strVal[:47] + "..."
+		} else {
+			preview[key] = value
+		}
+		count++
+	}
+
+	previewBytes, _ := json.Marshal(preview)
+	return string(previewBytes)
+}
+
+// getDAGErrorMessage safely extracts error message
+func (tm *DAG) getDAGErrorMessage(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }

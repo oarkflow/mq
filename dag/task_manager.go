@@ -209,6 +209,12 @@ func (tm *TaskManager) processNode(exec *task) {
 	if tm.dag.PreProcessHook != nil {
 		exec.ctx = tm.dag.PreProcessHook(exec.ctx, node, exec.taskID, exec.payload)
 	}
+
+	// Debug logging before processing
+	if node.IsDebugEnabled(tm.dag.IsDebugEnabled()) {
+		tm.debugNodeStart(exec, node)
+	}
+
 	state, _ := tm.taskStates.Get(exec.nodeID)
 	if state == nil {
 		tm.dag.Logger().Warn("State not found; creating new state", logger.Field{Key: "nodeID", Value: exec.nodeID})
@@ -258,6 +264,11 @@ func (tm *TaskManager) processNode(exec *task) {
 	// Invoke PostProcessHook if available.
 	if tm.dag.PostProcessHook != nil {
 		tm.dag.PostProcessHook(exec.ctx, node, exec.taskID, result)
+	}
+
+	// Debug logging after processing
+	if node.IsDebugEnabled(tm.dag.IsDebugEnabled()) {
+		tm.debugNodeComplete(exec, node, result, nodeLatency, attempts)
 	}
 
 	if result.Error != nil {
@@ -613,4 +624,95 @@ func (tm *TaskManager) Stop() {
 	tm.deferredTasks.Clear()
 	tm.currentNodePayload.Clear()
 	tm.currentNodeResult.Clear()
+}
+
+// debugNodeStart logs debug information when a node starts processing
+func (tm *TaskManager) debugNodeStart(exec *task, node *Node) {
+	var payload map[string]any
+	if err := json.Unmarshal(exec.payload, &payload); err != nil {
+		payload = map[string]any{"raw_payload": string(exec.payload)}
+	}
+
+	tm.dag.Logger().Info("🐛 [DEBUG] Node processing started",
+		logger.Field{Key: "dag_name", Value: tm.dag.name},
+		logger.Field{Key: "task_id", Value: exec.taskID},
+		logger.Field{Key: "node_id", Value: node.ID},
+		logger.Field{Key: "node_type", Value: node.NodeType.String()},
+		logger.Field{Key: "node_label", Value: node.Label},
+		logger.Field{Key: "timestamp", Value: time.Now().Format(time.RFC3339)},
+		logger.Field{Key: "has_timeout", Value: node.Timeout > 0},
+		logger.Field{Key: "timeout_duration", Value: node.Timeout.String()},
+		logger.Field{Key: "payload_size", Value: len(exec.payload)},
+		logger.Field{Key: "payload_preview", Value: tm.getPayloadPreview(payload)},
+		logger.Field{Key: "debug_mode", Value: "individual_node:" + fmt.Sprintf("%t", node.Debug) + ", dag_global:" + fmt.Sprintf("%t", tm.dag.IsDebugEnabled())},
+	)
+
+	// Log processor type if it implements the Debugger interface
+	if debugger, ok := node.processor.(Debugger); ok {
+		debugger.Debug(exec.ctx, mq.NewTask(exec.taskID, exec.payload, exec.nodeID, mq.WithDAG(tm.dag)))
+	}
+}
+
+// debugNodeComplete logs debug information when a node completes processing
+func (tm *TaskManager) debugNodeComplete(exec *task, node *Node, result mq.Result, latency time.Duration, attempts int) {
+	var resultPayload map[string]any
+	if len(result.Payload) > 0 {
+		if err := json.Unmarshal(result.Payload, &resultPayload); err != nil {
+			resultPayload = map[string]any{"raw_payload": string(result.Payload)}
+		}
+	}
+
+	tm.dag.Logger().Info("🐛 [DEBUG] Node processing completed",
+		logger.Field{Key: "dag_name", Value: tm.dag.name},
+		logger.Field{Key: "task_id", Value: exec.taskID},
+		logger.Field{Key: "node_id", Value: node.ID},
+		logger.Field{Key: "node_type", Value: node.NodeType.String()},
+		logger.Field{Key: "node_label", Value: node.Label},
+		logger.Field{Key: "timestamp", Value: time.Now().Format(time.RFC3339)},
+		logger.Field{Key: "status", Value: string(result.Status)},
+		logger.Field{Key: "latency", Value: latency.String()},
+		logger.Field{Key: "attempts", Value: attempts + 1},
+		logger.Field{Key: "has_error", Value: result.Error != nil},
+		logger.Field{Key: "error_message", Value: tm.getErrorMessage(result.Error)},
+		logger.Field{Key: "result_size", Value: len(result.Payload)},
+		logger.Field{Key: "result_preview", Value: tm.getPayloadPreview(resultPayload)},
+		logger.Field{Key: "is_last_node", Value: result.Last},
+	)
+}
+
+// getPayloadPreview returns a truncated version of the payload for debug logging
+func (tm *TaskManager) getPayloadPreview(payload map[string]any) string {
+	if payload == nil {
+		return "null"
+	}
+
+	preview := make(map[string]any)
+	count := 0
+	maxFields := 5 // Limit to first 5 fields to avoid log spam
+
+	for key, value := range payload {
+		if count >= maxFields {
+			preview["..."] = fmt.Sprintf("and %d more fields", len(payload)-maxFields)
+			break
+		}
+
+		// Truncate string values if they're too long
+		if strVal, ok := value.(string); ok && len(strVal) > 100 {
+			preview[key] = strVal[:97] + "..."
+		} else {
+			preview[key] = value
+		}
+		count++
+	}
+
+	previewBytes, _ := json.Marshal(preview)
+	return string(previewBytes)
+}
+
+// getErrorMessage safely extracts error message
+func (tm *TaskManager) getErrorMessage(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
