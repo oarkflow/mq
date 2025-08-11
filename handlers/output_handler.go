@@ -44,7 +44,6 @@ func (c *OutputHandler) ProcessTask(ctx context.Context, task *mq.Task) mq.Resul
 			}
 		}
 	}
-
 	outputType, _ := c.Payload.Data["output_type"].(string)
 	switch outputType {
 	case "stdout":
@@ -136,7 +135,7 @@ func (c *OutputHandler) ProcessTask(ctx context.Context, task *mq.Task) mq.Resul
 
 	bt, _ := json.Marshal(templateData)
 	for _, field := range except {
-		utils.RemoveRecursiveFromJSON(bt, field)
+		bt = utils.RemoveRecursiveFromJSON(bt, field)
 	}
 	return mq.Result{Payload: bt, Ctx: ctx}
 }
