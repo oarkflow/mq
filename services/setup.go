@@ -25,6 +25,7 @@ import (
 	"github.com/oarkflow/mq/dag"
 	"github.com/oarkflow/mq/services/http/responses"
 	"github.com/oarkflow/mq/services/middlewares"
+	"github.com/oarkflow/mq/services/renderer"
 	"github.com/oarkflow/mq/services/utils"
 )
 
@@ -34,7 +35,10 @@ func Setup(loader *Loader, serverApp *fiber.App, brokerAddr string) {
 	if loader.UserConfig == nil {
 		return
 	}
-	SetupServices(loader.Prefix(), serverApp, brokerAddr)
+	err := SetupServices(loader.Prefix(), serverApp, brokerAddr)
+	if err != nil {
+		panic(err)
+	}
 }
 
 func SetupHandler(handler Handler, brokerAddr string, async ...bool) *dag.DAG {
@@ -212,6 +216,23 @@ func SetupServices(prefix string, router fiber.Router, brokerAddr string) error 
 	err := SetupHandlers(userConfig.Policy.Handlers, brokerAddr)
 	if err != nil {
 		return err
+	}
+	static := userConfig.Policy.Web.Static
+	if static != nil && static.Dir != "" {
+		router.Static(
+			static.Prefix,
+			static.Dir,
+			fiber.Static{
+				Compress:  static.Options.Compress,
+				ByteRange: static.Options.ByteRange,
+				Browse:    static.Options.Browse,
+				Index:     static.Options.IndexFile,
+			},
+		)
+	}
+	err = setupRender(prefix, router)
+	if err != nil {
+		return fmt.Errorf("failed to setup render: %w", err)
 	}
 	return SetupAPI(prefix, router, brokerAddr)
 }
@@ -439,6 +460,24 @@ func ruleMiddleware(rules map[string]string) fiber.Handler {
 		}
 		return ctx.Next()
 	}
+}
+
+func setupRender(_ string, clientRoutes fiber.Router) error {
+	for _, cfg := range userConfig.Policy.Web.Render {
+		if cfg.Root != "" && cfg.ID != "" {
+			err := renderer.New(clientRoutes, renderer.Config{
+				Prefix:   cfg.Prefix,
+				Root:     cfg.Root,
+				Index:    cfg.Index,
+				UseIndex: cfg.UseIndex,
+				Compress: cfg.Compress,
+			})
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // requestMiddleware validates the request body in the original form of byte array
