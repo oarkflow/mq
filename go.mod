@@ -12,9 +12,9 @@ require (
 	github.com/oarkflow/form v0.0.0-20241203111156-b1be5636af43
 	github.com/oarkflow/jet v0.0.4
 	github.com/oarkflow/json v0.0.28
-	github.com/oarkflow/log v1.0.79
+	github.com/oarkflow/log v1.0.83
 	github.com/oarkflow/xid v1.2.8
-	golang.org/x/crypto v0.33.0
+	golang.org/x/crypto v0.41.0
 	golang.org/x/exp v0.0.0-20250305212735-054e65f0b394
 	golang.org/x/time v0.11.0
 )
@@ -25,7 +25,7 @@ require (
 	github.com/gotnospirit/makeplural v0.0.0-20180622080156-a5f48d94d976 // indirect
 	github.com/gotnospirit/messageformat v0.0.0-20221001023931-dfe49f1eb092 // indirect
 	github.com/kaptinlin/go-i18n v0.1.4 // indirect
-	golang.org/x/text v0.25.0 // indirect
+	golang.org/x/text v0.28.0 // indirect
 )
 
 require (
@@ -40,5 +40,5 @@ require (
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/valyala/fasthttp v1.59.0 // indirect
-	golang.org/x/sys v0.31.0 // indirect
+	golang.org/x/sys v0.35.0 // indirect
 )
