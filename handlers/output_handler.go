@@ -11,7 +11,6 @@ import (
 
 	"github.com/oarkflow/mq"
 	"github.com/oarkflow/mq/dag"
-	"github.com/oarkflow/mq/utils"
 )
 
 type OutputHandler struct {
@@ -19,31 +18,14 @@ type OutputHandler struct {
 }
 
 func (c *OutputHandler) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
-	var templateData map[string]any
-	if len(task.Payload) > 0 {
-		if err := json.Unmarshal(task.Payload, &templateData); err != nil {
-			return mq.Result{Error: err, Ctx: ctx}
-		}
+	templateData, err := dag.UnmarshalPayload[map[string]any](ctx, task.Payload)
+	if err != nil {
+		return mq.Result{Error: err, Ctx: ctx}
 	}
 	if templateData == nil {
 		templateData = make(map[string]any)
 	}
-	if c.Payload.Mapping != nil {
-		for k, v := range c.Payload.Mapping {
-			_, val := dag.GetVal(ctx, v, templateData)
-			templateData[k] = val
-		}
-	}
-	except, ok := c.Payload.Data["except_fields"].([]string)
-	if !ok {
-		exceptAny, ok := c.Payload.Data["except_fields"].([]any)
-		if ok {
-			except = make([]string, len(exceptAny))
-			for i, v := range exceptAny {
-				except[i], _ = v.(string)
-			}
-		}
-	}
+	templateData = c.ParseMapping(ctx, templateData)
 	outputType, _ := c.Payload.Data["output_type"].(string)
 	switch outputType {
 	case "stdout":
@@ -132,11 +114,8 @@ func (c *OutputHandler) ProcessTask(ctx context.Context, task *mq.Task) mq.Resul
 			"message":     "Data sent to API successfully",
 		}
 	}
-
 	bt, _ := json.Marshal(templateData)
-	for _, field := range except {
-		bt = utils.RemoveRecursiveFromJSON(bt, field)
-	}
+	bt = c.ExceptFields(bt)
 	return mq.Result{Payload: bt, Ctx: ctx}
 }
 

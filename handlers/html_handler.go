@@ -50,11 +50,9 @@ func (c *RenderHTMLNode) ProcessTask(ctx context.Context, task *mq.Task) mq.Resu
 		templateStr, _  = data["template"].(string)
 		templateFile, _ = data["template_file"].(string)
 	)
-	var templateData map[string]any
-	if len(task.Payload) > 0 {
-		if err := json.Unmarshal(task.Payload, &templateData); err != nil {
-			return mq.Result{Payload: task.Payload, Error: err, Ctx: ctx}
-		}
+	templateData, err := dag.UnmarshalPayload[map[string]any](ctx, task.Payload)
+	if err != nil {
+		return mq.Result{Error: err, Ctx: ctx}
 	}
 	if templateData == nil {
 		templateData = make(map[string]any)
@@ -68,7 +66,6 @@ func (c *RenderHTMLNode) ProcessTask(ctx context.Context, task *mq.Task) mq.Resu
 	}
 	templateData["task_id"] = ctx.Value("task_id")
 	var renderedHTML string
-	var err error
 	parser := jet.NewWithMemory(jet.WithDelims("{{", "}}"))
 	switch {
 	// 1. JSONSchema + HTML Template

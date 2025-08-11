@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/oarkflow/json"
+	"github.com/oarkflow/mq/utils"
 
 	"github.com/oarkflow/date"
 	"github.com/oarkflow/dipper"
@@ -165,6 +166,48 @@ func (e *Operation) ValidateFields(c context.Context, payload []byte) (map[strin
 	for _, k := range e.RequiredFields {
 		if !slices.Contains(keys, k) {
 			return nil, errors.New("Required field doesn't exist")
+		}
+	}
+	return data, nil
+}
+
+func (e *Operation) ParseMapping(ctx context.Context, data map[string]any) map[string]any {
+	templateData := make(map[string]any)
+	if e.Payload.Mapping != nil {
+		for k, v := range e.Payload.Mapping {
+			_, val := GetVal(ctx, v, data)
+			templateData[k] = val
+		}
+	}
+	return templateData
+}
+
+func (e *Operation) ExceptFields(payload []byte) []byte {
+	except, ok := e.Payload.Data["except_fields"].([]string)
+	if !ok {
+		exceptAny, ok := e.Payload.Data["except_fields"].([]any)
+		if ok {
+			except = make([]string, len(exceptAny))
+			for i, v := range exceptAny {
+				except[i], _ = v.(string)
+			}
+		}
+	}
+	return e.RemoveFields(payload, except...)
+}
+
+func (e *Operation) RemoveFields(payload []byte, keys ...string) []byte {
+	for _, field := range keys {
+		payload = utils.RemoveRecursiveFromJSON(payload, field)
+	}
+	return payload
+}
+
+func UnmarshalPayload[T any](c context.Context, payload []byte) (T, error) {
+	var data T
+	if len(payload) > 0 {
+		if err := json.Unmarshal(payload, &data); err != nil {
+			return data, err
 		}
 	}
 	return data, nil

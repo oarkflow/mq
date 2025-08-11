@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/oarkflow/json"
 	"github.com/oarkflow/mq"
 	"github.com/oarkflow/mq/dag"
 )
@@ -36,10 +35,9 @@ func (e *Condition) SetConditions(conditions map[string]dag.Condition) {
 }
 
 func (e *Condition) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
-	var data map[string]any
-	err := json.Unmarshal(task.Payload, &data)
+	data, err := dag.UnmarshalPayload[map[string]any](ctx, task.Payload)
 	if err != nil {
-		panic(err)
+		return mq.Result{Error: err, Ctx: ctx}
 	}
 	var conditionStatus string
 	_, ok := e.conditions[defaultKey]
