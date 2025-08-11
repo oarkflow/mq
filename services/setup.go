@@ -17,15 +17,15 @@ import (
 	"github.com/oarkflow/filters"
 	"github.com/oarkflow/form"
 	"github.com/oarkflow/json"
-	v2 "github.com/oarkflow/jsonschema"
 	"github.com/oarkflow/log"
+	"github.com/oarkflow/protocol/utils/str"
+
 	"github.com/oarkflow/mq"
 	"github.com/oarkflow/mq/consts"
 	"github.com/oarkflow/mq/dag"
 	"github.com/oarkflow/mq/services/http/responses"
 	"github.com/oarkflow/mq/services/middlewares"
 	"github.com/oarkflow/mq/services/utils"
-	"github.com/oarkflow/protocol/utils/str"
 )
 
 var ValidationInstance Validation
@@ -341,21 +341,19 @@ func prepareHeader(ctx *fiber.Ctx, route *Route) (map[string]any, map[string]any
 	header := make(map[string]any)
 	param := make(map[string]any)
 	query := make(map[string]any)
-	if route.Schema != nil {
-		schema := route.GetSchema()
-		if schema != nil {
-			if schema.Properties != nil {
-				for key, property := range *schema.Properties {
-					if property.In != nil {
-						for _, in := range property.In {
-							switch in {
-							case "param":
-								param[key] = ctx.Params(key)
-							case "query":
-								query[key] = ctx.Query(key)
-							case "body":
-								requiredBody[key] = true
-							}
+	schema := route.GetSchema()
+	if schema != nil {
+		if schema.Properties != nil {
+			for key, property := range *schema.Properties {
+				if property.In != nil {
+					for _, in := range property.In {
+						switch in {
+						case "param":
+							param[key] = ctx.Params(key)
+						case "query":
+							query[key] = ctx.Query(key)
+						case "body":
+							requiredBody[key] = true
 						}
 					}
 				}
@@ -446,18 +444,9 @@ func ruleMiddleware(rules map[string]string) fiber.Handler {
 // requestMiddleware validates the request body in the original form of byte array
 // against the provided request JSON schema to ensure that the request body is valid.
 func requestMiddleware(prefix string, route *Route) fiber.Handler {
-	path := CleanAndMergePaths(prefix, route.Uri)
-	var schema *v2.Schema
-	var err error
-	if route.Schema != nil {
-		schema, err = utils.CompileSchema(path, strings.ToUpper(route.Method), route.Schema)
-		if err != nil {
-			panic(err)
-		}
-		route.SetSchema(schema)
-	}
 	return func(ctx *fiber.Ctx) error {
-		if route.Schema == nil {
+		schema := route.GetSchema()
+		if schema == nil {
 			return ctx.Next()
 		}
 		requestSchema := ctx.Query("request-schema")
@@ -480,11 +469,11 @@ func requestMiddleware(prefix string, route *Route) fiber.Handler {
 				break
 			}
 		}
-		form, _ := ctx.MultipartForm()
-		if form != nil {
+		multipartForm, _ := ctx.MultipartForm()
+		if multipartForm != nil {
 			return ctx.Next()
 		}
-		return middlewares.ValidateRequestBySchema(ctx)
+		return middlewares.ValidateRequestBySchema(schema, ctx)
 	}
 }
 

@@ -3,24 +3,7 @@
         {
             "route_uri": "/test-route",
             "route_method": "POST",
-            "schema": {
-                "type": "object",
-                "description": "users",
-                "required": [ "user_id" ],
-                "properties": {
-                    "last_name": {
-                        "type": "string",
-                        "default": "'Baniya'"
-                    },
-                    "user_id": {
-                        "type": [
-                            "integer",
-                            "string"
-                        ],
-                        "maxLength": 64
-                    }
-                }
-            },
+            "schema_file": "test-route.json",
             "description": "Handle test route",
             "model": "test_route",
             "operation": "custom",

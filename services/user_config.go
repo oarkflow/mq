@@ -188,14 +188,13 @@ type RestrictedFields struct {
 }
 
 type Route struct {
-	Name             string `json:"name" yaml:"name"`
-	Description      string `json:"description" yaml:"description"`
-	Uri              string `json:"route_uri" yaml:"route_uri"`
-	HandlerKey       string `json:"handler_key" yaml:"handler_key"`
-	Method           string `json:"route_method" yaml:"route_method"`
-	Schema           []byte `json:"schema" yaml:"schema"`
-	SchemaFile       string `json:"schema_file" yaml:"schema_file"`
-	schema           *v2.Schema
+	Name             string            `json:"name" yaml:"name"`
+	Description      string            `json:"description" yaml:"description"`
+	Uri              string            `json:"route_uri" yaml:"route_uri"`
+	HandlerKey       string            `json:"handler_key" yaml:"handler_key"`
+	Method           string            `json:"route_method" yaml:"route_method"`
+	Schema           []byte            `json:"schema" yaml:"schema"`
+	SchemaFile       string            `json:"schema_file" yaml:"schema_file"`
 	Rules            map[string]string `json:"rules" yaml:"rules"`
 	CustomRules      []string          `json:"custom_rules" yaml:"custom_rules"`
 	Model            string            `json:"model" yaml:"model"`
@@ -203,6 +202,7 @@ type Route struct {
 	Middlewares      []Middleware      `json:"middlewares" yaml:"middlewares"`
 	Operation        string            `json:"operation" yaml:"operation"`
 	RestrictedFields RestrictedFields  `json:"restricted_fields" yaml:"restricted_fields"`
+	schema           *v2.Schema
 }
 
 func (r *Route) GetSchema() *v2.Schema {

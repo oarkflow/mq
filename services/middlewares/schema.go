@@ -3,8 +3,8 @@ package middlewares
 import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/oarkflow/json"
+	"github.com/oarkflow/jsonschema"
 	"github.com/oarkflow/jsonschema/request"
-	"github.com/oarkflow/mq/services/utils"
 )
 
 var ServerApp *fiber.App
@@ -80,17 +80,7 @@ func MatchRouterPath(method, path string) (fiber.Route, bool, map[string]string)
 }
 
 // ValidateRequestBySchema - validates each request that has schema validation
-func ValidateRequestBySchema(c *fiber.Ctx) error {
-	route, matched, _ := MatchRouterPath(c.Method(), c.Path())
-	if !matched {
-		return c.Next()
-	}
-
-	key := route.Method + ":" + route.Path
-	schema, exists := utils.GetSchema(key)
-	if !exists {
-		return c.Next()
-	}
+func ValidateRequestBySchema(schema *jsonschema.Schema, c *fiber.Ctx) error {
 	body := c.Body()
 	if len(body) == 0 {
 		return c.Next()

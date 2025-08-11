@@ -29,6 +29,10 @@ type Loader struct {
 	UserConfig *UserConfig
 }
 
+var JsonSchemaFunctions = map[string]jsonschema.DefaultFunc{
+	"now": jsonschema.DefaultNowFunc,
+}
+
 func NewLoader(path string, configFiles ...string) *Loader {
 	var configFile string
 	if len(configFiles) > 0 {
@@ -230,6 +234,9 @@ func readSchemas(path string, cfg *UserConfig) error {
 		return err
 	}
 	compiler := jsonschema.NewCompiler()
+	for name, fn := range JsonSchemaFunctions {
+		compiler.RegisterDefaultFunc(name, fn)
+	}
 	for _, entry := range entries {
 		if !entry.IsDir() && isSupportedExt(filepath.Ext(entry.Name())) {
 			file := filepath.Join(path, entry.Name())
@@ -415,6 +422,10 @@ func readApis(path string, cfg *UserConfig) error {
 	if err != nil {
 		return err
 	}
+	compiler := jsonschema.NewCompiler()
+	for name, fn := range JsonSchemaFunctions {
+		compiler.RegisterDefaultFunc(name, fn)
+	}
 	for _, entry := range entries {
 		if !entry.IsDir() && isSupportedExt(filepath.Ext(entry.Name())) {
 			file := filepath.Join(modelsPath, entry.Name())
@@ -428,6 +439,22 @@ func readApis(path string, cfg *UserConfig) error {
 				return err
 			}
 			for i, route := range api.Routes {
+				if len(route.Schema) > 0 {
+					schema, err := compiler.Compile(route.Schema)
+					if err != nil {
+						return err
+					}
+					if schema == nil {
+						return errors.New("compiled schema is nil for route: " + route.Uri)
+					}
+					route.schema = schema
+				} else if route.SchemaFile != "" {
+					schema := cfg.GetSchemaInstance(route.SchemaFile)
+					if schema == nil {
+						return errors.New("schema not found for route: " + route.Uri + ", file: " + route.SchemaFile)
+					}
+					route.schema = schema.Instance
+				}
 				if route.HandlerKey != "" {
 					if handler := cfg.GetHandler(route.HandlerKey); handler != nil {
 						route.Handler = *handler
