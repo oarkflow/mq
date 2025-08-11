@@ -11,6 +11,7 @@ import (
 
 	"github.com/oarkflow/mq"
 	"github.com/oarkflow/mq/dag"
+	"github.com/oarkflow/mq/utils"
 )
 
 type OutputHandler struct {
@@ -31,6 +32,16 @@ func (c *OutputHandler) ProcessTask(ctx context.Context, task *mq.Task) mq.Resul
 		for k, v := range c.Payload.Mapping {
 			_, val := dag.GetVal(ctx, v, templateData)
 			templateData[k] = val
+		}
+	}
+	except, ok := c.Payload.Data["except_fields"].([]string)
+	if !ok {
+		exceptAny, ok := c.Payload.Data["except_fields"].([]any)
+		if ok {
+			except = make([]string, len(exceptAny))
+			for i, v := range exceptAny {
+				except[i], _ = v.(string)
+			}
 		}
 	}
 
@@ -124,6 +135,9 @@ func (c *OutputHandler) ProcessTask(ctx context.Context, task *mq.Task) mq.Resul
 	}
 
 	bt, _ := json.Marshal(templateData)
+	for _, field := range except {
+		utils.RemoveRecursiveFromJSON(bt, field)
+	}
 	return mq.Result{Payload: bt, Ctx: ctx}
 }
 
