@@ -23,7 +23,7 @@ func (h *JSONHandler) ProcessTask(ctx context.Context, task *mq.Task) mq.Result 
 
 	operation, ok := h.Payload.Data["operation"].(string)
 	if !ok {
-		return mq.Result{Error: fmt.Errorf("operation not specified")}
+		return mq.Result{Error: fmt.Errorf("operation not specified"), Ctx: ctx}
 	}
 
 	var result map[string]any
@@ -41,12 +41,12 @@ func (h *JSONHandler) ProcessTask(ctx context.Context, task *mq.Task) mq.Result 
 	case "extract_fields":
 		result = h.extractFields(data)
 	default:
-		return mq.Result{Error: fmt.Errorf("unsupported operation: %s", operation)}
+		return mq.Result{Error: fmt.Errorf("unsupported operation: %s", operation), Ctx: ctx}
 	}
 
 	resultPayload, err := json.Marshal(result)
 	if err != nil {
-		return mq.Result{Error: fmt.Errorf("failed to marshal result: %w", err)}
+		return mq.Result{Error: fmt.Errorf("failed to marshal result: %w", err), Ctx: ctx}
 	}
 
 	return mq.Result{Payload: resultPayload, Ctx: ctx}

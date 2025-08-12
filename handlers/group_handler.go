@@ -25,12 +25,12 @@ func (h *GroupHandler) ProcessTask(ctx context.Context, task *mq.Task) mq.Result
 	// Extract the data array
 	dataArray, ok := data["data"].([]interface{})
 	if !ok {
-		return mq.Result{Error: fmt.Errorf("expected 'data' field to be an array")}
+		return mq.Result{Error: fmt.Errorf("expected 'data' field to be an array"), Ctx: ctx}
 	}
 
 	groupByFields := h.getGroupByFields()
 	if len(groupByFields) == 0 {
-		return mq.Result{Error: fmt.Errorf("group_by fields not specified")}
+		return mq.Result{Error: fmt.Errorf("group_by fields not specified"), Ctx: ctx}
 	}
 
 	aggregations := h.getAggregations()
@@ -43,7 +43,7 @@ func (h *GroupHandler) ProcessTask(ctx context.Context, task *mq.Task) mq.Result
 
 	resultPayload, err := json.Marshal(data)
 	if err != nil {
-		return mq.Result{Error: fmt.Errorf("failed to marshal result: %w", err)}
+		return mq.Result{Error: fmt.Errorf("failed to marshal result: %w", err), Ctx: ctx}
 	}
 
 	return mq.Result{Payload: resultPayload, Ctx: ctx}

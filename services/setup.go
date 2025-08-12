@@ -9,6 +9,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/basicauth"
@@ -31,14 +32,11 @@ import (
 
 var ValidationInstance Validation
 
-func Setup(loader *Loader, serverApp *fiber.App, brokerAddr string) {
+func Setup(loader *Loader, serverApp *fiber.App, brokerAddr string) error {
 	if loader.UserConfig == nil {
-		return
+		return nil
 	}
-	err := SetupServices(loader.Prefix(), serverApp, brokerAddr)
-	if err != nil {
-		panic(err)
-	}
+	return SetupServices(loader.Prefix(), serverApp, brokerAddr)
 }
 
 func SetupHandler(handler Handler, brokerAddr string, async ...bool) *dag.DAG {
@@ -209,6 +207,39 @@ func mapProviders(dataProviders interface{}) []dag.Provider {
 	return providers
 }
 
+func setupBackgroundHandlers(brokerAddress string) {
+	for _, cmd := range userConfig.Policy.BackgroundHandlers {
+		if cmd.Handler.Key == "" && cmd.HandlerKey != "" {
+			handler := userConfig.GetHandler(cmd.HandlerKey)
+			if handler == nil {
+				panic(fmt.Sprintf("Handler not found %s", cmd.HandlerKey))
+			}
+			cmd.Handler = *handler
+		}
+		flow := SetupHandler(cmd.Handler, brokerAddress)
+		if flow.Error != nil {
+			panic(flow.Error)
+		}
+		flow.AssignTopic(cmd.Queue)
+		if cmd.Schedule != nil && cmd.Schedule.Enable {
+			duration, err := utils.ParseDuration(cmd.Schedule.Interval)
+			if err != nil {
+				duration = time.Minute
+			}
+			go func() {
+				time.Sleep(5 * time.Second)
+				flow.ScheduleTask(context.Background(), cmd.Payload, mq.WithInterval(duration))
+			}()
+		}
+		go func() {
+			err := flow.Consume(context.Background())
+			if err != nil {
+				panic(err)
+			}
+		}()
+	}
+}
+
 func SetupServices(prefix string, router fiber.Router, brokerAddr string) error {
 	if router == nil {
 		return nil
@@ -217,6 +248,7 @@ func SetupServices(prefix string, router fiber.Router, brokerAddr string) error 
 	if err != nil {
 		return err
 	}
+	setupBackgroundHandlers(brokerAddr)
 	static := userConfig.Policy.Web.Static
 	if static != nil && static.Dir != "" {
 		router.Static(
@@ -244,7 +276,7 @@ func SetupAPI(prefix string, router fiber.Router, brokerAddr string) error {
 	api := router.Group(prefix)
 	for _, configRoute := range userConfig.Policy.Web.Apis {
 		routeGroup := api.Group(configRoute.Prefix)
-		mws := setupMiddlewares(configRoute.Middlewares)
+		mws := setupMiddlewares(configRoute.Middlewares...)
 		if len(mws) > 0 {
 			routeGroup.Use(mws...)
 		}
@@ -252,7 +284,7 @@ func SetupAPI(prefix string, router fiber.Router, brokerAddr string) error {
 			switch route.Operation {
 			case "custom":
 				flow := setupFlow(route, routeGroup, brokerAddr)
-				routeMiddlewares := setupMiddlewares(route.Middlewares)
+				routeMiddlewares := setupMiddlewares(route.Middlewares...)
 				if len(routeMiddlewares) > 0 {
 					routeGroup.Use(routeMiddlewares...)
 				}
@@ -516,7 +548,7 @@ func requestMiddleware(prefix string, route *Route) fiber.Handler {
 	}
 }
 
-func setupMiddlewares(middlewares []Middleware) (mid []any) {
+func setupMiddlewares(middlewares ...Middleware) (mid []any) {
 	for _, middleware := range middlewares {
 		switch middleware.Name {
 		case "cors":

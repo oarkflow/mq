@@ -51,7 +51,9 @@ func (tm *DAG) RenderFiber(c *fiber.Ctx) error {
 	if result.Error != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"message": result.Error.Error()})
 	}
-
+	if result.Ctx == nil {
+		result.Ctx = ctx
+	}
 	contentType := consts.TypeJson
 	if ct, ok := result.Ctx.Value(consts.ContentType).(string); ok {
 		contentType = ct

@@ -18,12 +18,12 @@ func (h *FlattenHandler) ProcessTask(ctx context.Context, task *mq.Task) mq.Resu
 	var data map[string]any
 	err := json.Unmarshal(task.Payload, &data)
 	if err != nil {
-		return mq.Result{Error: fmt.Errorf("failed to unmarshal task payload: %w", err)}
+		return mq.Result{Error: fmt.Errorf("failed to unmarshal task payload: %w", err), Ctx: ctx}
 	}
 
 	operation, ok := h.Payload.Data["operation"].(string)
 	if !ok {
-		return mq.Result{Error: fmt.Errorf("operation not specified")}
+		return mq.Result{Error: fmt.Errorf("operation not specified"), Ctx: ctx}
 	}
 
 	var result map[string]any
@@ -37,12 +37,12 @@ func (h *FlattenHandler) ProcessTask(ctx context.Context, task *mq.Task) mq.Resu
 	case "flatten_array":
 		result = h.flattenArray(data)
 	default:
-		return mq.Result{Error: fmt.Errorf("unsupported operation: %s", operation)}
+		return mq.Result{Error: fmt.Errorf("unsupported operation: %s", operation), Ctx: ctx}
 	}
 
 	resultPayload, err := json.Marshal(result)
 	if err != nil {
-		return mq.Result{Error: fmt.Errorf("failed to marshal result: %w", err)}
+		return mq.Result{Error: fmt.Errorf("failed to marshal result: %w", err), Ctx: ctx}
 	}
 
 	return mq.Result{Payload: resultPayload, Ctx: ctx}
