@@ -339,11 +339,13 @@ func callMethod(obj Value, method string, args []Value) (Value, error) {
 		"reverse": true, "isEmpty": true, "flatten": true, "distinct": true, "sortBy": true,
 	}
 
-	// If obj is a collection and method should be vectorized
-	if slice, ok := obj.([]Value); ok {
-		if !nonVectorMethods[method] && len(slice) > 0 {
-			// Test if method works on individual elements
-			_, err := callMethodOnSingle(slice[0], method, args)
+	// Check if this is a method call on a collection that should be vectorized
+	if slice, ok := obj.([]Value); ok && len(slice) > 0 {
+		// Only vectorize if method is not in nonVectorMethods and method exists on string/element types
+		if !nonVectorMethods[method] {
+			// Test if method works on individual elements by checking the first element
+			firstElement := slice[0]
+			_, err := callMethodOnSingle(firstElement, method, args)
 			if err == nil {
 				// Method is supported on elements, vectorize it
 				result := make([]Value, len(slice))
@@ -416,7 +418,7 @@ func reverseCollection(obj Value) Value {
 func callMethodOnSingle(obj Value, method string, args []Value) (Value, error) {
 	// Fast method lookup using registry
 	if handler, exists := methodRegistry[method]; exists {
-		return handler(obj, args)
+		return handler(obj, args...)
 	}
 
 	// Check if it's a built-in function that can be called as method
