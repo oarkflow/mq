@@ -5,27 +5,27 @@ import (
 	"sync"
 )
 
-// OptimizedContext provides caching and optimization features
-type OptimizedContext struct {
+// CachedContext provides caching and performance features
+type CachedContext struct {
 	*Context
 	methodCache sync.Map // Cache for frequently used method lookups
 	exprCache   sync.Map // Cache for compiled expressions
 }
 
-// NewOptimizedContext creates a new optimized context
-func NewOptimizedContext() *OptimizedContext {
-	return &OptimizedContext{
+// NewCachedContext creates a new cached context
+func NewCachedContext() *CachedContext {
+	return &CachedContext{
 		Context: NewContext(),
 	}
 }
 
-// CachedMethodCall provides optimized method calling with caching
-func (oc *OptimizedContext) CachedMethodCall(obj Value, method string, args []Value) (Value, error) {
+// CallWithCache provides method calling with caching
+func (cc *CachedContext) CallWithCache(obj Value, method string, args []Value) (Value, error) {
 	// Create cache key
 	cacheKey := method // Simple key for now, could be more sophisticated
 
 	// Check cache first
-	if cached, ok := oc.methodCache.Load(cacheKey); ok {
+	if cached, ok := cc.methodCache.Load(cacheKey); ok {
 		if handler, ok := cached.(MethodHandler); ok {
 			return handler(obj, args...)
 		}
@@ -36,20 +36,15 @@ func (oc *OptimizedContext) CachedMethodCall(obj Value, method string, args []Va
 	if err == nil {
 		// Cache successful lookups
 		if handler, exists := methodRegistry[method]; exists {
-			oc.methodCache.Store(cacheKey, handler)
+			cc.methodCache.Store(cacheKey, handler)
 		}
 	}
 
 	return result, err
 }
 
-// Fast path optimizations for common operations
-type FastPathOps struct{}
-
-var FastPath = &FastPathOps{}
-
-// FastStringConcat provides optimized string concatenation
-func (fp *FastPathOps) StringConcat(values []Value) string {
+// StringConcat provides efficient string concatenation
+func (cc *CachedContext) StringConcat(values []Value) string {
 	if len(values) == 0 {
 		return ""
 	}
@@ -74,22 +69,22 @@ func (fp *FastPathOps) StringConcat(values []Value) string {
 	return string(result)
 }
 
-// FastArrayAccess provides bounds-checked array access with minimal overhead
-func (fp *FastPathOps) ArrayAccess(arr []Value, index int) (Value, bool) {
+// ArrayAccess provides bounds-checked array access
+func (cc *CachedContext) ArrayAccess(arr []Value, index int) (Value, bool) {
 	if index < 0 || index >= len(arr) {
 		return nil, false
 	}
 	return arr[index], true
 }
 
-// FastMapAccess provides optimized map field access
-func (fp *FastPathOps) MapAccess(obj map[string]Value, field string) (Value, bool) {
+// MapAccess provides map field access
+func (cc *CachedContext) MapAccess(obj map[string]Value, field string) (Value, bool) {
 	val, exists := obj[field]
 	return val, exists
 }
 
-// InlineMethodRegistry provides compile-time method resolution for better performance
-var InlineMethodRegistry = map[string]func(obj Value, args ...Value) (Value, error){
+// builtinMethodRegistry provides compile-time method resolution for common methods
+var builtinMethodRegistry = map[string]func(obj Value, args ...Value) (Value, error){
 	"size": func(obj Value, args ...Value) (Value, error) {
 		if len(args) != 0 {
 			return nil, fmt.Errorf("size() requires 0 arguments")
@@ -122,10 +117,10 @@ var InlineMethodRegistry = map[string]func(obj Value, args ...Value) (Value, err
 	},
 }
 
-// OptimizedCallMethod provides fast method calling for common cases
-func OptimizedCallMethod(obj Value, method string, args []Value) (Value, error) {
-	// Try inline registry first for hot path methods
-	if handler, exists := InlineMethodRegistry[method]; exists {
+// CallMethod provides method calling with builtin method support
+func CallMethod(obj Value, method string, args []Value) (Value, error) {
+	// Try builtin registry first for common methods
+	if handler, exists := builtinMethodRegistry[method]; exists {
 		return handler(obj, args...)
 	}
 

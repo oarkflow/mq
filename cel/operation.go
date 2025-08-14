@@ -268,7 +268,7 @@ func executeOptimizedCollectionChain(chain *ChainInfo, ctx *Context) (Value, boo
 		chain.Methods[2].Method == "join" {
 
 		// Use our ultra-fast operations from ultra_fast_collections.go
-		return executeUltraFastFilterMapJoin(collection, chain.Methods, ctx)
+		return executeCachedFilterMapJoin(collection, chain.Methods, ctx)
 	}
 
 	return nil, false
@@ -312,21 +312,21 @@ func executeMacroFilterMapJoin(filterMacro *Macro, mapMacro *Macro, joinStep Cha
 	separator := toString(sepVal)
 
 	// Use the ultra-fast collection operations
-	filtered, err := UltraFast.Filter(collection, filterMacro.Variable, filterMacro.Body, ctx)
+	filtered, err := Cached.Filter(collection, filterMacro.Variable, filterMacro.Body, ctx)
 	if err != nil {
 		return nil, false
 	}
 
-	mapped, err := UltraFast.Map(filtered, mapMacro.Variable, mapMacro.Body, ctx)
+	mapped, err := Cached.Map(filtered, mapMacro.Variable, mapMacro.Body, ctx)
 	if err != nil {
 		return nil, false
 	}
 
-	result := UltraFast.Join(mapped, separator)
+	result := Cached.Join(mapped, separator)
 	return result, true
 }
 
-func executeUltraFastFilterMapJoin(collection []Value, methods []ChainStep, ctx *Context) (Value, bool) {
+func executeCachedFilterMapJoin(collection []Value, methods []ChainStep, ctx *Context) (Value, bool) {
 	// Extract filter parameters
 	if len(methods[0].Args) != 2 {
 		return nil, false
@@ -364,17 +364,17 @@ func executeUltraFastFilterMapJoin(collection []Value, methods []ChainStep, ctx 
 	separator := toString(sepVal)
 
 	// Use the ultra-fast collection operations
-	filtered, err := UltraFast.Filter(collection, filterVar.Name, filterExpr, ctx)
+	filtered, err := Cached.Filter(collection, filterVar.Name, filterExpr, ctx)
 	if err != nil {
 		return nil, false
 	}
 
-	mapped, err := UltraFast.Map(filtered, mapVar.Name, mapExpr, ctx)
+	mapped, err := Cached.Map(filtered, mapVar.Name, mapExpr, ctx)
 	if err != nil {
 		return nil, false
 	}
 
-	result := UltraFast.Join(mapped, separator)
+	result := Cached.Join(mapped, separator)
 	return result, true
 }
 

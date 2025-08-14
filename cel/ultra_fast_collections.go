@@ -4,10 +4,10 @@ import (
 	"sync"
 )
 
-// UltraFastCollections provides zero-allocation collection operations where possible
-type UltraFastCollections struct{}
+// CachedCollections provides zero-allocation collection operations where possible
+type CachedCollections struct{}
 
-var UltraFast = &UltraFastCollections{}
+var Cached = &CachedCollections{}
 
 // Reusable slice pools sized for different use cases
 var (
@@ -80,8 +80,8 @@ func putUltraContext(ctx *Context) {
 	ultraContextPool.Put(ctx)
 }
 
-// UltraFastFilter performs filtering with minimal allocations
-func (ufc *UltraFastCollections) Filter(items []Value, variable string, body Expression, baseCtx *Context) ([]Value, error) {
+// CachedFilter performs filtering with minimal allocations
+func (ufc *CachedCollections) Filter(items []Value, variable string, body Expression, baseCtx *Context) ([]Value, error) {
 	if len(items) == 0 {
 		return items, nil
 	}
@@ -118,8 +118,8 @@ func (ufc *UltraFastCollections) Filter(items []Value, variable string, body Exp
 	return result, nil
 }
 
-// UltraFastMap performs mapping with pre-allocated result
-func (ufc *UltraFastCollections) Map(items []Value, variable string, body Expression, baseCtx *Context) ([]Value, error) {
+// CachedMap performs mapping with pre-allocated result
+func (ufc *CachedCollections) Map(items []Value, variable string, body Expression, baseCtx *Context) ([]Value, error) {
 	if len(items) == 0 {
 		return items, nil
 	}
@@ -149,8 +149,8 @@ func (ufc *UltraFastCollections) Map(items []Value, variable string, body Expres
 	return mapped, nil
 }
 
-// UltraFastJoin performs string joining with pre-calculated buffer size
-func (ufc *UltraFastCollections) Join(items []Value, separator string) string {
+// CachedJoin performs string joining with pre-calculated buffer size
+func (ufc *CachedCollections) Join(items []Value, separator string) string {
 	if len(items) == 0 {
 		return ""
 	}
@@ -197,7 +197,7 @@ func DetectChainOptimization(obj Value, method string, args []Value) (Value, boo
 		switch method {
 		case "join":
 			if len(args) == 1 {
-				result := UltraFast.Join(slice, toString(args[0]))
+				result := Cached.Join(slice, toString(args[0]))
 				return result, true, nil
 			}
 		}

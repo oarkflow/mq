@@ -433,7 +433,7 @@ func callMethodOnSingle(obj Value, method string, args []Value) (Value, error) {
 	}
 
 	// Try optimized inline registry for hot path methods
-	if handler, exists := InlineMethodRegistry[method]; exists {
+	if handler, exists := builtinMethodRegistry[method]; exists {
 		return handler(obj, args...)
 	}
 
@@ -615,11 +615,11 @@ func evaluateMacro(coll Value, variable string, body Expression, macroType strin
 
 	case "filter":
 		// Use ultra-fast filter for better performance
-		return UltraFast.Filter(items, variable, body, ctx)
+		return Cached.Filter(items, variable, body, ctx)
 
 	case "map":
 		// Use ultra-fast map for better performance
-		return UltraFast.Map(items, variable, body, ctx)
+		return Cached.Map(items, variable, body, ctx)
 
 	case "find":
 		for _, item := range items {
