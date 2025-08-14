@@ -81,34 +81,19 @@ var methodRegistry = map[string]MethodHandler{
 	},
 
 	"replace": func(obj Value, args ...Value) (Value, error) {
-		if len(args) != 2 {
-			return nil, fmt.Errorf("replace() requires 2 arguments")
-		}
-		str := toString(obj)
-		old := toString(args[0])
-		new := toString(args[1])
-		return strings.ReplaceAll(str, old, new), nil
+		return OptimizedStringOps["replace"](obj, args...)
 	},
 
 	"trim": func(obj Value, args ...Value) (Value, error) {
-		if len(args) != 0 {
-			return nil, fmt.Errorf("trim() requires 0 arguments")
-		}
-		return strings.TrimSpace(toString(obj)), nil
+		return OptimizedStringOps["trim"](obj, args...)
 	},
 
 	"upper": func(obj Value, args ...Value) (Value, error) {
-		if len(args) != 0 {
-			return nil, fmt.Errorf("upper() requires 0 arguments")
-		}
-		return strings.ToUpper(toString(obj)), nil
+		return OptimizedStringOps["upper"](obj, args...)
 	},
 
 	"lower": func(obj Value, args ...Value) (Value, error) {
-		if len(args) != 0 {
-			return nil, fmt.Errorf("lower() requires 0 arguments")
-		}
-		return strings.ToLower(toString(obj)), nil
+		return OptimizedStringOps["lower"](obj, args...)
 	},
 
 	"matches": func(obj Value, args ...Value) (Value, error) {
@@ -348,10 +333,16 @@ var methodRegistry = map[string]MethodHandler{
 			if len(slice) == 0 {
 				return "", nil // Zero allocation for empty slices
 			}
+			if len(slice) == 1 {
+				return toString(slice[0]), nil // Single element optimization
+			}
+
 			// Pre-calculate capacity to avoid reallocations
 			var totalLen int
-			for _, item := range slice {
-				totalLen += len(toString(item))
+			strItems := make([]string, len(slice)) // Pre-convert to avoid repeated toString calls
+			for i, item := range slice {
+				strItems[i] = toString(item)
+				totalLen += len(strItems[i])
 			}
 			totalLen += (len(slice) - 1) * len(separator)
 
@@ -359,11 +350,10 @@ var methodRegistry = map[string]MethodHandler{
 			var builder strings.Builder
 			builder.Grow(totalLen)
 
-			for i, item := range slice {
-				if i > 0 {
-					builder.WriteString(separator)
-				}
-				builder.WriteString(toString(item))
+			builder.WriteString(strItems[0])
+			for i := 1; i < len(strItems); i++ {
+				builder.WriteString(separator)
+				builder.WriteString(strItems[i])
 			}
 			return builder.String(), nil
 		}

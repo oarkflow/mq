@@ -416,6 +416,27 @@ func reverseCollection(obj Value) Value {
 }
 
 func callMethodOnSingle(obj Value, method string, args []Value) (Value, error) {
+	// Try to detect and optimize method chains
+	if result, optimized, err := DetectChainOptimization(obj, method, args); optimized {
+		return result, err
+	}
+
+	// Try ultra-fast string operations first for string objects
+	if _, isString := obj.(string); isString {
+		if result, optimized, err := DetectAndOptimizeStringChain(obj, method, args); optimized {
+			return result, err
+		}
+		// Fallback to fast string methods
+		if handler, exists := FastStringMethods[method]; exists {
+			return handler(obj, args...)
+		}
+	}
+
+	// Try optimized inline registry for hot path methods
+	if handler, exists := InlineMethodRegistry[method]; exists {
+		return handler(obj, args...)
+	}
+
 	// Fast method lookup using registry
 	if handler, exists := methodRegistry[method]; exists {
 		return handler(obj, args...)
@@ -433,9 +454,7 @@ func callMethodOnSingle(obj Value, method string, args []Value) (Value, error) {
 
 	// Try reflection-based method call for custom types
 	return callReflectionMethod(obj, method, args)
-}
-
-// High-performance reflection-based method calling
+} // High-performance reflection-based method calling
 func callReflectionMethod(obj Value, method string, args []Value) (Value, error) {
 	if obj == nil {
 		return nil, fmt.Errorf("cannot call method %s on nil", method)
@@ -524,11 +543,11 @@ func convertToReflectValue(arg Value, targetType reflect.Type) reflect.Value {
 }
 
 func evaluateMacro(coll Value, variable string, body Expression, macroType string, ctx *Context) (Value, error) {
-	// Convert collection to []Value
+	// Convert collection to []Value with optimized path
 	var items []Value
 	switch c := coll.(type) {
 	case []Value:
-		items = c
+		items = c // Zero-allocation path for our native type
 	default:
 		rv := reflect.ValueOf(c)
 		if rv.Kind() == reflect.Slice || rv.Kind() == reflect.Array {
@@ -541,13 +560,28 @@ func evaluateMacro(coll Value, variable string, body Expression, macroType strin
 		}
 	}
 
-	// Create new context with the loop variable
+	// For performance-critical operations, avoid context creation overhead
+	switch macroType {
+	case "size":
+		return len(items), nil
+	case "reverse":
+		if len(items) <= 1 {
+			return items, nil // Optimization for small collections
+		}
+		reversed := make([]Value, len(items))
+		for i := 0; i < len(items); i++ {
+			reversed[i] = items[len(items)-1-i]
+		}
+		return reversed, nil
+	}
+
+	// Create optimized context with pre-allocated variables map
 	newCtx := &Context{
-		Variables: make(map[string]Value),
+		Variables: make(map[string]Value, len(ctx.Variables)+1), // Pre-size for existing vars + loop var
 		Functions: ctx.Functions,
 	}
 
-	// Copy existing variables
+	// Copy existing variables in bulk
 	for k, v := range ctx.Variables {
 		newCtx.Variables[k] = v
 	}
@@ -580,30 +614,12 @@ func evaluateMacro(coll Value, variable string, body Expression, macroType strin
 		return false, nil
 
 	case "filter":
-		var filtered []Value
-		for _, item := range items {
-			newCtx.Variables[variable] = item
-			result, err := body.Evaluate(newCtx)
-			if err != nil {
-				return nil, err
-			}
-			if toBool(result) {
-				filtered = append(filtered, item)
-			}
-		}
-		return filtered, nil
+		// Use ultra-fast filter for better performance
+		return UltraFast.Filter(items, variable, body, ctx)
 
 	case "map":
-		mapped := make([]Value, len(items))
-		for i, item := range items {
-			newCtx.Variables[variable] = item
-			result, err := body.Evaluate(newCtx)
-			if err != nil {
-				return nil, err
-			}
-			mapped[i] = result
-		}
-		return mapped, nil
+		// Use ultra-fast map for better performance
+		return UltraFast.Map(items, variable, body, ctx)
 
 	case "find":
 		for _, item := range items {
@@ -618,22 +634,12 @@ func evaluateMacro(coll Value, variable string, body Expression, macroType strin
 		}
 		return nil, nil // Return null if no item found
 
-	case "size":
-		return len(items), nil
-
-	case "reverse":
-		reversed := make([]Value, len(items))
-		for i := 0; i < len(items); i++ {
-			reversed[i] = items[len(items)-1-i]
-		}
-		return reversed, nil
-
 	case "sort":
-		// Simple sort by the expression result
+		// Simple sort by the expression result with optimized comparison
 		sorted := make([]Value, len(items))
 		copy(sorted, items)
 
-		// Simple bubble sort for demonstration
+		// Simple bubble sort for demonstration (could be improved with quicksort)
 		for i := 0; i < len(sorted)-1; i++ {
 			for j := 0; j < len(sorted)-i-1; j++ {
 				newCtx.Variables[variable] = sorted[j]
@@ -656,7 +662,8 @@ func evaluateMacro(coll Value, variable string, body Expression, macroType strin
 		return sorted, nil
 
 	case "flatMap":
-		var flattened []Value
+		// Pre-allocate with conservative estimate
+		flattened := make([]Value, 0, len(items)*2)
 		for _, item := range items {
 			newCtx.Variables[variable] = item
 			result, err := body.Evaluate(newCtx)
