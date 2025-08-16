@@ -394,6 +394,10 @@ func (wp *Pool) Start(numWorkers int) {
 			heap.Push(&wp.taskQueue, task)
 		}
 		wp.taskQueueLock.Unlock()
+		// Signal workers that tasks are available after restoring from storage
+		wp.taskAvailableCond.L.Lock()
+		wp.taskAvailableCond.Broadcast()
+		wp.taskAvailableCond.L.Unlock()
 	}
 	for i := 0; i < numWorkers; i++ {
 		wp.wg.Add(1)

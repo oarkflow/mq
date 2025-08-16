@@ -9,6 +9,12 @@ import (
 
 func RecoverPanic(labelGenerator func() string) {
 	if r := recover(); r != nil {
+		defer func() {
+			if rr := recover(); rr != nil {
+				// If logging or labelGenerator panics, just print a minimal message
+				fmt.Printf("[PANIC] - error during panic recovery: %v\n", rr)
+			}
+		}()
 		pc, file, line, ok := runtime.Caller(2)
 		funcName := "unknown"
 		if ok {

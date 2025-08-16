@@ -2,7 +2,6 @@ package bpool
 
 import (
 	"io"
-	"unsafe"
 )
 
 // ByteBuffer provides byte buffer, which can be used for minimizing
@@ -105,7 +104,7 @@ func (b *ByteBuffer) SetString(s string) {
 
 // String returns string representation of ByteBuffer.B.
 func (b *ByteBuffer) String() string {
-	return *(*string)(unsafe.Pointer(&b.B))
+	return string(b.B)
 }
 
 // Reset makes ByteBuffer.B empty.
