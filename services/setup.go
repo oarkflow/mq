@@ -33,7 +33,7 @@ import (
 var ValidationInstance Validation
 
 func Setup(loader *Loader, serverApp *fiber.App, brokerAddr string) error {
-	if loader.UserConfig == nil {
+	if loader.UserConfig == nil || serverApp == nil {
 		return nil
 	}
 	return SetupServices(loader.Prefix(), serverApp, brokerAddr)
