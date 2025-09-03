@@ -184,6 +184,7 @@ func (m *Message) Validate(config *Config) error {
 	}
 
 	if len(m.Payload) > int(config.MaxMessageSize) {
+		fmt.Println(string(m.Payload))
 		return fmt.Errorf("%v %v, payload size: %d", ErrMessageTooLarge, config.MaxMessageSize, len(m.Payload))
 	}
 
@@ -337,7 +338,7 @@ func (c *Codec) ReadMessage(ctx context.Context, conn net.Conn) (*Message, error
 	// Validate message size
 	if length > c.config.MaxMessageSize {
 		c.incrementErrors()
-		return nil, fmt.Errorf("%v %v, payload size: %d", ErrMessageTooLarge, c.config.MaxMessageSize, length)
+		return nil, fmt.Errorf("%v %v, payload size: %d while ReadMessage", ErrMessageTooLarge, c.config.MaxMessageSize, length)
 	}
 
 	if length == 0 {
@@ -449,7 +450,7 @@ func validateHeaders(headers map[string]string) error {
 	for k, v := range headers {
 		totalSize += len(k) + len(v)
 		if totalSize > MaxHeaderSize {
-			return fmt.Errorf("%v %v, payload size: %d", ErrMessageTooLarge, MaxHeaderSize, totalSize)
+			return fmt.Errorf("%v %v, payload size: %d while validating headers", ErrMessageTooLarge, MaxHeaderSize, totalSize)
 		}
 	}
 	return nil
