@@ -184,7 +184,7 @@ func (m *Message) Validate(config *Config) error {
 	}
 
 	if len(m.Payload) > int(config.MaxMessageSize) {
-		return ErrMessageTooLarge
+		return fmt.Errorf("%v %v, payload size: %d", ErrMessageTooLarge, config.MaxMessageSize, len(m.Payload))
 	}
 
 	return nil
@@ -264,7 +264,7 @@ func (c *Codec) sendRawMessage(ctx context.Context, conn net.Conn, msg *Message)
 	// Check message size
 	if len(data) > int(c.config.MaxMessageSize) {
 		c.incrementErrors()
-		return ErrMessageTooLarge
+		return fmt.Errorf("%v %v, payload: %d", ErrMessageTooLarge, c.config.MaxMessageSize, len(data))
 	}
 
 	// Prepare buffer
@@ -337,7 +337,7 @@ func (c *Codec) ReadMessage(ctx context.Context, conn net.Conn) (*Message, error
 	// Validate message size
 	if length > c.config.MaxMessageSize {
 		c.incrementErrors()
-		return nil, ErrMessageTooLarge
+		return nil, fmt.Errorf("%v %v, payload size: %d", ErrMessageTooLarge, c.config.MaxMessageSize, length)
 	}
 
 	if length == 0 {
@@ -449,7 +449,7 @@ func validateHeaders(headers map[string]string) error {
 	for k, v := range headers {
 		totalSize += len(k) + len(v)
 		if totalSize > MaxHeaderSize {
-			return ErrMessageTooLarge
+			return fmt.Errorf("%v %v, payload size: %d", ErrMessageTooLarge, MaxHeaderSize, totalSize)
 		}
 	}
 	return nil
