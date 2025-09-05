@@ -17,8 +17,6 @@ A simple Pub/Sub system memory based task processing. It uses centralized server
 
 > `go run publisher.go`
 
-
-
 [tasks.go](./examples/tasks/tasks.go)
 
 ```go
