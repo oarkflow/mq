@@ -335,13 +335,17 @@ func readCaches(path string, cfg *UserConfig) error {
 }
 
 func readCredentials(path string, cfg *UserConfig) error {
-	if err := readDatabases(path, cfg); err != nil {
+	if err := readDatabases(path, cfg); err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	if err := readStorages(path, cfg); err != nil {
+	if err := readStorages(path, cfg); err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	return readCaches(path, cfg)
+	err := readCaches(path, cfg)
+	if !os.IsNotExist(err) {
+		return err
+	}
+	return nil
 }
 
 func readConfig(path string, cfg *UserConfig) error {
