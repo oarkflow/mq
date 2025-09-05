@@ -80,6 +80,7 @@ type Model struct {
 	SortField   string           `json:"sort_field" yaml:"sort_field"`
 	SortOrder   string           `json:"sort_order" yaml:"sort_order"`
 	RestApi     bool             `json:"rest_api" yaml:"rest_api"`
+	SoftDelete  bool             `json:"soft_delete" yaml:"soft_delete"`
 	Update      bool             `json:"update" yaml:"update"`
 }
 

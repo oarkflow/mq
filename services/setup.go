@@ -431,6 +431,7 @@ func prepareHeader(ctx *fiber.Ctx, route *Route) (map[string]any, map[string]any
 
 func customHandler(flow *dag.DAG) fiber.Handler {
 	return func(ctx *fiber.Ctx) error {
+		utils.ParseQueryParams(ctx)
 		result := flow.Process(ctx.UserContext(), ctx.BodyRaw())
 		if result.Error != nil {
 			return result.Error
