@@ -60,6 +60,10 @@ github.com/jackc/puddle/v2 v2.2.2 h1:PR8nw+E/1w0GLuRFSmiioY6UooMp6KJv0/61nB7icHo
 github.com/jackc/puddle/v2 v2.2.2/go.mod h1:vriiEXHvEE654aYKXXjOvZM39qJ0q+azkZFrfEOc3H4=
 github.com/kaptinlin/go-i18n v0.1.5 h1:7hNfKUi+JzlOToOPv5iUtL/r6mWNOdRtDLhWJ33kWio=
 github.com/kaptinlin/go-i18n v0.1.5/go.mod h1:oOfNMf/GDapNftSGH/1anXPEPjCqp4ZS6sC/H92KYNs=
+github.com/kaptinlin/go-i18n v0.1.6 h1:XQT3qvE/xgNrAps/zXBHAKWhPlWSrFS9t1jCZ4PVnOs=
+github.com/kaptinlin/go-i18n v0.1.6/go.mod h1:MoHPYUYQug2jyLygIWeT9F3VDUZEP480cKotmtQjUCc=
+github.com/kaptinlin/messageformat-go v0.4.0 h1:L5wPgwQZkV1Rvs19htUT2RGx8N1GCq3uQG5nB6VHRcM=
+github.com/kaptinlin/messageformat-go v0.4.0/go.mod h1:LrLCV49C5ms/BZlOpFPihou+cPvhOQSvVJHj2wOe6w8=
 github.com/klauspost/compress v1.18.0 h1:c/Cqfb0r+Yi+JtIEq73FWXVkRonBlf0CRNYc8Zttxdo=
 github.com/klauspost/compress v1.18.0/go.mod h1:2Pp+KzxcywXVXMr50+X0Q/Lsb43OQHYWRCY2AiWywWQ=
 github.com/kr/pretty v0.3.0 h1:WgNl7dwNpEZ6jJ9k1snq4pZsg7DOEN8hP9Xw0Tsjwk0=
@@ -130,6 +134,7 @@ github.com/stretchr/testify v1.3.0/go.mod h1:M5WIy9Dh21IEIfnGCwXGc5bZfKNJtfHm1UV
 github.com/stretchr/testify v1.7.0/go.mod h1:6Fq8oRcR53rry900zMqJjRRixrwX3KX962/h/Wwjteg=
 github.com/stretchr/testify v1.10.0 h1:Xv5erBjTwe/5IxqUQTdXv5kgmIvbHo3QQyRwhJsOfJA=
 github.com/stretchr/testify v1.10.0/go.mod h1:r2ic/lqez/lEtzL7wO/rwa5dbSLXVDPFyf8C91i36aY=
+github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu7U=
 github.com/tinylib/msgp v1.4.0 h1:SYOeDRiydzOw9kSiwdYp9UcBgPFtLU2WDHaJXyHruf8=
 github.com/tinylib/msgp v1.4.0/go.mod h1:cvjFkb4RiC8qSBOPMGPSzSAx47nAsfhLVTCZZNuHv5o=
 github.com/toorop/go-dkim v0.0.0-20201103131630-e1cd1a0a5208/go.mod h1:BzWtXXrXzZUvMacR0oF/fbDDgUPO8L36tDMmRAf14ns=

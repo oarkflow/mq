@@ -13,8 +13,12 @@ require (
 	github.com/oarkflow/jsonschema v0.0.4
 	github.com/oarkflow/log v1.0.83
 	github.com/oarkflow/metadata v0.0.80
-	github.com/oarkflow/mq v0.0.26
 	gopkg.in/yaml.v3 v3.0.1
+)
+
+require (
+	github.com/kaptinlin/messageformat-go v0.4.0 // indirect
+	github.com/oarkflow/mq v0.0.30 // indirect
 )
 
 require (
@@ -38,7 +42,7 @@ require (
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/pgx/v5 v5.7.5 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
-	github.com/kaptinlin/go-i18n v0.1.5 // indirect
+	github.com/kaptinlin/go-i18n v0.1.6 // indirect
 	github.com/klauspost/compress v1.18.0 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
