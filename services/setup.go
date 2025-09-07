@@ -431,23 +431,43 @@ func prepareHeader(ctx *fiber.Ctx, route *Route) (map[string]any, map[string]any
 
 func customHandler(flow *dag.DAG) fiber.Handler {
 	return func(ctx *fiber.Ctx) error {
+		// Step 1: always parse query params
 		utils.ParseQueryParams(ctx)
-		result := flow.Process(ctx.UserContext(), ctx.BodyRaw())
+
+		// Step 2: build user context
+		userCtx := ctx.UserContext()
+		contentType := ctx.Get("Content-Type")
+		if strings.HasPrefix(contentType, "multipart/form-data") {
+			// attach Fiber ctx so downstream can access files later
+			userCtx = context.WithValue(userCtx, "fiberCtx", ctx)
+		}
+
+		// Step 3: run DAG flow with the enriched context
+		result := flow.Process(userCtx, ctx.BodyRaw())
 		if result.Error != nil {
 			return result.Error
 		}
-		contentType := result.Ctx.Value(consts.ContentType)
-		if contentType == nil {
+
+		// Step 4: handle response content type
+		contentType = ""
+		if ct := result.Ctx.Value(consts.ContentType); ct != nil {
+			if s, ok := ct.(string); ok {
+				contentType = s
+			}
+		}
+
+		if contentType == "" ||
+			contentType == fiber.MIMEApplicationJSON ||
+			contentType == fiber.MIMEApplicationJSONCharsetUTF8 {
 			return ctx.JSON(result)
 		}
-		if contentType == fiber.MIMEApplicationJSON || contentType == fiber.MIMEApplicationJSONCharsetUTF8 {
-			return ctx.JSON(result)
-		}
+
 		var resultData map[string]any
 		if err := json.Unmarshal(result.Payload, &resultData); err != nil {
 			return ctx.JSON(fiber.Map{"success": false, "error": "Invalid response payload"})
 		}
-		ctx.Set(consts.ContentType, contentType.(string))
+
+		ctx.Set(consts.ContentType, contentType)
 		html, _ := resultData["html_content"].(string)
 		return ctx.SendString(html)
 	}
@@ -515,7 +535,7 @@ func setupRender(_ string, clientRoutes fiber.Router) error {
 
 // requestMiddleware validates the request body in the original form of byte array
 // against the provided request JSON schema to ensure that the request body is valid.
-func requestMiddleware(prefix string, route *Route) fiber.Handler {
+func requestMiddleware(_ string, route *Route) fiber.Handler {
 	return func(ctx *fiber.Ctx) error {
 		schema := route.GetSchema()
 		if schema == nil {
