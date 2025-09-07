@@ -52,36 +52,31 @@ type Operation struct {
 	Actions []string `json:"actions" yaml:"actions"`
 }
 
-type Constraint struct {
-	Indices     []metadata.Indices    `json:"indices" yaml:"indices"`
-	ForeignKeys []metadata.ForeignKey `json:"foreign" yaml:"foreign"`
-}
-
 type Query struct {
 	File   string `json:"file" yaml:"file"`
 	String string `json:"string" yaml:"string"`
 }
 
 type Model struct {
-	Name        string           `json:"name" yaml:"name"`
-	OldName     string           `json:"old_name" yaml:"old_name"`
-	Key         string           `json:"key" yaml:"key"`
-	Title       string           `json:"title" yaml:"title"`
-	Database    string           `json:"database" yaml:"database"`
-	ModelType   string           `json:"model_type" yaml:"model_type"`
-	StoreFields []string         `json:"store_fields" yaml:"store_fields"`
-	IndexFields []string         `json:"index_fields" yaml:"index_fields"`
-	Query       Query            `json:"query" yaml:"query"`
-	Constraints Constraint       `json:"constraints" yaml:"constraints"`
-	Fields      []metadata.Field `json:"fields" yaml:"fields"`
-	Operations  []Operation      `json:"operations" yaml:"operations"`
-	Fulltext    bool             `json:"fulltext" yaml:"fulltext"`
-	Files       map[string]bool  `json:"files" yaml:"files"`
-	SortField   string           `json:"sort_field" yaml:"sort_field"`
-	SortOrder   string           `json:"sort_order" yaml:"sort_order"`
-	RestApi     bool             `json:"rest_api" yaml:"rest_api"`
-	SoftDelete  bool             `json:"soft_delete" yaml:"soft_delete"`
-	Update      bool             `json:"update" yaml:"update"`
+	Name        string              `json:"name" yaml:"name"`
+	OldName     string              `json:"old_name" yaml:"old_name"`
+	Key         string              `json:"key" yaml:"key"`
+	Title       string              `json:"title" yaml:"title"`
+	Database    string              `json:"database" yaml:"database"`
+	ModelType   string              `json:"model_type" yaml:"model_type"`
+	StoreFields []string            `json:"store_fields" yaml:"store_fields"`
+	IndexFields []string            `json:"index_fields" yaml:"index_fields"`
+	Query       Query               `json:"query" yaml:"query"`
+	Constraints metadata.Constraint `json:"constraints" yaml:"constraints"`
+	Fields      []metadata.Field    `json:"fields" yaml:"fields"`
+	Operations  []Operation         `json:"operations" yaml:"operations"`
+	Fulltext    bool                `json:"fulltext" yaml:"fulltext"`
+	Files       map[string]bool     `json:"files" yaml:"files"`
+	SortField   string              `json:"sort_field" yaml:"sort_field"`
+	SortOrder   string              `json:"sort_order" yaml:"sort_order"`
+	RestApi     bool                `json:"rest_api" yaml:"rest_api"`
+	SoftDelete  bool                `json:"soft_delete" yaml:"soft_delete"`
+	Update      bool                `json:"update" yaml:"update"`
 }
 
 type Property struct {
