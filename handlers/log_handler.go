@@ -3,6 +3,9 @@ package handlers
 import (
 	"context"
 	"fmt"
+	"strings"
+
+	"github.com/oarkflow/jet"
 	"github.com/oarkflow/json"
 	"github.com/oarkflow/mq"
 	"github.com/oarkflow/mq/dag"
@@ -44,6 +47,12 @@ func (p *LogHandler) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 	if len(toReturn) > 0 {
 		for k, v := range toReturn {
 			logger = logger.Any(k, v)
+		}
+	}
+	if strings.Contains(msg, "{{") {
+		rs, err := jet.Parse(msg, toReturn, true)
+		if err == nil {
+			msg = rs
 		}
 	}
 	logger.Msg(msg)
