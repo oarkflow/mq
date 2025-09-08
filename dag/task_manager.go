@@ -191,6 +191,26 @@ func (tm *TaskManager) waitForResult() {
 	}
 }
 
+// areDependenciesMet checks if all previous nodes have completed successfully
+func (tm *TaskManager) areDependenciesMet(nodeID string) bool {
+	// Get previous nodes
+	prevNodes, err := tm.dag.GetPreviousNodes(nodeID)
+	if err != nil {
+		tm.dag.Logger().Error("Error getting previous nodes", logger.Field{Key: "nodeID", Value: nodeID}, logger.Field{Key: "error", Value: err.Error()})
+		return false
+	}
+
+	// Check if all previous nodes have completed successfully
+	for _, prevNode := range prevNodes {
+		state, exists := tm.taskStates.Get(prevNode.ID)
+		if !exists || state.Status != mq.Completed {
+			return false
+		}
+	}
+
+	return true
+}
+
 func (tm *TaskManager) processNode(exec *task) {
 	startTime := time.Now()
 	pureNodeID := strings.Split(exec.nodeID, Delimiter)[0]
@@ -199,6 +219,15 @@ func (tm *TaskManager) processNode(exec *task) {
 		tm.dag.Logger().Error("Node not found", logger.Field{Key: "nodeID", Value: pureNodeID})
 		return
 	}
+
+	// Check if all dependencies are met before processing
+	if !tm.areDependenciesMet(pureNodeID) {
+		tm.dag.Logger().Warn("Dependencies not met for node, deferring", logger.Field{Key: "nodeID", Value: pureNodeID})
+		// Defer the task
+		tm.deferredTasks.Set(exec.taskID, exec)
+		return
+	}
+
 	// Wrap context with timeout if node.Timeout is configured.
 	if node.Timeout > 0 {
 		var cancel context.CancelFunc
@@ -240,11 +269,15 @@ func (tm *TaskManager) processNode(exec *task) {
 					// add jitter to avoid thundering herd
 					jitter := time.Duration(rand.Int63n(int64(tm.baseBackoff)))
 					backoff += jitter
-					log.Printf("Recoverable error on node %s, retrying in %s: %v", exec.nodeID, backoff, result.Error)
+					tm.dag.Logger().Warn("Recoverable error on node, retrying",
+						logger.Field{Key: "nodeID", Value: exec.nodeID},
+						logger.Field{Key: "attempt", Value: attempts},
+						logger.Field{Key: "backoff", Value: backoff.String()},
+						logger.Field{Key: "error", Value: result.Error.Error()})
 					select {
 					case <-time.After(backoff):
 					case <-exec.ctx.Done():
-						log.Printf("Context cancelled for node %s", exec.nodeID)
+						tm.dag.Logger().Warn("Context cancelled for node", logger.Field{Key: "nodeID", Value: exec.nodeID})
 						return
 					}
 					continue
@@ -252,8 +285,13 @@ func (tm *TaskManager) processNode(exec *task) {
 					if err := tm.recoveryHandler(exec.ctx, result); err == nil {
 						result.Error = nil
 						result.Status = mq.Completed
+					} else {
+						result.Error = fmt.Errorf("recovery failed for node %s: %w", exec.nodeID, err)
 					}
 				}
+			} else {
+				// Wrap non-recoverable errors with context
+				result.Error = fmt.Errorf("node %s failed: %w", exec.nodeID, result.Error)
 			}
 		}
 		break

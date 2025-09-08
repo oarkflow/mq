@@ -466,15 +466,54 @@ func (tm *DAG) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 
 	var result mq.Result
 
+	// Check cache for node result
+	cacheKey := fmt.Sprintf("%s:%s", task.ID, task.Topic)
+	if tm.cache != nil {
+		if cachedResult, found := tm.cache.GetNodeResult(cacheKey); found {
+			tm.Logger().Info("Using cached result for node", logger.Field{Key: "nodeID", Value: task.Topic})
+			result = cachedResult.(mq.Result)
+			return result
+		}
+	}
+
+	// Begin transaction if transaction manager is available
+	var tx *Transaction
+	if tm.transactionManager != nil {
+		tx = tm.transactionManager.BeginTransaction(task.ID)
+		defer func() {
+			if result.Error != nil {
+				if err := tm.transactionManager.RollbackTransaction(tx.ID); err != nil {
+					tm.Logger().Error("Failed to rollback transaction", logger.Field{Key: "txID", Value: tx.ID}, logger.Field{Key: "error", Value: err.Error()})
+				}
+			} else {
+				if err := tm.transactionManager.CommitTransaction(tx.ID); err != nil {
+					tm.Logger().Error("Failed to commit transaction", logger.Field{Key: "txID", Value: tx.ID}, logger.Field{Key: "error", Value: err.Error()})
+				}
+			}
+		}()
+	}
+
 	// Execute with circuit breaker protection
 	err := circuitBreaker.Execute(func() error {
 		result = tm.processTaskInternal(ctx, task)
 		return result.Error
 	})
 
-	if err != nil && result.Error == nil {
-		result.Error = err
-		result.Ctx = ctx
+	// Cache the result if successful
+	if tm.cache != nil && result.Error == nil {
+		tm.cache.SetNodeResult(cacheKey, result)
+	}
+
+	if err != nil {
+		if result.Error == nil {
+			result.Error = err
+			result.Ctx = ctx
+		}
+		// Log circuit breaker error
+		tm.Logger().Error("Circuit breaker error",
+			logger.Field{Key: "nodeID", Value: task.Topic},
+			logger.Field{Key: "error", Value: err.Error()},
+		)
 	}
 
 	// Record completion
