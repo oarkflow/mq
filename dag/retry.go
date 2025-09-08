@@ -196,19 +196,47 @@ func (rp *RetryableProcessor) ProcessTask(ctx context.Context, task *mq.Task) mq
 			logger.Field{Key: "attempt", Value: rp.retryManager.GetAttempts(taskID, nodeID)},
 		)
 
-		// Schedule retry after delay
-		time.AfterFunc(delay, func() {
-			retryResult := rp.processor.ProcessTask(ctx, task)
+		// Create a channel to signal retry completion
+		retryDone := make(chan mq.Result, 1)
+
+		// Schedule retry with proper context handling
+		go func() {
+			defer close(retryDone)
+
+			select {
+			case <-time.After(delay):
+				retryResult := rp.processor.ProcessTask(ctx, task)
+				retryDone <- retryResult
+			case <-ctx.Done():
+				rp.logger.Warn("Retry cancelled due to context cancellation",
+					logger.Field{Key: "taskID", Value: taskID},
+					logger.Field{Key: "nodeID", Value: nodeID})
+				return
+			}
+		}()
+
+		// Wait for retry result or timeout
+		select {
+		case retryResult := <-retryDone:
 			if retryResult.Error == nil {
 				rp.retryManager.Reset(taskID, nodeID)
 				rp.logger.Info("Task retry succeeded",
 					logger.Field{Key: "taskID", Value: taskID},
 					logger.Field{Key: "nodeID", Value: nodeID},
 				)
+				return retryResult
 			}
-		})
+		case <-time.After(30 * time.Second): // Timeout for retry
+			rp.logger.Error("Retry timed out",
+				logger.Field{Key: "taskID", Value: taskID},
+				logger.Field{Key: "nodeID", Value: nodeID})
+		case <-ctx.Done():
+			rp.logger.Warn("Retry cancelled due to context cancellation",
+				logger.Field{Key: "taskID", Value: taskID},
+				logger.Field{Key: "nodeID", Value: nodeID})
+		}
 
-		// Return original failure result
+		// Return original failure result if retry didn't succeed
 		return result
 	}
 
