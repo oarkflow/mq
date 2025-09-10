@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -16,6 +17,143 @@ import (
 	"github.com/oarkflow/mq/storage"
 	"github.com/oarkflow/mq/storage/memory"
 )
+
+// PriorityQueueItem represents an item in the priority queue
+type PriorityQueueItem struct {
+	task      *task
+	priority  int   // Lower number = higher priority
+	timestamp int64 // For FIFO ordering within same priority
+	index     int   // For heap operations
+}
+
+// PriorityQueue implements a priority queue for deterministic task execution
+type PriorityQueue struct {
+	items []*PriorityQueueItem
+	mu    sync.RWMutex
+}
+
+// NewPriorityQueue creates a new priority queue
+func NewPriorityQueue() *PriorityQueue {
+	return &PriorityQueue{
+		items: make([]*PriorityQueueItem, 0),
+	}
+}
+
+// Push adds a task to the priority queue
+func (pq *PriorityQueue) Push(t *task, priority int) {
+	pq.mu.Lock()
+	defer pq.mu.Unlock()
+
+	item := &PriorityQueueItem{
+		task:      t,
+		priority:  priority,
+		timestamp: time.Now().UnixNano(),
+	}
+
+	pq.items = append(pq.items, item)
+	pq.bubbleUp(len(pq.items) - 1)
+}
+
+// Pop removes and returns the highest priority task
+func (pq *PriorityQueue) Pop() *task {
+	pq.mu.Lock()
+	defer pq.mu.Unlock()
+
+	if len(pq.items) == 0 {
+		return nil
+	}
+
+	// Get the root (highest priority)
+	root := pq.items[0]
+
+	// Move last item to root and remove last
+	lastIndex := len(pq.items) - 1
+	pq.items[0] = pq.items[lastIndex]
+	pq.items[0].index = 0
+	pq.items = pq.items[:lastIndex]
+
+	if len(pq.items) > 0 {
+		pq.bubbleDown(0)
+	}
+
+	return root.task
+}
+
+// Peek returns the highest priority task without removing it
+func (pq *PriorityQueue) Peek() *task {
+	pq.mu.RLock()
+	defer pq.mu.RUnlock()
+
+	if len(pq.items) == 0 {
+		return nil
+	}
+	return pq.items[0].task
+}
+
+// Len returns the number of items in the queue
+func (pq *PriorityQueue) Len() int {
+	pq.mu.RLock()
+	defer pq.mu.RUnlock()
+	return len(pq.items)
+}
+
+// IsEmpty returns true if the queue is empty
+func (pq *PriorityQueue) IsEmpty() bool {
+	return pq.Len() == 0
+}
+
+// bubbleUp moves an item up the heap to maintain heap property
+func (pq *PriorityQueue) bubbleUp(index int) {
+	for index > 0 {
+		parentIndex := (index - 1) / 2
+		if pq.compare(pq.items[index], pq.items[parentIndex]) >= 0 {
+			break
+		}
+		pq.swap(index, parentIndex)
+		index = parentIndex
+	}
+}
+
+// bubbleDown moves an item down the heap to maintain heap property
+func (pq *PriorityQueue) bubbleDown(index int) {
+	size := len(pq.items)
+	for {
+		left := 2*index + 1
+		right := 2*index + 2
+		smallest := index
+
+		if left < size && pq.compare(pq.items[left], pq.items[smallest]) < 0 {
+			smallest = left
+		}
+		if right < size && pq.compare(pq.items[right], pq.items[smallest]) < 0 {
+			smallest = right
+		}
+
+		if smallest == index {
+			break
+		}
+
+		pq.swap(index, smallest)
+		index = smallest
+	}
+}
+
+// compare compares two priority queue items
+func (pq *PriorityQueue) compare(a, b *PriorityQueueItem) int {
+	// First compare by priority (lower number = higher priority)
+	if a.priority != b.priority {
+		return a.priority - b.priority
+	}
+	// Then by timestamp (earlier = higher priority)
+	return int(a.timestamp - b.timestamp)
+}
+
+// swap swaps two items in the heap
+func (pq *PriorityQueue) swap(i, j int) {
+	pq.items[i], pq.items[j] = pq.items[j], pq.items[i]
+	pq.items[i].index = i
+	pq.items[j].index = j
+}
 
 // TaskError is used by node processors to indicate whether an error is recoverable.
 type TaskError struct {
@@ -83,7 +221,7 @@ type TaskManager struct {
 	iteratorNodes      storage.IMap[string, []Edge]
 	currentNodePayload storage.IMap[string, json.RawMessage]
 	currentNodeResult  storage.IMap[string, mq.Result]
-	taskQueue          chan *task
+	taskQueue          *PriorityQueue // Changed from chan *task to PriorityQueue
 	result             *mq.Result
 	resultQueue        chan nodeResult
 	resultCh           chan mq.Result
@@ -111,7 +249,7 @@ func NewTaskManager(dag *DAG, taskID string, resultCh chan mq.Result, iteratorNo
 		deferredTasks:      memory.New[string, *task](),
 		currentNodePayload: memory.New[string, json.RawMessage](),
 		currentNodeResult:  memory.New[string, mq.Result](),
-		taskQueue:          make(chan *task, DefaultChannelSize),
+		taskQueue:          NewPriorityQueue(), // Changed from channel to PriorityQueue
 		resultQueue:        make(chan nodeResult, DefaultChannelSize),
 		resultCh:           resultCh,
 		stopCh:             make(chan struct{}),
@@ -145,26 +283,37 @@ func (tm *TaskManager) enqueueTask(ctx context.Context, startNode, taskID string
 	}
 	t := newTask(ctx, taskID, startNode, payload)
 
-	select {
-	case tm.taskQueue <- t:
-		// Successfully enqueued
-	default:
-		// Queue is full, add to deferred tasks with limit
-		if tm.deferredTasks.Size() < 1000 { // Limit deferred tasks to prevent memory issues
-			tm.deferredTasks.Set(taskID, t)
-			tm.dag.Logger().Warn("Task queue full, deferring task",
-				logger.Field{Key: "taskID", Value: taskID},
-				logger.Field{Key: "nodeID", Value: startNode})
-		} else {
-			tm.dag.Logger().Error("Deferred tasks queue also full, dropping task",
-				logger.Field{Key: "taskID", Value: taskID},
-				logger.Field{Key: "nodeID", Value: startNode})
+	// Calculate priority based on topological order
+	priority := tm.calculateTaskPriority(startNode)
+	tm.taskQueue.Push(t, priority)
+}
+
+// calculateTaskPriority calculates the priority of a task based on topological order
+func (tm *TaskManager) calculateTaskPriority(nodeID string) int {
+	pureNodeID := strings.Split(nodeID, Delimiter)[0]
+
+	// Get topological order if available
+	if topoOrder, err := tm.dag.GetTopologicalOrder(); err == nil {
+		for i, node := range topoOrder {
+			if node == pureNodeID {
+				return i // Lower index = higher priority (processed first)
+			}
 		}
 	}
+
+	// Fallback: use node ID hash for deterministic ordering
+	hash := 0
+	for _, char := range pureNodeID {
+		hash = hash*31 + int(char)
+	}
+	return hash
 }
 
 func (tm *TaskManager) run() {
 	defer tm.wg.Done()
+	ticker := time.NewTicker(10 * time.Millisecond) // Check queue every 10ms
+	defer ticker.Stop()
+
 	for {
 		select {
 		case <-tm.stopCh:
@@ -188,8 +337,11 @@ func (tm *TaskManager) run() {
 			case <-tm.stopCh:
 				log.Println("Stopping TaskManager run loop")
 				return
-			case tsk := <-tm.taskQueue:
-				tm.processNode(tsk)
+			case <-ticker.C:
+				// Try to get next task from priority queue
+				if tsk := tm.taskQueue.Pop(); tsk != nil {
+					tm.processNode(tsk)
+				}
 			}
 		}
 	}
@@ -572,16 +724,22 @@ func (tm *TaskManager) getConditionalEdges(node *Node, result mq.Result) []Edge 
 	edges := make([]Edge, len(node.Edges))
 	copy(edges, node.Edges)
 
-	// Handle conditional edges based on ConditionStatus
-	if result.ConditionStatus != "" {
+	// Handle conditional edges based on ConditionStatus or expression evaluation
+	conditionStatus := result.ConditionStatus
+	if conditionStatus == "" {
+		// Try to evaluate conditions from payload if no explicit status
+		conditionStatus = tm.evaluateConditionalStatus(node, result)
+	}
+
+	if conditionStatus != "" {
 		if conditions, ok := tm.dag.conditions[node.ID]; ok {
-			if targetKey, exists := conditions[result.ConditionStatus]; exists {
+			if targetKey, exists := conditions[conditionStatus]; exists {
 				if targetNode, found := tm.dag.nodes.Get(targetKey); found {
 					conditionalEdge := Edge{
 						From:       node,
 						FromSource: node.ID,
 						To:         targetNode,
-						Label:      fmt.Sprintf("condition:%s", result.ConditionStatus),
+						Label:      fmt.Sprintf("condition:%s", conditionStatus),
 						Type:       Simple,
 					}
 					edges = append(edges, conditionalEdge)
@@ -602,6 +760,91 @@ func (tm *TaskManager) getConditionalEdges(node *Node, result mq.Result) []Edge 
 	}
 
 	return edges
+}
+
+// evaluateConditionalStatus evaluates conditional expressions to determine the next path
+func (tm *TaskManager) evaluateConditionalStatus(node *Node, result mq.Result) string {
+	if conditions, ok := tm.dag.conditions[node.ID]; ok {
+		// Extract data from result payload for expression evaluation
+		var data map[string]interface{}
+		if len(result.Payload) > 0 {
+			if err := json.Unmarshal(result.Payload, &data); err != nil {
+				tm.dag.Logger().Warn("Failed to unmarshal result payload for condition evaluation",
+					logger.Field{Key: "nodeID", Value: node.ID},
+					logger.Field{Key: "error", Value: err.Error()})
+				return ""
+			}
+		}
+
+		// Evaluate each condition
+		for conditionKey := range conditions {
+			if conditionKey == "default" {
+				continue // Skip default, handle it separately
+			}
+
+			// Try to evaluate as expression
+			if tm.evaluateConditionExpression(conditionKey, data) {
+				return conditionKey
+			}
+		}
+	}
+
+	return ""
+}
+
+// evaluateConditionExpression evaluates a conditional expression
+func (tm *TaskManager) evaluateConditionExpression(expression string, data map[string]interface{}) bool {
+	// Simple expression evaluation - can be enhanced with a proper expression engine
+	parts := strings.Fields(expression)
+	if len(parts) < 3 {
+		return false
+	}
+
+	field := parts[0]
+	operator := parts[1]
+	expectedValue := strings.Join(parts[2:], " ")
+
+	if fieldValue, ok := data[field]; ok {
+		actualStr := fmt.Sprintf("%v", fieldValue)
+		switch operator {
+		case "==", "=":
+			return actualStr == expectedValue
+		case "!=":
+			return actualStr != expectedValue
+		case ">":
+			if actualNum, err := strconv.ParseFloat(actualStr, 64); err == nil {
+				if expectedNum, err := strconv.ParseFloat(expectedValue, 64); err == nil {
+					return actualNum > expectedNum
+				}
+			}
+		case "<":
+			if actualNum, err := strconv.ParseFloat(actualStr, 64); err == nil {
+				if expectedNum, err := strconv.ParseFloat(expectedValue, 64); err == nil {
+					return actualNum < expectedNum
+				}
+			}
+		case ">=":
+			if actualNum, err := strconv.ParseFloat(actualStr, 64); err == nil {
+				if expectedNum, err := strconv.ParseFloat(expectedValue, 64); err == nil {
+					return actualNum >= expectedNum
+				}
+			}
+		case "<=":
+			if actualNum, err := strconv.ParseFloat(actualStr, 64); err == nil {
+				if expectedNum, err := strconv.ParseFloat(expectedValue, 64); err == nil {
+					return actualNum <= expectedNum
+				}
+			}
+		case "contains":
+			return strings.Contains(actualStr, expectedValue)
+		case "startswith":
+			return strings.HasPrefix(actualStr, expectedValue)
+		case "endswith":
+			return strings.HasSuffix(actualStr, expectedValue)
+		}
+	}
+
+	return false
 }
 
 func (tm *TaskManager) handleEdges(currentResult nodeResult, edges []Edge) {
@@ -685,16 +928,15 @@ func (tm *TaskManager) retryDeferredTasks() {
 					return false
 				}
 
-				select {
-				case tm.taskQueue <- tsk:
-					tm.deferredTasks.Del(taskID)
-					processed++
-					tm.dag.Logger().Debug("Retried deferred task",
-						logger.Field{Key: "taskID", Value: taskID})
-				default:
-					// Queue still full, keep the task deferred
-					return false
-				}
+				// Calculate priority and push to priority queue
+				priority := tm.calculateTaskPriority(tsk.nodeID)
+				tm.taskQueue.Push(tsk, priority)
+				tm.deferredTasks.Del(taskID)
+				processed++
+				tm.dag.Logger().Debug("Retried deferred task",
+					logger.Field{Key: "taskID", Value: taskID},
+					logger.Field{Key: "nodeID", Value: tsk.nodeID},
+					logger.Field{Key: "priority", Value: priority})
 				return true
 			})
 		}

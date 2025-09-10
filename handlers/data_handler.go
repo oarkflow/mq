@@ -32,6 +32,7 @@ func (h *DataHandler) ProcessTask(ctx context.Context, task *mq.Task) mq.Result 
 	}
 
 	var result map[string]any
+	var conditionStatus string
 	switch operation {
 	case "sort":
 		result = h.sortData(data)
@@ -41,6 +42,11 @@ func (h *DataHandler) ProcessTask(ctx context.Context, task *mq.Task) mq.Result 
 		result = h.calculateFields(data)
 	case "conditional_set":
 		result = h.conditionalSet(data)
+		// Extract condition status from result
+		if status, ok := result["_condition_status"].(string); ok {
+			conditionStatus = status
+			delete(result, "_condition_status") // Remove from payload
+		}
 	case "type_cast":
 		result = h.typeCast(data)
 	case "validate_fields":
@@ -60,7 +66,11 @@ func (h *DataHandler) ProcessTask(ctx context.Context, task *mq.Task) mq.Result 
 		return mq.Result{Error: fmt.Errorf("failed to marshal result: %w", err)}
 	}
 
-	return mq.Result{Payload: resultPayload, Ctx: ctx}
+	return mq.Result{
+		Payload:         resultPayload,
+		Ctx:             ctx,
+		ConditionStatus: conditionStatus,
+	}
 }
 
 func (h *DataHandler) sortData(data map[string]any) map[string]any {
@@ -186,6 +196,9 @@ func (h *DataHandler) conditionalSet(data map[string]any) map[string]any {
 		result[key] = value
 	}
 
+	// Track which condition was met for setting ConditionStatus
+	var metCondition string
+
 	for targetField, condConfig := range conditions {
 		condition := condConfig["condition"].(string)
 		ifTrue := condConfig["if_true"]
@@ -193,9 +206,17 @@ func (h *DataHandler) conditionalSet(data map[string]any) map[string]any {
 
 		if h.evaluateCondition(data, condition) {
 			result[targetField] = ifTrue
+			if metCondition == "" { // Take the first met condition
+				metCondition = condition
+			}
 		} else {
 			result[targetField] = ifFalse
 		}
+	}
+
+	// Set condition status if any condition was evaluated
+	if metCondition != "" {
+		result["_condition_status"] = metCondition
 	}
 
 	return result

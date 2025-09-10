@@ -22,6 +22,124 @@ type Callback func(ctx context.Context, result Result) error
 // CompletionCallback is called when the pool completes a graceful shutdown.
 type CompletionCallback func()
 
+// Enhanced Retry Mechanisms with Exponential Backoff and Jitter
+type RetryStrategy interface {
+	NextDelay(attempt int) time.Duration
+	ShouldRetry(attempt int, err error) bool
+	MaxAttempts() int
+}
+
+type ExponentialBackoffRetry struct {
+	InitialDelay time.Duration
+	MaxDelay     time.Duration
+	Multiplier   float64
+	Jitter       float64
+	maxAttempts  int
+}
+
+func NewExponentialBackoffRetry(initialDelay, maxDelay time.Duration, multiplier, jitter float64, maxAttempts int) *ExponentialBackoffRetry {
+	return &ExponentialBackoffRetry{
+		InitialDelay: initialDelay,
+		MaxDelay:     maxDelay,
+		Multiplier:   multiplier,
+		Jitter:       jitter,
+		maxAttempts:  maxAttempts,
+	}
+}
+
+func (e *ExponentialBackoffRetry) NextDelay(attempt int) time.Duration {
+	if attempt <= 0 {
+		return e.InitialDelay
+	}
+
+	delay := float64(e.InitialDelay) * float64(attempt) * e.Multiplier
+	if delay > float64(e.MaxDelay) {
+		delay = float64(e.MaxDelay)
+	}
+
+	// Add jitter
+	jitterRange := delay * e.Jitter
+	jitter := (rand.Float64() - 0.5) * 2 * jitterRange
+	delay += jitter
+
+	if delay < 0 {
+		delay = 0
+	}
+
+	return time.Duration(delay)
+}
+
+func (e *ExponentialBackoffRetry) ShouldRetry(attempt int, err error) bool {
+	if attempt >= e.maxAttempts {
+		return false
+	}
+
+	// Don't retry certain types of errors
+	if err != nil {
+		errStr := err.Error()
+		// Don't retry authentication errors, permission errors, etc.
+		if strings.Contains(errStr, "unauthorized") ||
+			strings.Contains(errStr, "forbidden") ||
+			strings.Contains(errStr, "authentication") {
+			return false
+		}
+	}
+
+	return true
+}
+
+func (e *ExponentialBackoffRetry) MaxAttempts() int {
+	return e.maxAttempts
+}
+
+// Circuit Breaker Integration with Retry
+type RetryWithCircuitBreaker struct {
+	retryStrategy  RetryStrategy
+	circuitBreaker *EnhancedCircuitBreaker
+}
+
+func NewRetryWithCircuitBreaker(retryStrategy RetryStrategy, circuitBreaker *EnhancedCircuitBreaker) *RetryWithCircuitBreaker {
+	return &RetryWithCircuitBreaker{
+		retryStrategy:  retryStrategy,
+		circuitBreaker: circuitBreaker,
+	}
+}
+
+func (r *RetryWithCircuitBreaker) ExecuteWithRetry(operation func() error) error {
+	attempt := 0
+
+	for {
+		// Check circuit breaker
+		if r.circuitBreaker != nil {
+			err := r.circuitBreaker.Call(operation)
+			if err != nil {
+				if !r.retryStrategy.ShouldRetry(attempt, err) {
+					return err
+				}
+			} else {
+				return nil // Success
+			}
+		} else {
+			err := operation()
+			if err == nil {
+				return nil // Success
+			}
+			if !r.retryStrategy.ShouldRetry(attempt, err) {
+				return err
+			}
+		}
+
+		attempt++
+		if attempt >= r.retryStrategy.MaxAttempts() {
+			return fmt.Errorf("max retry attempts exceeded")
+		}
+
+		delay := r.retryStrategy.NextDelay(attempt)
+		Logger.Info().Msgf("Retrying operation in %v (attempt %d/%d)", delay, attempt, r.retryStrategy.MaxAttempts())
+		time.Sleep(delay)
+	}
+}
+
 // Metrics holds cumulative pool metrics.
 type Metrics struct {
 	TotalTasks           int64 // total number of tasks processed

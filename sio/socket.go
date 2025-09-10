@@ -244,7 +244,7 @@ func (s *Socket) Close() error {
 		return nil
 	}
 
-	defer slog.Debug(s.ID(), "disconnected")
+	defer slog.Debug("Socket disconnected", "socket_id", s.ID())
 
 	err := s.ws.Close()
 	if err != nil {

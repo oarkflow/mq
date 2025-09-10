@@ -419,7 +419,13 @@ func (c *Codec) ReadMessage(ctx context.Context, conn net.Conn) (*Message, error
 func (c *Codec) GetStats() Stats {
 	c.stats.mu.RLock()
 	defer c.stats.mu.RUnlock()
-	return *c.stats
+	return Stats{
+		MessagesSent:     c.stats.MessagesSent,
+		MessagesReceived: c.stats.MessagesReceived,
+		BytesSent:        c.stats.BytesSent,
+		BytesReceived:    c.stats.BytesReceived,
+		Errors:           c.stats.Errors,
+	}
 }
 
 // ResetStats resets codec statistics
