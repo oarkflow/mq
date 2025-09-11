@@ -438,7 +438,6 @@ func (tm *TaskManager) processNode(exec *task) {
 
 	state, _ := tm.taskStates.Get(pureNodeID)
 	if state == nil {
-		tm.dag.Logger().Warn("State not found; creating new state", logger.Field{Key: "nodeID", Value: pureNodeID})
 		state = newTaskState(pureNodeID)
 		tm.taskStates.Set(pureNodeID, state)
 	}
