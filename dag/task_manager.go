@@ -579,7 +579,9 @@ func (tm *TaskManager) logNodeExecution(exec *task, pureNodeID string, result mq
 		fields = append(fields, logger.Field{Key: "error", Value: result.Error.Error()})
 		tm.dag.Logger().Error("Node execution failed", fields...)
 	} else {
-		tm.dag.Logger().Info("Node execution completed", fields...)
+		if tm.dag.debug {
+			tm.dag.Logger().Info("Node execution completed", fields...)
+		}
 	}
 }
 

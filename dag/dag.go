@@ -245,12 +245,14 @@ func (d *DAG) updateTaskMetrics(taskID string, result mq.Result, duration time.D
 	case mq.Cancelled:
 		d.metrics.Cancelled++
 	}
-	d.Logger().Info("Updating task metrics",
-		logger.Field{Key: "taskID", Value: taskID},
-		logger.Field{Key: "lastExecuted", Value: time.Now()},
-		logger.Field{Key: "duration", Value: duration},
-		logger.Field{Key: "success", Value: result.Status},
-	)
+	if d.debug {
+		d.Logger().Info("Updating task metrics",
+			logger.Field{Key: "taskID", Value: taskID},
+			logger.Field{Key: "lastExecuted", Value: time.Now()},
+			logger.Field{Key: "duration", Value: duration},
+			logger.Field{Key: "success", Value: result.Status},
+		)
+	}
 }
 
 // Getter for task metrics.
