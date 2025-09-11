@@ -11,7 +11,7 @@ import (
 type Response struct {
 	Additional any    `json:"additional,omitempty"`
 	Data       any    `json:"data"`
-	Message    string `json:"message,omitempty"`
+	Message    string `json:"message"`
 	StackTrace string `json:"stack_trace,omitempty"`
 	Code       int    `json:"code"`
 	Success    bool   `json:"success"`

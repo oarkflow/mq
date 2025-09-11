@@ -459,7 +459,7 @@ func customHandler(flow *dag.DAG) fiber.Handler {
 		if contentType == "" ||
 			contentType == fiber.MIMEApplicationJSON ||
 			contentType == fiber.MIMEApplicationJSONCharsetUTF8 {
-			return ctx.JSON(result)
+			return responses.Success(ctx, 200, result.Payload)
 		}
 
 		var resultData map[string]any
