@@ -1356,8 +1356,6 @@ func (wp *Pool) adjustWorkersBasedOnLoad() {
 	targetWorkers = max(minWorkers, min(maxWorkers, targetWorkers))
 
 	if targetWorkers != currentWorkers {
-		wp.logger.Info().Msgf("Auto-scaling workers from %d to %d (queue: %d, overflow: %d)",
-			currentWorkers, targetWorkers, queueLen, overflowLen)
 		wp.AdjustWorkerCount(targetWorkers)
 	}
 }
