@@ -126,6 +126,7 @@ type Data struct {
 	Mapping         map[string]string `json:"mapping,omitempty" yaml:"mapping,omitempty"`
 	AdditionalData  map[string]any    `json:"additional_data,omitempty" yaml:"additional_data,omitempty"`
 	GeneratedFields []string          `json:"generated_fields,omitempty" yaml:"generated_fields,omitempty"`
+	Conditions      map[string]Filter `json:"conditions,omitempty" yaml:"conditions,omitempty"`
 	Providers       []Provider        `json:"providers,omitempty" yaml:"providers,omitempty"`
 }
 

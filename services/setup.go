@@ -19,8 +19,6 @@ import (
 	"github.com/oarkflow/form"
 	"github.com/oarkflow/json"
 	"github.com/oarkflow/log"
-	"github.com/oarkflow/protocol/utils/str"
-
 	"github.com/oarkflow/mq"
 	"github.com/oarkflow/mq/consts"
 	"github.com/oarkflow/mq/dag"
@@ -28,6 +26,7 @@ import (
 	"github.com/oarkflow/mq/services/middlewares"
 	"github.com/oarkflow/mq/services/renderer"
 	"github.com/oarkflow/mq/services/utils"
+	"github.com/oarkflow/protocol/utils/str"
 )
 
 var ValidationInstance Validation
@@ -142,41 +141,34 @@ func prepareNode(flow *dag.DAG, node Node) error {
 			GeneratedFields: node.Data.GeneratedFields,
 			Providers:       providers,
 		})
-		if s, ok := node.Data.AdditionalData["conditions"]; ok {
-			var fil map[string]*Filter
-			err := Map(&fil, s)
-			if err != nil {
-				return err
-			}
-			condition := make(map[string]string)
-			conditions := make(map[string]dag.Condition)
-			for key, cond := range fil {
-				condition[key] = cond.Node
-				if cond.Filter != nil {
-					conditions[key] = cond.Filter
-				} else if cond.FilterGroup != nil {
-					cond.FilterGroup.Operator = strings.ToUpper(cond.FilterGroup.Operator)
-					if !slices.Contains([]string{"AND", "OR"}, cond.FilterGroup.Operator) {
-						cond.FilterGroup.Operator = "AND"
-					}
-					var fillers []filters.Condition
-					for _, f := range cond.FilterGroup.Filters {
-						if f != nil {
-							fillers = append(fillers, f)
-						}
-					}
-					conditions[key] = &filters.FilterGroup{
-						Operator: filters.Boolean(cond.FilterGroup.Operator),
-						Reverse:  cond.FilterGroup.Reverse,
-						Filters:  fillers,
-					}
-				} else {
-					conditions[key] = nil
+		condition := make(map[string]string)
+		conditions := make(map[string]dag.Condition)
+		for key, cond := range node.Data.Conditions {
+			condition[key] = cond.Node
+			if cond.Filter != nil {
+				conditions[key] = cond.Filter
+			} else if cond.FilterGroup != nil {
+				cond.FilterGroup.Operator = strings.ToUpper(cond.FilterGroup.Operator)
+				if !slices.Contains([]string{"AND", "OR"}, cond.FilterGroup.Operator) {
+					cond.FilterGroup.Operator = "AND"
 				}
+				var fillers []filters.Condition
+				for _, f := range cond.FilterGroup.Filters {
+					if f != nil {
+						fillers = append(fillers, f)
+					}
+				}
+				conditions[key] = &filters.FilterGroup{
+					Operator: filters.Boolean(cond.FilterGroup.Operator),
+					Reverse:  cond.FilterGroup.Reverse,
+					Filters:  fillers,
+				}
+			} else {
+				conditions[key] = nil
 			}
-			flow.AddCondition(node.ID, condition)
-			nodeHandler.SetConditions(conditions)
 		}
+		flow.AddCondition(node.ID, condition)
+		nodeHandler.SetConditions(conditions)
 	case dag.Processor:
 		nodeHandler.SetConfig(dag.Payload{
 			Mapping:         node.Data.Mapping,
