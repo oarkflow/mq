@@ -94,7 +94,7 @@ package main
 
 import (
 	"context"
-	
+
 	"github.com/oarkflow/mq"
 	"github.com/oarkflow/mq/examples/tasks"
 )
@@ -141,7 +141,7 @@ package main
 import (
 	"context"
 	"fmt"
-	
+
 	"github.com/oarkflow/mq"
 )
 
@@ -247,6 +247,82 @@ func requestHandler(requestType string) func(w http.ResponseWriter, r *http.Requ
 }
 ```
 
+## Middleware System
+
+The DAG system supports a robust middleware system that allows you to add cross-cutting concerns like logging, validation, timing, and more to your DAG nodes.
+
+### Global Middlewares
+
+Global middlewares apply to all nodes in the DAG:
+
+```go
+flow.Use(LoggingMiddleware, ValidationMiddleware)
+```
+
+### Node-Specific Middlewares
+
+You can apply middlewares to specific nodes:
+
+```go
+flow.UseNodeMiddlewares(
+    dag.NodeMiddleware{
+        Node:        "process_a",
+        Middlewares: []mq.Handler{TimingMiddleware},
+    },
+    dag.NodeMiddleware{
+        Node:        "process_b",
+        Middlewares: []mq.Handler{TimingMiddleware},
+    },
+)
+```
+
+### Middleware Example
+
+[middleware_example_main.go](./examples/middleware_example_main.go)
+
+```go
+// LoggingMiddleware logs the start and end of task processing
+func LoggingMiddleware(ctx context.Context, task *mq.Task) mq.Result {
+    log.Printf("Middleware: Starting processing for node %s, task %s", task.Topic, task.ID)
+
+    // Return successful result to continue to next middleware/processor
+    return mq.Result{
+        Status:  mq.Completed,
+        Ctx:     ctx,
+        Payload: task.Payload,
+    }
+}
+
+// ValidationMiddleware validates the task payload
+func ValidationMiddleware(ctx context.Context, task *mq.Task) mq.Result {
+    if len(task.Payload) == 0 {
+        return mq.Result{
+            Status: mq.Failed,
+            Error:  fmt.Errorf("empty payload not allowed"),
+            Ctx:    ctx,
+        }
+    }
+
+    return mq.Result{
+        Status:  mq.Completed,
+        Ctx:     ctx,
+        Payload: task.Payload,
+    }
+}
+```
+
+### Middleware Execution Order
+
+Middlewares are executed in the following order:
+1. Global middlewares (in the order they were added)
+2. Node-specific middlewares (in the order they were added)
+3. The actual node processor
+
+Each middleware can:
+- Modify the context
+- Modify the task payload
+- Short-circuit processing by returning an error result
+- Continue processing by returning a successful result
 
 ## TODOS
 

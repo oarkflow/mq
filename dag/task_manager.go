@@ -349,7 +349,13 @@ func (tm *TaskManager) processNode(exec *task) {
 	attempts := 0
 	for {
 		// log.Printf("Tracing: Start processing node %s (attempt %d) on flow %s", exec.nodeID, attempts+1, tm.dag.key)
-		result = node.processor.ProcessTask(exec.ctx, mq.NewTask(exec.taskID, exec.payload, exec.nodeID, mq.WithDAG(tm.dag)))
+		// Get middlewares for this node
+		middlewares := tm.dag.getNodeMiddlewares(pureNodeID)
+
+		// Execute middlewares and processor
+		result = tm.dag.executeMiddlewares(exec.ctx, mq.NewTask(exec.taskID, exec.payload, exec.nodeID, mq.WithDAG(tm.dag)), middlewares, func(ctx context.Context, task *mq.Task) mq.Result {
+			return node.processor.ProcessTask(ctx, task)
+		})
 		if result.Error != nil {
 			if te, ok := result.Error.(TaskError); ok && te.Recoverable {
 				if attempts < tm.maxRetries {

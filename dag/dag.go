@@ -32,6 +32,12 @@ type TaskMetrics struct {
 	Failed     int
 }
 
+// NodeMiddleware represents middleware configuration for a specific node
+type NodeMiddleware struct {
+	Node        string
+	Middlewares []mq.Handler
+}
+
 type Node struct {
 	processor mq.Processor
 	Label     string
@@ -114,6 +120,11 @@ type DAG struct {
 
 	// Debug configuration
 	debug bool // Global debug mode for the entire DAG
+
+	// Middleware configuration
+	globalMiddlewares []mq.Handler
+	nodeMiddlewares   map[string][]mq.Handler
+	middlewaresMu     sync.RWMutex
 }
 
 // SetPreProcessHook configures a function to be called before each node is processed.
@@ -183,6 +194,77 @@ func (tm *DAG) GetDebugInfo() map[string]interface{} {
 	return debugInfo
 }
 
+// Use adds global middleware handlers that will be executed for all nodes in the DAG
+func (tm *DAG) Use(handlers ...mq.Handler) {
+	tm.middlewaresMu.Lock()
+	defer tm.middlewaresMu.Unlock()
+	tm.globalMiddlewares = append(tm.globalMiddlewares, handlers...)
+}
+
+// UseNodeMiddlewares adds middleware handlers for specific nodes
+func (tm *DAG) UseNodeMiddlewares(nodeMiddlewares ...NodeMiddleware) {
+	tm.middlewaresMu.Lock()
+	defer tm.middlewaresMu.Unlock()
+	for _, nm := range nodeMiddlewares {
+		if nm.Node == "" {
+			continue
+		}
+		if tm.nodeMiddlewares[nm.Node] == nil {
+			tm.nodeMiddlewares[nm.Node] = make([]mq.Handler, 0)
+		}
+		tm.nodeMiddlewares[nm.Node] = append(tm.nodeMiddlewares[nm.Node], nm.Middlewares...)
+	}
+}
+
+// executeMiddlewares executes a chain of middlewares and then the final handler
+func (tm *DAG) executeMiddlewares(ctx context.Context, task *mq.Task, middlewares []mq.Handler, finalHandler func(context.Context, *mq.Task) mq.Result) mq.Result {
+	if len(middlewares) == 0 {
+		return finalHandler(ctx, task)
+	}
+
+	// For this implementation, we'll execute middlewares sequentially
+	// Each middleware can modify the task/context and return a result
+	// If a middleware returns a result with Status == Completed and no error,
+	// we consider it as "continue to next"
+
+	for _, middleware := range middlewares {
+		result := middleware(ctx, task)
+		// If middleware returns an error or failed status, short-circuit
+		if result.Error != nil || result.Status == mq.Failed {
+			return result
+		}
+		// Update task payload if middleware modified it
+		if len(result.Payload) > 0 {
+			task.Payload = result.Payload
+		}
+		// Update context if middleware provided one
+		if result.Ctx != nil {
+			ctx = result.Ctx
+		}
+	}
+
+	// All middlewares passed, execute final handler
+	return finalHandler(ctx, task)
+}
+
+// getNodeMiddlewares returns all middlewares for a specific node (global + node-specific)
+func (tm *DAG) getNodeMiddlewares(nodeID string) []mq.Handler {
+	tm.middlewaresMu.RLock()
+	defer tm.middlewaresMu.RUnlock()
+
+	var allMiddlewares []mq.Handler
+
+	// Add global middlewares first
+	allMiddlewares = append(allMiddlewares, tm.globalMiddlewares...)
+
+	// Add node-specific middlewares
+	if nodeMiddlewares, exists := tm.nodeMiddlewares[nodeID]; exists {
+		allMiddlewares = append(allMiddlewares, nodeMiddlewares...)
+	}
+
+	return allMiddlewares
+}
+
 func NewDAG(name, key string, finalResultCallback func(taskID string, result mq.Result), opts ...mq.Option) *DAG {
 	callback := func(ctx context.Context, result mq.Result) error { return nil }
 	d := &DAG{
@@ -197,6 +279,7 @@ func NewDAG(name, key string, finalResultCallback func(taskID string, result mq.
 		circuitBreakers: make(map[string]*CircuitBreaker),
 		nextNodesCache:  make(map[string][]*Node),
 		prevNodesCache:  make(map[string][]*Node),
+		nodeMiddlewares: make(map[string][]mq.Handler),
 	}
 
 	opts = append(opts,
