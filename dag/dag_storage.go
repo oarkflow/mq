@@ -7,6 +7,8 @@ import (
 
 	"github.com/oarkflow/mq"
 	"github.com/oarkflow/mq/logger"
+
+	dagstorage "github.com/oarkflow/mq/dag/storage"
 )
 
 // SetTaskStorage sets the task storage for persistence
