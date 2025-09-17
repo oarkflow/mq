@@ -482,8 +482,10 @@ func (tm *DAG) processTaskInternal(ctx context.Context, task *mq.Task) mq.Result
 	ctx = context.WithValue(ctx, "task_id", task.ID)
 	userContext := form.UserContext(ctx)
 	next := userContext.Get("next")
+
+	// Ensure we have a TaskManager and a fresh resultCh for this synchronous wait.
 	manager, ok := tm.taskManager.Get(task.ID)
-	resultCh := make(chan mq.Result, 1)
+	resultCh := make(chan mq.Result, 1) // buffered to avoid trivial races
 	if !ok {
 		manager = NewTaskManager(tm, task.ID, resultCh, tm.iteratorNodes.Clone(), tm.taskStorage)
 		tm.taskManager.Set(task.ID, manager)
@@ -495,6 +497,7 @@ func (tm *DAG) processTaskInternal(ctx context.Context, task *mq.Task) mq.Result
 			)
 		}
 	} else {
+		// Replace the manager's result channel so waiting here is wired to this call.
 		manager.resultCh = resultCh
 		tm.Logger().Info("Resuming task",
 			logger.Field{Key: "taskID", Value: task.ID},
@@ -502,6 +505,8 @@ func (tm *DAG) processTaskInternal(ctx context.Context, task *mq.Task) mq.Result
 			logger.Field{Key: "timestamp", Value: time.Now()},
 		)
 	}
+
+	// Determine the current node and possibly handle sub-DAGs
 	currentKey := tm.getCurrentNode(manager)
 	currentNode := strings.Split(currentKey, Delimiter)[0]
 	node, exists := tm.nodes.Get(currentNode)
@@ -520,13 +525,13 @@ func (tm *DAG) processTaskInternal(ctx context.Context, task *mq.Task) mq.Result
 			if exists && node.NodeType == Page {
 				return result
 			}
-			m, ok := subDag.taskManager.Get(task.ID)
-			if !subDag.hasPageNode || (ok && m != nil && m.result != nil) {
+			if m, ok := subDag.taskManager.Get(task.ID); !subDag.hasPageNode || (ok && m != nil && m.result != nil) {
 				task.Payload = result.Payload
 			}
 		}
 	}
-	method, ok := ctx.Value("method").(string)
+
+	method, _ := ctx.Value("method").(string)
 	if method == "GET" && exists && node.NodeType == Page {
 		ctx = context.WithValue(ctx, "initial_node", currentNode)
 		if manager.result != nil {
@@ -542,6 +547,7 @@ func (tm *DAG) processTaskInternal(ctx context.Context, task *mq.Task) mq.Result
 		}
 	}
 
+	// Merge previous node result into task payload if present
 	if currentNodeResult, hasResult := manager.currentNodeResult.Get(currentKey); hasResult {
 		var taskPayload, resultPayload map[string]any
 		if err := json.Unmarshal(task.Payload, &taskPayload); err == nil {
@@ -549,90 +555,74 @@ func (tm *DAG) processTaskInternal(ctx context.Context, task *mq.Task) mq.Result
 				for key, val := range resultPayload {
 					taskPayload[key] = val
 				}
-				task.Payload, _ = json.Marshal(taskPayload)
+				if newPayload, err := json.Marshal(taskPayload); err == nil {
+					task.Payload = newPayload
+				} else if tm.debug {
+					tm.Logger().Error("Error marshalling merged payload",
+						logger.Field{Key: "error", Value: err})
+				}
+			} else if tm.debug {
+				tm.Logger().Error("Error unmarshalling current node result payload",
+					logger.Field{Key: "error", Value: err})
 			}
+		} else if tm.debug {
+			tm.Logger().Error("Error unmarshalling task payload",
+				logger.Field{Key: "error", Value: err})
 		}
 	}
 
+	// Determine initial node to start processing from
 	firstNode, err := tm.parseInitialNode(ctx)
 	if err != nil {
 		return mq.Result{Error: err, Ctx: ctx}
 	}
-	node, ok = tm.nodes.Get(firstNode)
+	node, _ = tm.nodes.Get(firstNode)
 	task.Topic = firstNode
 	ctx = context.WithValue(ctx, ContextIndex, "0")
 	manager.ProcessTask(ctx, firstNode, task.Payload)
-	if tm.hasPageNode {
+
+	// WAITING PHASE (no time.After / sleeps)
+	// If DAG has page nodes, block until an external SubmitPage sends an mq.Result into resultCh.
+	// For non-page flows, do the same: block until one result arrives or the ctx is cancelled.
+	waitForResult := func() mq.Result {
 		var results []mq.Result
-		timeout := time.After(10 * time.Minute)
-		for {
-			select {
-			case r := <-resultCh:
-				results = append(results, r)
-			case <-timeout:
-				if len(results) > 0 {
-					return results[len(results)-1]
-				}
-				return mq.Result{
-					Error: fmt.Errorf("timeout waiting for task result"),
-					Ctx:   ctx,
-				}
-			case <-ctx.Done():
-				if len(results) > 0 {
-					return results[len(results)-1]
-				}
-				return mq.Result{
-					Error: fmt.Errorf("context cancelled while waiting for task result: %w", ctx.Err()),
-					Ctx:   ctx,
-				}
-			}
-			if len(results) > 0 {
-				select {
-				case r := <-resultCh:
-					results = append(results, r)
-				case <-time.After(50 * time.Millisecond):
-					return results[len(results)-1]
-				}
-			}
-		}
-	}
-	var results []mq.Result
-	for {
+
+		// Block until first result or cancellation.
 		select {
 		case r := <-resultCh:
 			results = append(results, r)
-		case <-time.After(5 * time.Second):
-			if len(results) > 0 {
-				return results[len(results)-1]
-			}
-			return mq.Result{
-				Error: fmt.Errorf("timeout waiting for task result"),
-				Ctx:   ctx,
-			}
 		case <-ctx.Done():
-			if len(results) > 0 {
-				return results[len(results)-1]
-			}
 			return mq.Result{
 				Error: fmt.Errorf("context cancelled while waiting for task result: %w", ctx.Err()),
 				Ctx:   ctx,
 			}
 		}
-		if len(results) > 0 {
+
+		// Drain any already-queued results without waiting (non-blocking).
+		for {
 			select {
 			case r := <-resultCh:
 				results = append(results, r)
-			case <-time.After(50 * time.Millisecond):
+				// keep draining until empty
+				continue
+			default:
+				// return the most recent result
 				return results[len(results)-1]
 			}
 		}
 	}
+
+	if tm.hasPageNode {
+		return waitForResult()
+	}
+	return waitForResult()
 }
 
 func (tm *DAG) ProcessTaskNew(ctx context.Context, task *mq.Task) mq.Result {
 	ctx = context.WithValue(ctx, "task_id", task.ID)
 	userContext := form.UserContext(ctx)
 	next := userContext.Get("next")
+
 	manager, ok := tm.taskManager.Get(task.ID)
 	resultCh := make(chan mq.Result, 1)
 	if !ok {
@@ -653,6 +643,7 @@ func (tm *DAG) ProcessTaskNew(ctx context.Context, task *mq.Task) mq.Result {
 			logger.Field{Key: "timestamp", Value: time.Now()},
 		)
 	}
+
 	currentKey := tm.getCurrentNode(manager)
 	currentNode := strings.Split(currentKey, Delimiter)[0]
 	node, exists := tm.nodes.Get(currentNode)
@@ -675,6 +666,8 @@ func (tm *DAG) ProcessTaskNew(ctx context.Context, task *mq.Task) mq.Result {
 			ctx = context.WithValue(ctx, "initial_node", nodes[0].ID)
 		}
 	}
+
+	// Merge any previous node result into the task payload
 	if currentNodeResult, hasResult := manager.currentNodeResult.Get(currentKey); hasResult {
 		var taskPayload, resultPayload map[string]any
 		if err := json.Unmarshal(task.Payload, &taskPayload); err == nil {
@@ -700,76 +693,45 @@ func (tm *DAG) ProcessTaskNew(ctx context.Context, task *mq.Task) mq.Result {
 		}
 	}
 
-	// Parse the initial node from context.
 	firstNode, err := tm.parseInitialNode(ctx)
 	if err != nil {
 		tm.Logger().Error("Error parsing initial node", logger.Field{Key: "error", Value: err})
 		return mq.Result{Error: err, Ctx: ctx}
 	}
-	node, ok = tm.nodes.Get(firstNode)
+	node, _ = tm.nodes.Get(firstNode)
 	task.Topic = firstNode
 	ctx = context.WithValue(ctx, ContextIndex, "0")
 
-	// Dispatch the task to the TaskManager.
 	tm.Logger().Info("Dispatching task to TaskManager",
 		logger.Field{Key: "firstNode", Value: firstNode},
 		logger.Field{Key: "taskID", Value: task.ID})
 	manager.ProcessTask(ctx, firstNode, task.Payload)
 
-	// Wait for task result. If there's an HTML page node, the task will pause.
-	var result mq.Result
-	if tm.hasPageNode {
-		if !result.Last {
-			tm.Logger().Info("Page node detected; pausing task until user processes HTML",
-				logger.Field{Key: "taskID", Value: task.ID})
-		}
+	// WAITING (no polling; wait for a result or ctx cancellation)
+	waitForResult := func() mq.Result {
 		select {
-		case result = <-resultCh:
-		case <-time.After(10 * time.Minute):
-			result = mq.Result{
-				Error: fmt.Errorf("timeout waiting for task result"),
-				Ctx:   ctx,
-			}
-			tm.Logger().Error("Task result timeout",
-				logger.Field{Key: "taskID", Value: task.ID})
-		case <-ctx.Done():
-			result = mq.Result{
-				Error: fmt.Errorf("context cancelled while waiting for task result: %w", ctx.Err()),
-				Ctx:   ctx,
-			}
-			tm.Logger().Error("Task cancelled due to context",
-				logger.Field{Key: "taskID", Value: task.ID})
-		}
-	} else {
-		select {
-		case result = <-resultCh:
+		case result := <-resultCh:
 			tm.Logger().Info("Received task result",
 				logger.Field{Key: "taskID", Value: task.ID})
-		case <-time.After(10 * time.Minute):
-			result = mq.Result{
-				Error: fmt.Errorf("timeout waiting for task result"),
-				Ctx:   ctx,
-			}
-			tm.Logger().Error("Task result timeout",
-				logger.Field{Key: "taskID", Value: task.ID})
+			return result
 		case <-ctx.Done():
-			result = mq.Result{
+			tm.Logger().Error("Task cancelled due to context",
+				logger.Field{Key: "taskID", Value: task.ID})
+			return mq.Result{
 				Error: fmt.Errorf("context cancelled while waiting for task result: %w", ctx.Err()),
 				Ctx:   ctx,
 			}
-			tm.Logger().Error("Task cancelled due to context",
-				logger.Field{Key: "taskID", Value: task.ID})
 		}
 	}
 
-	if result.Last {
-		tm.Logger().Info("Task completed",
-			logger.Field{Key: "taskID", Value: task.ID},
-			logger.Field{Key: "lastExecuted", Value: time.Now()},
-			logger.Field{Key: "success", Value: result.Error == nil},
-		)
+	if tm.hasPageNode {
+		tm.Logger().Info("Page node detected; pausing task until user processes HTML",
+			logger.Field{Key: "taskID", Value: task.ID})
+		return waitForResult()
 	}
-	return result
+
+	// non-page flows also wait until a result is available or ctx cancelled
+	return waitForResult()
 }
 
 func (tm *DAG) Process(ctx context.Context, payload []byte) mq.Result {
@@ -780,7 +742,9 @@ func (tm *DAG) Process(ctx context.Context, payload []byte) mq.Result {
 	} else {
 		taskID = mq.NewID()
 	}
-	return tm.ProcessTask(ctx, mq.NewTask(taskID, payload, "", mq.WithDAG(tm)))
+	rs := tm.ProcessTask(ctx, mq.NewTask(taskID, payload, "", mq.WithDAG(tm)))
+	time.Sleep(100 * time.Microsecond)
+	return rs
 }
 
 func (tm *DAG) Validate() error {

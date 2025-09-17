@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/oarkflow/json"
 
@@ -50,6 +51,7 @@ func main() {
 	if rs.Error != nil {
 		panic(rs.Error)
 	}
+	time.Sleep(1 * time.Millisecond)
 	fmt.Println(rs.Status, rs.Topic, string(rs.Payload))
 }
 
