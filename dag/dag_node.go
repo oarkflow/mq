@@ -170,11 +170,18 @@ func (tm *DAG) getCurrentNode(manager *TaskManager) string {
 func (tm *DAG) AddDAGNode(nodeType NodeType, name string, key string, dag *DAG, firstNode ...bool) *DAG {
 	dag.AssignTopic(key)
 	dag.name += fmt.Sprintf("(%s)", name)
+
+	// Create a wrapper processor that ensures proper completion reporting for iterator patterns
+	processor := &DAGNodeProcessor{
+		subDAG: dag,
+		nodeID: key,
+	}
+
 	tm.nodes.Set(key, &Node{
 		Label:     name,
 		ID:        key,
 		NodeType:  nodeType,
-		processor: dag,
+		processor: processor,
 		isReady:   true,
 		IsLast:    true, // Assume it's last until edges are added
 	})
