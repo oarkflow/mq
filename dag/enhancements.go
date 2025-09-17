@@ -255,10 +255,12 @@ func (tm *TransactionManager) CommitTransaction(txID string) error {
 	tx.Status = TransactionStatusCommitted
 	tx.EndTime = time.Now()
 
-	tm.logger.Info("Transaction committed",
-		logger.Field{Key: "transaction_id", Value: txID},
-		logger.Field{Key: "operations_count", Value: len(tx.Operations)},
-	)
+	if tm.dag.debug {
+		tm.logger.Info("Transaction committed",
+			logger.Field{Key: "transaction_id", Value: txID},
+			logger.Field{Key: "operations_count", Value: len(tx.Operations)},
+		)
+	}
 
 	// Clean up save points
 	delete(tm.savePoints, txID)

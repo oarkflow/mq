@@ -284,8 +284,6 @@ func (po *PerformanceOptimizer) adjustWorkerCount() {
 
 	// Apply scaling
 	if targetWorkers != currentWorkers {
-		po.workerPool.logger.Info().Msg(fmt.Sprintf("Auto-scaling workers from %d to %d (queue: %d)",
-			currentWorkers, targetWorkers, queueDepth))
 		po.workerPool.AdjustWorkerCount(targetWorkers)
 	}
 }
