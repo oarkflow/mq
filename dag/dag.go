@@ -761,11 +761,13 @@ func (tm *DAG) processTaskInternal(ctx context.Context, task *mq.Task) mq.Result
 	if !ok {
 		manager = NewTaskManager(tm, task.ID, resultCh, tm.iteratorNodes.Clone(), tm.taskStorage)
 		tm.taskManager.Set(task.ID, manager)
-		tm.Logger().Info("Processing task",
-			logger.Field{Key: "taskID", Value: task.ID},
-			logger.Field{Key: "phase", Value: "start"},
-			logger.Field{Key: "timestamp", Value: time.Now()},
-		)
+		if tm.debug {
+			tm.Logger().Info("Processing task",
+				logger.Field{Key: "taskID", Value: task.ID},
+				logger.Field{Key: "phase", Value: "start"},
+				logger.Field{Key: "timestamp", Value: time.Now()},
+			)
+		}
 	} else {
 		manager.resultCh = resultCh
 		tm.Logger().Info("Resuming task",
@@ -875,11 +877,13 @@ func (tm *DAG) ProcessTaskNew(ctx context.Context, task *mq.Task) mq.Result {
 	if !ok {
 		manager = NewTaskManager(tm, task.ID, resultCh, tm.iteratorNodes.Clone(), tm.taskStorage)
 		tm.taskManager.Set(task.ID, manager)
-		tm.Logger().Info("Processing task",
-			logger.Field{Key: "taskID", Value: task.ID},
-			logger.Field{Key: "phase", Value: "start"},
-			logger.Field{Key: "timestamp", Value: time.Now()},
-		)
+		if tm.debug {
+			tm.Logger().Info("Processing task",
+				logger.Field{Key: "taskID", Value: task.ID},
+				logger.Field{Key: "phase", Value: "start"},
+				logger.Field{Key: "timestamp", Value: time.Now()},
+			)
+		}
 	} else {
 		manager.resultCh = resultCh
 		tm.Logger().Info("Resuming task",
