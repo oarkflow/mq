@@ -4,13 +4,13 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"math/rand" // ...new import for jitter...
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/oarkflow/json"
+	"math/rand" // ...new import for jitter...
 
+	"github.com/oarkflow/json"
 	"github.com/oarkflow/mq"
 	"github.com/oarkflow/mq/logger"
 	"github.com/oarkflow/mq/storage"
@@ -144,11 +144,22 @@ func (tm *TaskManager) enqueueTask(ctx context.Context, startNode, taskID string
 		tm.taskStates.Set(startNode, newTaskState(startNode))
 	}
 	t := newTask(ctx, taskID, startNode, payload)
+
 	select {
 	case tm.taskQueue <- t:
+		// Successfully enqueued
 	default:
-		log.Println("Task queue is full, deferring task")
-		tm.deferredTasks.Set(taskID, t)
+		// Queue is full, add to deferred tasks with limit
+		if tm.deferredTasks.Size() < 1000 { // Limit deferred tasks to prevent memory issues
+			tm.deferredTasks.Set(taskID, t)
+			tm.dag.Logger().Warn("Task queue full, deferring task",
+				logger.Field{Key: "taskID", Value: taskID},
+				logger.Field{Key: "nodeID", Value: startNode})
+		} else {
+			tm.dag.Logger().Error("Deferred tasks queue also full, dropping task",
+				logger.Field{Key: "taskID", Value: taskID},
+				logger.Field{Key: "nodeID", Value: startNode})
+		}
 	}
 }
 
@@ -164,8 +175,15 @@ func (tm *TaskManager) run() {
 			pch := tm.pauseCh
 			tm.pauseMu.Unlock()
 			if pch != nil {
-				<-pch
+				select {
+				case <-tm.stopCh:
+					log.Println("Stopping TaskManager run loop during pause")
+					return
+				case <-pch:
+					// Resume from pause
+				}
 			}
+
 			select {
 			case <-tm.stopCh:
 				log.Println("Stopping TaskManager run loop")
@@ -186,7 +204,13 @@ func (tm *TaskManager) waitForResult() {
 			log.Println("Stopping TaskManager result listener")
 			return
 		case nr := <-tm.resultQueue:
-			tm.onNodeCompleted(nr)
+			select {
+			case <-tm.stopCh:
+				log.Println("Stopping TaskManager result listener during processing")
+				return
+			default:
+				tm.onNodeCompleted(nr)
+			}
 		}
 	}
 }
@@ -288,6 +312,17 @@ func (tm *TaskManager) processNode(exec *task) {
 		exec.ctx, cancel = context.WithTimeout(exec.ctx, node.Timeout)
 		defer cancel()
 	}
+
+	// Check for context cancellation before processing
+	select {
+	case <-exec.ctx.Done():
+		tm.dag.Logger().Warn("Context cancelled before node processing",
+			logger.Field{Key: "nodeID", Value: exec.nodeID},
+			logger.Field{Key: "taskID", Value: exec.taskID})
+		return
+	default:
+	}
+
 	// Invoke PreProcessHook if available.
 	if tm.dag.PreProcessHook != nil {
 		exec.ctx = tm.dag.PreProcessHook(exec.ctx, node, exec.taskID, exec.payload)
@@ -376,8 +411,8 @@ func (tm *TaskManager) processNode(exec *task) {
 	result.Status = mq.Completed
 	state.Result = result
 	state.Result.Status = mq.Completed
-	state.Status = mq.Completed
 	state.Result.Latency = nodeLatency.String()
+	state.Status = mq.Completed // <-- Add this line to set state status
 	result.Topic = node.ID
 	tm.updateTimestamps(&result)
 
@@ -503,6 +538,7 @@ func (tm *TaskManager) handlePrevious(ctx context.Context, state *TaskState, res
 				result: state.Result,
 			}
 			tm.handleEdges(toProcess, edges)
+			state.Status = mq.Completed
 		} else if size == targetsCount {
 			if parentState, _ := tm.taskStates.Get(parentKey); parentState != nil {
 				state.Result.Topic = state.NodeID
@@ -545,8 +581,11 @@ func (tm *TaskManager) handleNext(ctx context.Context, node *Node, state *TaskSt
 func (tm *TaskManager) enqueueResult(nr nodeResult) {
 	select {
 	case tm.resultQueue <- nr:
+		// Successfully enqueued
 	default:
-		log.Println("Result queue is full, dropping result")
+		tm.dag.Logger().Error("Result queue is full, dropping result",
+			logger.Field{Key: "nodeID", Value: nr.nodeID},
+			logger.Field{Key: "taskID", Value: nr.result.TaskID})
 	}
 }
 
@@ -581,37 +620,52 @@ func (tm *TaskManager) onNodeCompleted(nr nodeResult) {
 func (tm *TaskManager) getConditionalEdges(node *Node, result mq.Result) []Edge {
 	edges := make([]Edge, len(node.Edges))
 	copy(edges, node.Edges)
+
+	// Handle conditional edges based on ConditionStatus
 	if result.ConditionStatus != "" {
-		if conditions, ok := tm.dag.conditions[result.Topic]; ok {
+		if conditions, ok := tm.dag.conditions[node.ID]; ok {
 			if targetKey, exists := conditions[result.ConditionStatus]; exists {
 				if targetNode, found := tm.dag.nodes.Get(targetKey); found {
-					edges = append(edges, Edge{From: node, To: targetNode})
+					conditionalEdge := Edge{
+						From:       node,
+						FromSource: node.ID,
+						To:         targetNode,
+						Label:      fmt.Sprintf("condition:%s", result.ConditionStatus),
+						Type:       Simple,
+					}
+					edges = append(edges, conditionalEdge)
 				}
 			} else if targetKey, exists := conditions["default"]; exists {
 				if targetNode, found := tm.dag.nodes.Get(targetKey); found {
-					edges = append(edges, Edge{From: node, To: targetNode})
+					conditionalEdge := Edge{
+						From:       node,
+						FromSource: node.ID,
+						To:         targetNode,
+						Label:      "condition:default",
+						Type:       Simple,
+					}
+					edges = append(edges, conditionalEdge)
 				}
 			}
 		}
 	}
+
 	return edges
 }
 
 func (tm *TaskManager) handleEdges(currentResult nodeResult, edges []Edge) {
-	if len(edges) > 1 {
-		var wg sync.WaitGroup
-		for _, edge := range edges {
-			wg.Add(1)
-			go func(edge Edge) {
-				defer wg.Done()
-				tm.processSingleEdge(currentResult, edge)
-			}(edge)
-		}
-		wg.Wait()
-	} else {
-		for _, edge := range edges {
-			tm.processSingleEdge(currentResult, edge)
-		}
+	if len(edges) == 0 {
+		return
+	}
+
+	if len(edges) == 1 {
+		tm.processSingleEdge(currentResult, edges[0])
+		return
+	}
+
+	// For multiple edges, process sequentially to avoid race conditions
+	for _, edge := range edges {
+		tm.processSingleEdge(currentResult, edge)
 	}
 }
 
@@ -629,6 +683,10 @@ func (tm *TaskManager) processSingleEdge(currentResult nodeResult, edge Edge) {
 		fallthrough
 	case Iterator:
 		if edge.Type == Iterator {
+			if _, exists := tm.iteratorNodes.Get(edge.From.ID); !exists {
+				return
+			}
+			parentNode = edge.From.ID
 			var items []json.RawMessage
 			if err := json.Unmarshal(currentResult.result.Payload, &items); err != nil {
 				log.Printf("Error unmarshalling payload for node %s: %v", edge.To.ID, err)
@@ -662,14 +720,30 @@ func (tm *TaskManager) retryDeferredTasks() {
 	defer tm.wg.Done()
 	ticker := time.NewTicker(tm.baseBackoff)
 	defer ticker.Stop()
+
 	for {
 		select {
 		case <-tm.stopCh:
 			log.Println("Stopping deferred task retrier")
 			return
 		case <-ticker.C:
+			// Process deferred tasks with a limit to prevent overwhelming the queue
+			processed := 0
 			tm.deferredTasks.ForEach(func(taskID string, tsk *task) bool {
-				tm.enqueueTask(tsk.ctx, tsk.nodeID, taskID, tsk.payload)
+				if processed >= 10 { // Process max 10 deferred tasks per tick
+					return false
+				}
+
+				select {
+				case tm.taskQueue <- tsk:
+					tm.deferredTasks.Del(taskID)
+					processed++
+					tm.dag.Logger().Debug("Retried deferred task",
+						logger.Field{Key: "taskID", Value: taskID})
+				default:
+					// Queue still full, keep the task deferred
+					return false
+				}
 				return true
 			})
 		}
@@ -710,6 +784,14 @@ func (tm *TaskManager) Stop() {
 	close(tm.stopCh)
 	tm.wg.Wait()
 
+	// Cancel any pending operations
+	tm.pauseMu.Lock()
+	if tm.pauseCh != nil {
+		close(tm.pauseCh)
+		tm.pauseCh = nil
+	}
+	tm.pauseMu.Unlock()
+
 	// Clean up resources
 	tm.taskStates.Clear()
 	tm.parentNodes.Clear()
@@ -717,6 +799,9 @@ func (tm *TaskManager) Stop() {
 	tm.deferredTasks.Clear()
 	tm.currentNodePayload.Clear()
 	tm.currentNodeResult.Clear()
+
+	tm.dag.Logger().Info("TaskManager stopped gracefully",
+		logger.Field{Key: "taskID", Value: tm.taskID})
 }
 
 // debugNodeStart logs debug information when a node starts processing

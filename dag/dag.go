@@ -594,7 +594,20 @@ func (tm *DAG) processTaskInternal(ctx context.Context, task *mq.Task) mq.Result
 	ctx = context.WithValue(ctx, ContextIndex, "0")
 	manager.ProcessTask(ctx, firstNode, task.Payload)
 	if tm.hasPageNode {
-		return <-resultCh
+		select {
+		case result := <-resultCh:
+			return result
+		case <-time.After(30 * time.Second):
+			return mq.Result{
+				Error: fmt.Errorf("timeout waiting for task result"),
+				Ctx:   ctx,
+			}
+		case <-ctx.Done():
+			return mq.Result{
+				Error: fmt.Errorf("context cancelled while waiting for task result: %w", ctx.Err()),
+				Ctx:   ctx,
+			}
+		}
 	}
 	select {
 	case result := <-resultCh:
@@ -602,6 +615,11 @@ func (tm *DAG) processTaskInternal(ctx context.Context, task *mq.Task) mq.Result
 	case <-time.After(30 * time.Second):
 		return mq.Result{
 			Error: fmt.Errorf("timeout waiting for task result"),
+			Ctx:   ctx,
+		}
+	case <-ctx.Done():
+		return mq.Result{
+			Error: fmt.Errorf("context cancelled while waiting for task result: %w", ctx.Err()),
 			Ctx:   ctx,
 		}
 	}
@@ -699,7 +717,23 @@ func (tm *DAG) ProcessTaskNew(ctx context.Context, task *mq.Task) mq.Result {
 			tm.Logger().Info("Page node detected; pausing task until user processes HTML",
 				logger.Field{Key: "taskID", Value: task.ID})
 		}
-		result = <-resultCh
+		select {
+		case result = <-resultCh:
+		case <-time.After(30 * time.Second):
+			result = mq.Result{
+				Error: fmt.Errorf("timeout waiting for task result"),
+				Ctx:   ctx,
+			}
+			tm.Logger().Error("Task result timeout",
+				logger.Field{Key: "taskID", Value: task.ID})
+		case <-ctx.Done():
+			result = mq.Result{
+				Error: fmt.Errorf("context cancelled while waiting for task result: %w", ctx.Err()),
+				Ctx:   ctx,
+			}
+			tm.Logger().Error("Task cancelled due to context",
+				logger.Field{Key: "taskID", Value: task.ID})
+		}
 	} else {
 		select {
 		case result = <-resultCh:
@@ -711,6 +745,13 @@ func (tm *DAG) ProcessTaskNew(ctx context.Context, task *mq.Task) mq.Result {
 				Ctx:   ctx,
 			}
 			tm.Logger().Error("Task result timeout",
+				logger.Field{Key: "taskID", Value: task.ID})
+		case <-ctx.Done():
+			result = mq.Result{
+				Error: fmt.Errorf("context cancelled while waiting for task result: %w", ctx.Err()),
+				Ctx:   ctx,
+			}
+			tm.Logger().Error("Task cancelled due to context",
 				logger.Field{Key: "taskID", Value: task.ID})
 		}
 	}
@@ -795,6 +836,10 @@ func (tm *DAG) Reset() {
 	// Clear caches.
 	tm.nextNodesCache = nil
 	tm.prevNodesCache = nil
+
+	// Clear task managers map
+	tm.taskManager = memory.New[string, *TaskManager]()
+
 	tm.Logger().Info("DAG has been reset")
 }
 
@@ -810,6 +855,45 @@ func (tm *DAG) CancelTask(taskID string) error {
 	tm.metrics.Cancelled++ // <-- update cancelled metric
 	tm.metrics.mu.Unlock()
 	return nil
+}
+
+// CleanupCompletedTasks removes completed task managers to prevent memory leaks
+func (tm *DAG) CleanupCompletedTasks() {
+	completedTasks := make([]string, 0)
+
+	tm.taskManager.ForEach(func(taskID string, manager *TaskManager) bool {
+		// Check if task manager has completed tasks
+		hasActiveTasks := false
+		manager.taskStates.ForEach(func(nodeID string, state *TaskState) bool {
+			if state.Status == mq.Processing || state.Status == mq.Pending {
+				hasActiveTasks = true
+				return false // Stop iteration
+			}
+			return true
+		})
+
+		// If no active tasks, mark for cleanup
+		if !hasActiveTasks {
+			completedTasks = append(completedTasks, taskID)
+		}
+
+		return true
+	})
+
+	// Remove completed task managers
+	for _, taskID := range completedTasks {
+		if manager, exists := tm.taskManager.Get(taskID); exists {
+			manager.Stop()
+			tm.taskManager.Del(taskID)
+			tm.Logger().Debug("Cleaned up completed task manager",
+				logger.Field{Key: "taskID", Value: taskID})
+		}
+	}
+
+	if len(completedTasks) > 0 {
+		tm.Logger().Info("Cleaned up completed task managers",
+			logger.Field{Key: "count", Value: len(completedTasks)})
+	}
 }
 
 func (tm *DAG) GetReport() string {
