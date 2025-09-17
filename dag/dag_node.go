@@ -171,17 +171,12 @@ func (tm *DAG) AddDAGNode(nodeType NodeType, name string, key string, dag *DAG, 
 	dag.AssignTopic(key)
 	dag.name += fmt.Sprintf("(%s)", name)
 
-	// Create a wrapper processor that ensures proper completion reporting for iterator patterns
-	processor := &DAGNodeProcessor{
-		subDAG: dag,
-		nodeID: key,
-	}
-
+	// Use the sub-DAG directly as a processor since it implements mq.Processor
 	tm.nodes.Set(key, &Node{
 		Label:     name,
 		ID:        key,
 		NodeType:  nodeType,
-		processor: processor,
+		processor: dag,
 		isReady:   true,
 		IsLast:    true, // Assume it's last until edges are added
 	})
