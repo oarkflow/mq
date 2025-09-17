@@ -445,7 +445,7 @@ func generateClientSideValidation(fieldPath string, validation ValidationInfo, a
 					var reqField = document.querySelector('[name="%s"]');
 					if (depField && depField.value && (!reqField || !reqField.value)) {
 						return 'Field %s is required when %s has a value';
-					}`, depField, reqField, reqField, depField))
+					}`, depField, reqField, depField, reqField, reqField, depField))
 			}
 		}
 	}
