@@ -743,7 +743,6 @@ func (tm *DAG) Process(ctx context.Context, payload []byte) mq.Result {
 		taskID = mq.NewID()
 	}
 	rs := tm.ProcessTask(ctx, mq.NewTask(taskID, payload, "", mq.WithDAG(tm)))
-	time.Sleep(100 * time.Microsecond)
 	return rs
 }
 

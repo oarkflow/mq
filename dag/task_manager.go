@@ -426,6 +426,11 @@ func (tm *TaskManager) processNode(exec *task) {
 		}
 		break
 	}
+
+	// Reset Last flag for sub-DAG results to prevent premature final result processing
+	if _, isSubDAG := node.processor.(*DAG); isSubDAG {
+		result.Last = false
+	}
 	// log.Printf("Tracing: End processing node %s on flow %s", exec.nodeID, tm.dag.key)
 	nodeLatency := time.Since(startTime)
 
@@ -676,7 +681,7 @@ func (tm *TaskManager) onNodeCompleted(nr nodeResult) {
 			if parentKey, exists := tm.parentNodes.Get(childNode); exists {
 				if parentState, _ := tm.taskStates.Get(parentKey); parentState != nil {
 					tm.handlePrevious(nr.ctx, parentState, nr.result, nr.nodeID, true)
-					return
+					return // Don't send to resultCh if has parent
 				}
 			}
 		}
