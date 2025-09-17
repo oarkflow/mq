@@ -49,6 +49,8 @@ type Node struct {
 	isReady   bool
 	Timeout   time.Duration // ...new field for node-level timeout...
 	Debug     bool          // Individual node debug mode
+	IsFirst   bool          // Identifier for the first node in the DAG
+	IsLast    bool          // Identifier for last nodes in the DAG (can be multiple)
 }
 
 // SetTimeout allows setting a maximum processing duration for the node.
@@ -78,8 +80,8 @@ type DAG struct {
 	nodes                    storage.IMap[string, *Node]
 	taskManager              storage.IMap[string, *TaskManager]
 	iteratorNodes            storage.IMap[string, []Edge]
-	Error                    error
 	conditions               map[string]map[string]string
+	Error                    error
 	consumer                 *mq.Consumer
 	finalResult              func(taskID string, result mq.Result)
 	pool                     *mq.Pool

@@ -673,26 +673,31 @@ func (tm *TaskManager) onNodeCompleted(nr nodeResult) {
 	if !ok {
 		return
 	}
-	edges := tm.getConditionalEdges(node, nr.result)
-	if nr.result.Error != nil || len(edges) == 0 {
-
-		if index, ok := nr.ctx.Value(ContextIndex).(string); ok {
-			childNode := fmt.Sprintf("%s%s%s", node.ID, Delimiter, index)
-			if parentKey, exists := tm.parentNodes.Get(childNode); exists {
-				if parentState, _ := tm.taskStates.Get(parentKey); parentState != nil {
-					tm.handlePrevious(nr.ctx, parentState, nr.result, nr.nodeID, true)
-					return // Don't send to resultCh if has parent
-				}
-			}
-		}
-		tm.updateTimestamps(&nr.result)
-		tm.resultCh <- nr.result
-		if state, ok := tm.taskStates.Get(nr.nodeID); ok {
+	if nr.result.Error != nil || nr.status == mq.Failed {
+		if state, exists := tm.taskStates.Get(nr.nodeID); exists {
 			tm.processFinalResult(state)
+			return
 		}
+	}
+	edges := tm.getConditionalEdges(node, nr.result)
+	if len(edges) > 0 {
+		tm.handleEdges(nr, edges)
 		return
 	}
-	tm.handleEdges(nr, edges)
+	if index, ok := nr.ctx.Value(ContextIndex).(string); ok {
+		childNode := fmt.Sprintf("%s%s%s", node.ID, Delimiter, index)
+		if parentKey, exists := tm.parentNodes.Get(childNode); exists {
+			if parentState, _ := tm.taskStates.Get(parentKey); parentState != nil {
+				tm.handlePrevious(nr.ctx, parentState, nr.result, nr.nodeID, true)
+				return // Don't send to resultCh if has parent
+			}
+		}
+	}
+	tm.updateTimestamps(&nr.result)
+	tm.resultCh <- nr.result
+	if state, ok := tm.taskStates.Get(nr.nodeID); ok {
+		tm.processFinalResult(state)
+	}
 }
 
 func (tm *TaskManager) getConditionalEdges(node *Node, result mq.Result) []Edge {

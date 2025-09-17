@@ -11,7 +11,17 @@ import (
 )
 
 func (tm *DAG) SetStartNode(node string) {
+	// If there was a previous start node, unset its IsFirst
+	if tm.startNode != "" {
+		if oldNode, ok := tm.nodes.Get(tm.startNode); ok {
+			oldNode.IsFirst = false
+		}
+	}
 	tm.startNode = node
+	// Set IsFirst for the new start node
+	if newNode, ok := tm.nodes.Get(node); ok {
+		newNode.IsFirst = true
+	}
 }
 
 func (tm *DAG) GetStartNode() string {
@@ -20,6 +30,8 @@ func (tm *DAG) GetStartNode() string {
 
 func (tm *DAG) AddCondition(fromNode string, conditions map[string]string) *DAG {
 	tm.conditions[fromNode] = conditions
+	// Update node identifiers after adding conditions
+	tm.updateNodeIdentifiers()
 	return tm
 }
 
@@ -42,13 +54,21 @@ func (tm *DAG) AddNode(nodeType NodeType, name, nodeID string, handler mq.Proces
 		ID:        nodeID,
 		NodeType:  nodeType,
 		processor: con,
+		IsLast:    true, // Assume it's last until edges are added
 	}
 	if tm.server != nil && tm.server.SyncMode() {
 		n.isReady = true
 	}
 	tm.nodes.Set(nodeID, n)
 	if len(startNode) > 0 && startNode[0] {
+		// If there was a previous start node, unset its IsFirst
+		if tm.startNode != "" {
+			if oldNode, ok := tm.nodes.Get(tm.startNode); ok {
+				oldNode.IsFirst = false
+			}
+		}
 		tm.startNode = nodeID
+		n.IsFirst = true
 	}
 	if nodeType == Page && !tm.hasPageNode {
 		tm.hasPageNode = true
@@ -73,9 +93,19 @@ func (tm *DAG) AddDeferredNode(nodeType NodeType, name, key string, firstNode ..
 		Label:    name,
 		ID:       key,
 		NodeType: nodeType,
+		IsLast:   true, // Assume it's last until edges are added
 	})
 	if len(firstNode) > 0 && firstNode[0] {
+		// If there was a previous start node, unset its IsFirst
+		if tm.startNode != "" {
+			if oldNode, ok := tm.nodes.Get(tm.startNode); ok {
+				oldNode.IsFirst = false
+			}
+		}
 		tm.startNode = key
+		if node, ok := tm.nodes.Get(key); ok {
+			node.IsFirst = true
+		}
 	}
 	return nil
 }
@@ -124,6 +154,9 @@ func (tm *DAG) AddEdge(edgeType EdgeType, label, from string, targets ...string)
 			}
 		}
 	}
+	// Update identifiers after adding edges
+	node.IsLast = false
+	tm.updateNodeIdentifiers()
 	return tm
 }
 
@@ -143,9 +176,19 @@ func (tm *DAG) AddDAGNode(nodeType NodeType, name string, key string, dag *DAG, 
 		NodeType:  nodeType,
 		processor: dag,
 		isReady:   true,
+		IsLast:    true, // Assume it's last until edges are added
 	})
 	if len(firstNode) > 0 && firstNode[0] {
+		// If there was a previous start node, unset its IsFirst
+		if tm.startNode != "" {
+			if oldNode, ok := tm.nodes.Get(tm.startNode); ok {
+				oldNode.IsFirst = false
+			}
+		}
 		tm.startNode = key
+		if node, ok := tm.nodes.Get(key); ok {
+			node.IsFirst = true
+		}
 	}
 	return tm
 }
@@ -224,6 +267,8 @@ func (tm *DAG) RemoveNode(nodeID string) error {
 	// Invalidate caches.
 	tm.nextNodesCache = nil
 	tm.prevNodesCache = nil
+	// Update node identifiers after removal and edge adjustments
+	tm.updateNodeIdentifiers()
 	tm.Logger().Info("Node removed and edges adjusted",
 		logger.Field{Key: "removed_node", Value: nodeID})
 	return nil
@@ -273,6 +318,23 @@ func (tm *DAG) GetLastNodes() ([]*Node, error) {
 		return true
 	})
 	return lastNodes, nil
+}
+
+// updateNodeIdentifiers updates the IsLast field for all nodes based on their edges and conditions
+func (tm *DAG) updateNodeIdentifiers() {
+	tm.nodes.ForEach(func(id string, node *Node) bool {
+		node.IsLast = len(node.Edges) == 0 && len(tm.conditions[node.ID]) == 0
+		return true
+	})
+}
+
+// GetFirstNode returns the first node in the DAG
+func (tm *DAG) GetFirstNode() *Node {
+	if tm.startNode == "" {
+		return nil
+	}
+	node, _ := tm.nodes.Get(tm.startNode)
+	return node
 }
 
 // parseInitialNode extracts the initial node from context
