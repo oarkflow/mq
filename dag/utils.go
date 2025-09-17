@@ -197,3 +197,206 @@ func (tm *DAG) FlushActivityLogs() error {
 	}
 	return fmt.Errorf("activity logger not initialized")
 }
+
+// Clone creates a deep copy of the DAG
+func (tm *DAG) Clone() *DAG {
+	newDAG := NewDAG(tm.name+"_clone", tm.key, tm.finalResult)
+
+	// Copy nodes
+	tm.nodes.ForEach(func(id string, node *Node) bool {
+		newDAG.AddNode(node.NodeType, node.Label, node.ID, node.processor)
+		return true
+	})
+
+	// Copy edges
+	tm.nodes.ForEach(func(id string, node *Node) bool {
+		for _, edge := range node.Edges {
+			newDAG.AddEdge(edge.Type, edge.Label, edge.From.ID, edge.To.ID)
+		}
+		return true
+	})
+
+	// Copy conditions
+	for fromNode, conditions := range tm.conditions {
+		newDAG.AddCondition(fromNode, conditions)
+	}
+
+	// Copy start node
+	newDAG.SetStartNode(tm.startNode)
+
+	return newDAG
+}
+
+// Export exports the DAG structure to a serializable format
+func (tm *DAG) Export() map[string]any {
+	export := map[string]any{
+		"name":       tm.name,
+		"key":        tm.key,
+		"start_node": tm.startNode,
+		"nodes":      make([]map[string]any, 0),
+		"edges":      make([]map[string]any, 0),
+		"conditions": tm.conditions,
+	}
+
+	// Export nodes
+	tm.nodes.ForEach(func(id string, node *Node) bool {
+		nodeData := map[string]any{
+			"id":       node.ID,
+			"label":    node.Label,
+			"type":     node.NodeType.String(),
+			"is_ready": node.isReady,
+		}
+		export["nodes"] = append(export["nodes"].([]map[string]any), nodeData)
+		return true
+	})
+
+	// Export edges
+	tm.nodes.ForEach(func(id string, node *Node) bool {
+		for _, edge := range node.Edges {
+			edgeData := map[string]any{
+				"from":  edge.From.ID,
+				"to":    edge.To.ID,
+				"label": edge.Label,
+				"type":  edge.Type.String(),
+			}
+			export["edges"] = append(export["edges"].([]map[string]any), edgeData)
+		}
+		return true
+	})
+
+	return export
+}
+
+// GetDAGStatistics returns comprehensive DAG statistics
+func (tm *DAG) GetDAGStatistics() map[string]any {
+	if tm.validator == nil {
+		return map[string]any{"error": "validator not initialized"}
+	}
+	return tm.validator.GetNodeStatistics()
+}
+
+// StartMonitoring starts the monitoring system
+func (tm *DAG) StartMonitoring(ctx context.Context) {
+	if tm.monitor != nil {
+		tm.monitor.Start(ctx)
+	}
+}
+
+// StopMonitoring stops the monitoring system
+func (tm *DAG) StopMonitoring() {
+	if tm.monitor != nil {
+		tm.monitor.Stop()
+	}
+}
+
+// GetMonitoringMetrics returns current monitoring metrics
+func (tm *DAG) GetMonitoringMetrics() *MonitoringMetrics {
+	if tm.monitor != nil {
+		return tm.monitor.GetMetrics()
+	}
+	return nil
+}
+
+// GetNodeStats returns statistics for a specific node
+func (tm *DAG) GetNodeStats(nodeID string) *NodeStats {
+	if tm.monitor != nil && tm.monitor.metrics != nil {
+		return tm.monitor.metrics.GetNodeStats(nodeID)
+	}
+	return nil
+}
+
+// SetAlertThresholds configures alert thresholds
+func (tm *DAG) SetAlertThresholds(thresholds *AlertThresholds) {
+	if tm.monitor != nil {
+		tm.monitor.SetAlertThresholds(thresholds)
+	}
+}
+
+// AddAlertHandler adds an alert handler
+func (tm *DAG) AddAlertHandler(handler AlertHandler) {
+	if tm.monitor != nil {
+		tm.monitor.AddAlertHandler(handler)
+	}
+}
+
+// Configuration Management Methods
+
+// GetConfiguration returns current DAG configuration
+func (tm *DAG) GetConfiguration() *DAGConfig {
+	if tm.configManager != nil {
+		return tm.configManager.GetConfig()
+	}
+	return DefaultDAGConfig()
+}
+
+// UpdateConfiguration updates the DAG configuration
+func (tm *DAG) UpdateConfiguration(config *DAGConfig) error {
+	if tm.configManager != nil {
+		return tm.configManager.UpdateConfiguration(config)
+	}
+	return fmt.Errorf("config manager not initialized")
+}
+
+// AddConfigWatcher adds a configuration change watcher
+func (tm *DAG) AddConfigWatcher(watcher ConfigWatcher) {
+	if tm.configManager != nil {
+		tm.configManager.AddWatcher(watcher)
+	}
+}
+
+// Rate Limiting Methods
+
+// SetRateLimit sets rate limit for a specific node
+func (tm *DAG) SetRateLimit(nodeID string, requestsPerSecond float64, burst int) {
+	if tm.rateLimiter != nil {
+		tm.rateLimiter.SetNodeLimit(nodeID, requestsPerSecond, burst)
+	}
+}
+
+// CheckRateLimit checks if request is allowed for a node
+func (tm *DAG) CheckRateLimit(nodeID string) bool {
+	if tm.rateLimiter != nil {
+		return tm.rateLimiter.Allow(nodeID)
+	}
+	return true
+}
+
+// Retry and Circuit Breaker Methods
+
+// SetRetryConfig sets the retry configuration
+func (tm *DAG) SetRetryConfig(config *RetryConfig) {
+	if tm.retryManager != nil {
+		tm.retryManager.SetGlobalConfig(config)
+	}
+}
+
+// AddNodeWithRetry adds a node with specific retry configuration
+func (tm *DAG) AddNodeWithRetry(nodeType NodeType, name, nodeID string, handler mq.Processor, retryConfig *RetryConfig, startNode ...bool) *DAG {
+	tm.AddNode(nodeType, name, nodeID, handler, startNode...)
+	if tm.retryManager != nil {
+		tm.retryManager.SetNodeConfig(nodeID, retryConfig)
+	}
+	return tm
+}
+
+// ActivityAlertHandler handles alerts by logging them as activities
+type ActivityAlertHandler struct {
+	activityLogger *ActivityLogger
+}
+
+func (h *ActivityAlertHandler) HandleAlert(alert Alert) error {
+	if h.activityLogger != nil {
+		h.activityLogger.Log(
+			ActivityLevelWarn,
+			ActivityTypeAlert,
+			alert.Message,
+			map[string]any{
+				"alert_type":      alert.Type,
+				"alert_severity":  alert.Severity,
+				"alert_node_id":   alert.NodeID,
+				"alert_timestamp": alert.Timestamp,
+			},
+		)
+	}
+	return nil
+}

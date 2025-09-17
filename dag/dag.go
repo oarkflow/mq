@@ -171,20 +171,20 @@ func (tm *DAG) SetAllNodesDebug(enabled bool) {
 }
 
 // GetDebugInfo returns debug information about the DAG and its nodes.
-func (tm *DAG) GetDebugInfo() map[string]interface{} {
-	debugInfo := map[string]interface{}{
+func (tm *DAG) GetDebugInfo() map[string]any {
+	debugInfo := map[string]any{
 		"dag_name":          tm.name,
 		"dag_key":           tm.key,
 		"dag_debug_enabled": tm.debug,
 		"start_node":        tm.startNode,
 		"has_page_node":     tm.hasPageNode,
 		"is_paused":         tm.paused,
-		"nodes":             make(map[string]map[string]interface{}),
+		"nodes":             make(map[string]map[string]any),
 	}
 
-	nodesInfo := debugInfo["nodes"].(map[string]map[string]interface{})
+	nodesInfo := debugInfo["nodes"].(map[string]map[string]any)
 	tm.nodes.ForEach(func(nodeID string, node *Node) bool {
-		nodesInfo[nodeID] = map[string]interface{}{
+		nodesInfo[nodeID] = map[string]any{
 			"id":            node.ID,
 			"label":         node.Label,
 			"type":          node.NodeType.String(),
@@ -466,7 +466,7 @@ func (tm *DAG) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 			TaskID:    task.ID,
 			NodeID:    task.Topic,
 			Timestamp: time.Now(),
-			Data: map[string]interface{}{
+			Data: map[string]any{
 				"status":   string(result.Status),
 				"duration": duration.String(),
 				"success":  result.Error == nil,
@@ -1015,8 +1015,8 @@ func (tm *DAG) ScheduleTask(ctx context.Context, payload []byte, opts ...mq.Sche
 }
 
 // GetStatus returns a summary of the DAG including node and task counts.
-func (tm *DAG) GetStatus() map[string]interface{} {
-	status := make(map[string]interface{})
+func (tm *DAG) GetStatus() map[string]any {
+	status := make(map[string]any)
 	// Count nodes
 	nodeCount := 0
 	tm.nodes.ForEach(func(_ string, _ *Node) bool {
@@ -1052,75 +1052,6 @@ func (tm *DAG) GetEdgeCount() int {
 	return count
 }
 
-// Clone creates a deep copy of the DAG
-func (tm *DAG) Clone() *DAG {
-	newDAG := NewDAG(tm.name+"_clone", tm.key, tm.finalResult)
-
-	// Copy nodes
-	tm.nodes.ForEach(func(id string, node *Node) bool {
-		newDAG.AddNode(node.NodeType, node.Label, node.ID, node.processor)
-		return true
-	})
-
-	// Copy edges
-	tm.nodes.ForEach(func(id string, node *Node) bool {
-		for _, edge := range node.Edges {
-			newDAG.AddEdge(edge.Type, edge.Label, edge.From.ID, edge.To.ID)
-		}
-		return true
-	})
-
-	// Copy conditions
-	for fromNode, conditions := range tm.conditions {
-		newDAG.AddCondition(fromNode, conditions)
-	}
-
-	// Copy start node
-	newDAG.SetStartNode(tm.startNode)
-
-	return newDAG
-}
-
-// Export exports the DAG structure to a serializable format
-func (tm *DAG) Export() map[string]interface{} {
-	export := map[string]interface{}{
-		"name":       tm.name,
-		"key":        tm.key,
-		"start_node": tm.startNode,
-		"nodes":      make([]map[string]interface{}, 0),
-		"edges":      make([]map[string]interface{}, 0),
-		"conditions": tm.conditions,
-	}
-
-	// Export nodes
-	tm.nodes.ForEach(func(id string, node *Node) bool {
-		nodeData := map[string]interface{}{
-			"id":       node.ID,
-			"label":    node.Label,
-			"type":     node.NodeType.String(),
-			"is_ready": node.isReady,
-		}
-		export["nodes"] = append(export["nodes"].([]map[string]interface{}), nodeData)
-		return true
-	})
-
-	// Export edges
-	tm.nodes.ForEach(func(id string, node *Node) bool {
-		for _, edge := range node.Edges {
-			edgeData := map[string]interface{}{
-				"from":  edge.From.ID,
-				"to":    edge.To.ID,
-				"label": edge.Label,
-				"type":  edge.Type.String(),
-			}
-			export["edges"] = append(export["edges"].([]map[string]interface{}), edgeData)
-		}
-		return true
-	})
-
-	return export
-}
-
 // Enhanced Monitoring and Management Methods
 
 // ValidateDAG validates the DAG structure using the enhanced validator
@@ -1145,118 +1076,6 @@ func (tm *DAG) GetCriticalPath() ([]string, error) {
 		return nil, fmt.Errorf("validator not initialized")
 	}
 	return tm.validator.GetCriticalPath()
-}
-
-// GetDAGStatistics returns comprehensive DAG statistics
-func (tm *DAG) GetDAGStatistics() map[string]interface{} {
-	if tm.validator == nil {
-		return map[string]interface{}{"error": "validator not initialized"}
-	}
-	return tm.validator.GetNodeStatistics()
-}
-
-// StartMonitoring starts the monitoring system
-func (tm *DAG) StartMonitoring(ctx context.Context) {
-	if tm.monitor != nil {
-		tm.monitor.Start(ctx)
-	}
-}
-
-// StopMonitoring stops the monitoring system
-func (tm *DAG) StopMonitoring() {
-	if tm.monitor != nil {
-		tm.monitor.Stop()
-	}
-}
-
-// GetMonitoringMetrics returns current monitoring metrics
-func (tm *DAG) GetMonitoringMetrics() *MonitoringMetrics {
-	if tm.monitor != nil {
-		return tm.monitor.GetMetrics()
-	}
-	return nil
-}
-
-// GetNodeStats returns statistics for a specific node
-func (tm *DAG) GetNodeStats(nodeID string) *NodeStats {
-	if tm.monitor != nil && tm.monitor.metrics != nil {
-		return tm.monitor.metrics.GetNodeStats(nodeID)
-	}
-	return nil
-}
-
-// SetAlertThresholds configures alert thresholds
-func (tm *DAG) SetAlertThresholds(thresholds *AlertThresholds) {
-	if tm.monitor != nil {
-		tm.monitor.SetAlertThresholds(thresholds)
-	}
-}
-
-// AddAlertHandler adds an alert handler
-func (tm *DAG) AddAlertHandler(handler AlertHandler) {
-	if tm.monitor != nil {
-		tm.monitor.AddAlertHandler(handler)
-	}
-}
-
-// Configuration Management Methods
-
-// GetConfiguration returns current DAG configuration
-func (tm *DAG) GetConfiguration() *DAGConfig {
-	if tm.configManager != nil {
-		return tm.configManager.GetConfig()
-	}
-	return DefaultDAGConfig()
-}
-
-// UpdateConfiguration updates the DAG configuration
-func (tm *DAG) UpdateConfiguration(config *DAGConfig) error {
-	if tm.configManager != nil {
-		return tm.configManager.UpdateConfiguration(config)
-	}
-	return fmt.Errorf("config manager not initialized")
-}
-
-// AddConfigWatcher adds a configuration change watcher
-func (tm *DAG) AddConfigWatcher(watcher ConfigWatcher) {
-	if tm.configManager != nil {
-		tm.configManager.AddWatcher(watcher)
-	}
-}
-
-// Rate Limiting Methods
-
-// SetRateLimit sets rate limit for a specific node
-func (tm *DAG) SetRateLimit(nodeID string, requestsPerSecond float64, burst int) {
-	if tm.rateLimiter != nil {
-		tm.rateLimiter.SetNodeLimit(nodeID, requestsPerSecond, burst)
-	}
-}
-
-// CheckRateLimit checks if request is allowed for a node
-func (tm *DAG) CheckRateLimit(nodeID string) bool {
-	if tm.rateLimiter != nil {
-		return tm.rateLimiter.Allow(nodeID)
-	}
-	return true
-}
-
-// Retry and Circuit Breaker Methods
-
-// SetRetryConfig sets the retry configuration
-func (tm *DAG) SetRetryConfig(config *RetryConfig) {
-	if tm.retryManager != nil {
-		tm.retryManager.SetGlobalConfig(config)
-	}
-}
-
-// AddNodeWithRetry adds a node with specific retry configuration
-func (tm *DAG) AddNodeWithRetry(nodeType NodeType, name, nodeID string, handler mq.Processor, retryConfig *RetryConfig, startNode ...bool) *DAG {
-	tm.AddNode(nodeType, name, nodeID, handler, startNode...)
-	if tm.retryManager != nil {
-		tm.retryManager.SetNodeConfig(nodeID, retryConfig)
-	}
-	return tm
 }
 
 // Batch Processing Methods
@@ -1350,26 +1169,4 @@ func (tm *DAG) StopEnhanced(ctx context.Context) error {
 
 	// Stop underlying components
 	return tm.Stop(ctx)
-}
-
-// ActivityAlertHandler handles alerts by logging them as activities
-type ActivityAlertHandler struct {
-	activityLogger *ActivityLogger
-}
-
-func (h *ActivityAlertHandler) HandleAlert(alert Alert) error {
-	if h.activityLogger != nil {
-		h.activityLogger.Log(
-			ActivityLevelWarn,
-			ActivityTypeAlert,
-			alert.Message,
-			map[string]interface{}{
-				"alert_type":      alert.Type,
-				"alert_severity":  alert.Severity,
-				"alert_node_id":   alert.NodeID,
-				"alert_timestamp": alert.Timestamp,
-			},
-		)
-	}
-	return nil
 }
