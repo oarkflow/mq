@@ -28,6 +28,7 @@ func main() {
 	flow := dag.NewDAG("Sample DAG", "sample-dag", func(taskID string, result mq.Result) {
 		fmt.Printf("DAG Final result for task %s: %s\n", taskID, string(result.Payload))
 	})
+	flow.ConfigureMemoryStorage()
 	flow.AddNode(dag.Function, "GetData", "GetData", &GetData{}, true)
 	flow.AddNode(dag.Function, "Loop", "Loop", &Loop{})
 	flow.AddNode(dag.Function, "ValidateAge", "ValidateAge", &ValidateAge{})

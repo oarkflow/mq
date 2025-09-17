@@ -12,8 +12,9 @@ import (
 	"github.com/oarkflow/json"
 
 	"github.com/oarkflow/mq"
+	dagstorage "github.com/oarkflow/mq/dag/storage" // Import dag storage package with alias
 	"github.com/oarkflow/mq/logger"
-	"github.com/oarkflow/mq/storage"
+	mqstorage "github.com/oarkflow/mq/storage"
 	"github.com/oarkflow/mq/storage/memory"
 )
 
@@ -30,7 +31,7 @@ func (te TaskError) Error() string {
 // TaskState holds state and intermediate results for a given task (identified by a node ID).
 type TaskState struct {
 	UpdatedAt     time.Time
-	targetResults storage.IMap[string, mq.Result]
+	targetResults mqstorage.IMap[string, mq.Result]
 	NodeID        string
 	Status        mq.Status
 	Result        mq.Result
@@ -76,13 +77,13 @@ type TaskManagerConfig struct {
 
 type TaskManager struct {
 	createdAt          time.Time
-	taskStates         storage.IMap[string, *TaskState]
-	parentNodes        storage.IMap[string, string]
-	childNodes         storage.IMap[string, int]
-	deferredTasks      storage.IMap[string, *task]
-	iteratorNodes      storage.IMap[string, []Edge]
-	currentNodePayload storage.IMap[string, json.RawMessage]
-	currentNodeResult  storage.IMap[string, mq.Result]
+	taskStates         mqstorage.IMap[string, *TaskState]
+	parentNodes        mqstorage.IMap[string, string]
+	childNodes         mqstorage.IMap[string, int]
+	deferredTasks      mqstorage.IMap[string, *task]
+	iteratorNodes      mqstorage.IMap[string, []Edge]
+	currentNodePayload mqstorage.IMap[string, json.RawMessage]
+	currentNodeResult  mqstorage.IMap[string, mq.Result]
 	taskQueue          chan *task
 	result             *mq.Result
 	resultQueue        chan nodeResult
@@ -96,9 +97,10 @@ type TaskManager struct {
 	pauseMu            sync.Mutex
 	pauseCh            chan struct{}
 	wg                 sync.WaitGroup
+	storage            dagstorage.TaskStorage // Added TaskStorage for persistence
 }
 
-func NewTaskManager(dag *DAG, taskID string, resultCh chan mq.Result, iteratorNodes storage.IMap[string, []Edge]) *TaskManager {
+func NewTaskManager(dag *DAG, taskID string, resultCh chan mq.Result, iteratorNodes mqstorage.IMap[string, []Edge], taskStorage dagstorage.TaskStorage) *TaskManager {
 	config := TaskManagerConfig{
 		MaxRetries:  3,
 		BaseBackoff: time.Second,
@@ -121,6 +123,7 @@ func NewTaskManager(dag *DAG, taskID string, resultCh chan mq.Result, iteratorNo
 		baseBackoff:        config.BaseBackoff,
 		recoveryHandler:    config.RecoveryHandler,
 		iteratorNodes:      iteratorNodes,
+		storage:            taskStorage,
 	}
 
 	tm.wg.Add(3)
@@ -144,7 +147,27 @@ func (tm *TaskManager) enqueueTask(ctx context.Context, startNode, taskID string
 		tm.taskStates.Set(startNode, newTaskState(startNode))
 	}
 	t := newTask(ctx, taskID, startNode, payload)
-
+	// Persist task to storage
+	if tm.storage != nil {
+		persistentTask := &dagstorage.PersistentTask{
+			ID:              taskID,
+			DAGID:           tm.dag.key,
+			NodeID:          startNode,
+			CurrentNodeID:   startNode,
+			ProcessingState: "enqueued",
+			Status:          dagstorage.TaskStatusPending,
+			Payload:         payload,
+			CreatedAt:       time.Now(),
+			UpdatedAt:       time.Now(),
+			MaxRetries:      tm.maxRetries,
+		}
+		if err := tm.storage.SaveTask(ctx, persistentTask); err != nil {
+			tm.dag.Logger().Error("Failed to persist task", logger.Field{Key: "taskID", Value: taskID}, logger.Field{Key: "error", Value: err.Error()})
+		} else {
+			// Log task creation activity
+			tm.logActivity(ctx, taskID, startNode, "task_created", "Task enqueued for processing", nil)
+		}
+	}
 	select {
 	case tm.taskQueue <- t:
 		// Successfully enqueued
@@ -342,6 +365,18 @@ func (tm *TaskManager) processNode(exec *task) {
 	state.Status = mq.Processing
 	state.UpdatedAt = time.Now()
 	tm.currentNodePayload.Clear()
+	// Update task status in storage
+	if tm.storage != nil {
+		// Update task position and status
+		if err := tm.updateTaskPosition(exec.ctx, exec.taskID, pureNodeID, "processing"); err != nil {
+			tm.dag.Logger().Error("Failed to update task position", logger.Field{Key: "taskID", Value: exec.taskID}, logger.Field{Key: "error", Value: err.Error()})
+		}
+		if err := tm.storage.UpdateTaskStatus(exec.ctx, exec.taskID, dagstorage.TaskStatusRunning, ""); err != nil {
+			tm.dag.Logger().Error("Failed to update task status", logger.Field{Key: "taskID", Value: exec.taskID}, logger.Field{Key: "error", Value: err.Error()})
+		}
+		// Log node processing start
+		tm.logActivity(exec.ctx, exec.taskID, pureNodeID, "node_processing_started", "Node processing started", nil)
+	}
 	tm.currentNodeResult.Clear()
 	tm.currentNodePayload.Set(exec.nodeID, exec.payload)
 
@@ -578,6 +613,36 @@ func (tm *TaskManager) handleNext(ctx context.Context, node *Node, state *TaskSt
 	if result.Status == "" {
 		result.Status = state.Status
 	}
+	// Update task status in storage based on final result
+	if tm.storage != nil {
+		var status dagstorage.TaskStatus
+		var errorMsg string
+		var action string
+		var message string
+
+		if result.Error != nil {
+			status = dagstorage.TaskStatusFailed
+			errorMsg = result.Error.Error()
+			action = "node_failed"
+			message = fmt.Sprintf("Node %s failed: %s", state.NodeID, errorMsg)
+		} else if state.Status == mq.Completed {
+			status = dagstorage.TaskStatusCompleted
+			action = "node_completed"
+			message = fmt.Sprintf("Node %s completed successfully", state.NodeID)
+		} else {
+			status = dagstorage.TaskStatusRunning
+			action = "node_processing"
+			message = fmt.Sprintf("Node %s processing", state.NodeID)
+		}
+
+		if err := tm.storage.UpdateTaskStatus(ctx, tm.taskID, status, errorMsg); err != nil {
+			tm.dag.Logger().Error("Failed to update task status", logger.Field{Key: "taskID", Value: tm.taskID}, logger.Field{Key: "error", Value: err.Error()})
+		}
+
+		// Log node completion/failure
+		tm.logActivity(ctx, tm.taskID, state.NodeID, action, message, result.Payload)
+	}
+
 	tm.enqueueResult(nodeResult{
 		ctx:    ctx,
 		nodeID: state.NodeID,
@@ -901,4 +966,50 @@ func (tm *TaskManager) getErrorMessage(err error) string {
 		return ""
 	}
 	return err.Error()
+}
+
+// logActivity logs an activity for a task
+func (tm *TaskManager) logActivity(ctx context.Context, taskID, nodeID, action, message string, data json.RawMessage) {
+	if tm.storage == nil {
+		return
+	}
+
+	logEntry := &dagstorage.TaskActivityLog{
+		TaskID:    taskID,
+		DAGID:     tm.dag.key,
+		NodeID:    nodeID,
+		Action:    action,
+		Message:   message,
+		Data:      data,
+		Level:     "info",
+		CreatedAt: time.Now(),
+	}
+
+	if err := tm.storage.LogActivity(ctx, logEntry); err != nil {
+		tm.dag.Logger().Error("Failed to log activity",
+			logger.Field{Key: "taskID", Value: taskID},
+			logger.Field{Key: "action", Value: action},
+			logger.Field{Key: "error", Value: err.Error()})
+	}
+}
+
+// updateTaskPosition updates the current position of a task in the DAG
+func (tm *TaskManager) updateTaskPosition(ctx context.Context, taskID, currentNodeID, processingState string) error {
+	if tm.storage == nil {
+		return nil
+	}
+
+	// Get the current task
+	task, err := tm.storage.GetTask(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("failed to get task for position update: %w", err)
+	}
+
+	// Update position fields
+	task.CurrentNodeID = currentNodeID
+	task.ProcessingState = processingState
+	task.UpdatedAt = time.Now()
+
+	// Save the updated task
+	return tm.storage.SaveTask(ctx, task)
 }

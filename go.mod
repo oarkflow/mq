@@ -5,6 +5,8 @@ go 1.24.2
 require (
 	github.com/gofiber/fiber/v2 v2.52.9
 	github.com/gorilla/websocket v1.5.3
+	github.com/lib/pq v1.10.9
+	github.com/mattn/go-sqlite3 v1.14.32
 	github.com/oarkflow/date v0.0.4
 	github.com/oarkflow/dipper v0.0.6
 	github.com/oarkflow/errors v0.0.6
@@ -14,6 +16,7 @@ require (
 	github.com/oarkflow/json v0.0.28
 	github.com/oarkflow/jsonschema v0.0.4
 	github.com/oarkflow/log v1.0.83
+	github.com/oarkflow/squealx v0.0.56
 	github.com/oarkflow/xid v1.2.8
 	golang.org/x/crypto v0.41.0
 	golang.org/x/exp v0.0.0-20250819193227-8b4c13bb791b
