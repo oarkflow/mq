@@ -736,6 +736,6 @@ func (h *DataHandler) getUnpivotFields() []string {
 
 func NewDataHandler(id string) *DataHandler {
 	return &DataHandler{
-		Operation: dag.Operation{ID: id, Key: "data", Type: dag.Function, Tags: []string{"data", "transformation", "misc"}},
+		Operation: dag.Operation{ID: id, Key: "data:transform", Type: dag.Function, Tags: []string{"data", "transformation", "misc"}},
 	}
 }

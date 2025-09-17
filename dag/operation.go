@@ -152,12 +152,15 @@ func (e *Operation) ValidateFields(c context.Context, payload []byte) (map[strin
 	var data map[string]any
 	err := json.Unmarshal(payload, &data)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to unmarshal payload: %w", err)
 	}
 	for k, v := range e.Payload.Mapping {
 		_, val := GetVal(c, v, data)
 		if val != nil {
 			keys = append(keys, k)
+		} else {
+			// Log missing mapping
+			fmt.Printf("Warning: Mapping key %s not found for %s\n", k, v)
 		}
 	}
 	for k := range e.Payload.Data {
@@ -165,7 +168,7 @@ func (e *Operation) ValidateFields(c context.Context, payload []byte) (map[strin
 	}
 	for _, k := range e.RequiredFields {
 		if !slices.Contains(keys, k) {
-			return nil, errors.New("Required field doesn't exist")
+			return nil, fmt.Errorf("required field '%s' is missing or could not be mapped", k)
 		}
 	}
 	return data, nil
@@ -230,6 +233,13 @@ func GetVal(c context.Context, v string, data map[string]any) (key string, val a
 		} else {
 			key, val = getVal(c, v, data)
 		}
+	}
+
+	// Log warning if value is nil and not expected
+	if val == nil && key != "" {
+		// Assuming logger is available, but since it's not in this file, perhaps add a field or use fmt
+		// For now, use fmt.Printf for warning
+		fmt.Printf("Warning: Value not found for key %s in mapping %s\n", key, v)
 	}
 
 	return
