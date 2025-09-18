@@ -1,0 +1,46 @@
+{
+    "name": "Email Notification System",
+    "key": "email:notification",
+    "nodes": [
+        {
+            "id": "Login",
+            "name": "Check Login",
+            "node_key": "login:flow",
+            "first_node": true
+        },
+        {
+            "id": "ContactForm",
+            "node": "render-html",
+            "data": {
+                "additional_data": {
+                    "schema_file": "schema.json",
+                    "template_file": "templates/basic.html"
+                }
+            }
+        },
+        {
+            "id": "output",
+            "node": "output",
+            "data": {
+                "mapping": {
+                    "login_message": "eval.{{'Email sent successfully!'}}"
+                },
+                "additional_data": {
+                    "except_fields": [ "html_content" ]
+                }
+            }
+        }
+    ],
+    "edges": [
+        {
+            "source": "Login.output",
+            "label": "on_success",
+            "target": [ "ContactForm" ]
+        },
+        {
+            "source": "ContactForm",
+            "label": "on_email_sent",
+            "target": [ "output" ]
+        }
+    ]
+}

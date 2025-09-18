@@ -20,10 +20,12 @@ type DataHandler struct {
 }
 
 func (h *DataHandler) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
-	var data map[string]any
-	err := json.Unmarshal(task.Payload, &data)
+	data, err := dag.UnmarshalPayload[map[string]any](ctx, task.Payload)
 	if err != nil {
-		return mq.Result{Error: fmt.Errorf("failed to unmarshal task payload: %w", err)}
+		return mq.Result{Error: fmt.Errorf("failed to unmarshal task payload: %w", err), Ctx: ctx}
+	}
+	if data == nil {
+		data = make(map[string]any)
 	}
 
 	operation, ok := h.Payload.Data["operation"].(string)
@@ -34,6 +36,8 @@ func (h *DataHandler) ProcessTask(ctx context.Context, task *mq.Task) mq.Result 
 	var result map[string]any
 	var conditionStatus string
 	switch operation {
+	case "extract":
+		result = h.extractData(ctx, data)
 	case "sort":
 		result = h.sortData(data)
 	case "deduplicate":
@@ -71,6 +75,34 @@ func (h *DataHandler) ProcessTask(ctx context.Context, task *mq.Task) mq.Result 
 		Ctx:             ctx,
 		ConditionStatus: conditionStatus,
 	}
+}
+
+func (h *DataHandler) extractData(ctx context.Context, data map[string]any) map[string]any {
+	result := make(map[string]any)
+
+	// Copy existing data
+	for k, v := range data {
+		result[k] = v
+	}
+
+	// Extract data based on mapping
+	if h.Payload.Mapping != nil {
+		for targetField, sourcePath := range h.Payload.Mapping {
+			_, val := dag.GetVal(ctx, sourcePath, data)
+			if val != nil {
+				result[targetField] = val
+			}
+		}
+	}
+
+	// Handle default values
+	if defaultPath, ok := h.Payload.Data["default_path"].(string); ok {
+		if path, exists := result["path"]; !exists || path == "" {
+			result["path"] = defaultPath
+		}
+	}
+
+	return result
 }
 
 func (h *DataHandler) sortData(data map[string]any) map[string]any {

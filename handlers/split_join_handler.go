@@ -16,10 +16,9 @@ type SplitHandler struct {
 }
 
 func (h *SplitHandler) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
-	var data map[string]any
-	err := json.Unmarshal(task.Payload, &data)
+	data, err := dag.UnmarshalPayload[map[string]any](ctx, task.Payload)
 	if err != nil {
-		return mq.Result{Error: fmt.Errorf("failed to unmarshal task payload: %w", err)}
+		return mq.Result{Error: fmt.Errorf("failed to unmarshal task payload: %w", err), Ctx: ctx}
 	}
 
 	operation, ok := h.Payload.Data["operation"].(string)
@@ -149,10 +148,9 @@ type JoinHandler struct {
 }
 
 func (h *JoinHandler) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
-	var data map[string]any
-	err := json.Unmarshal(task.Payload, &data)
+	data, err := dag.UnmarshalPayload[map[string]any](ctx, task.Payload)
 	if err != nil {
-		return mq.Result{Error: fmt.Errorf("failed to unmarshal task payload: %w", err)}
+		return mq.Result{Error: fmt.Errorf("failed to unmarshal task payload: %w", err), Ctx: ctx}
 	}
 
 	operation, ok := h.Payload.Data["operation"].(string)

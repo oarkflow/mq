@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SMS Notification</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+
+        .sms-container {
+            background-color: #fff;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            border-left: 4px solid #007bff;
+        }
+
+        .header {
+            background-color: #007bff;
+            color: white;
+            padding: 15px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }
+
+        .message-body {
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 15px 0;
+            font-size: 16px;
+            line-height: 1.5;
+        }
+
+        .meta-info {
+            color: #666;
+            font-size: 14px;
+            margin-top: 20px;
+            padding-top: 15px;
+            border-top: 1px solid #eee;
+        }
+
+        .recipients {
+            background-color: #e7f3ff;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+
+        .priority {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+
+        .priority.high {
+            background-color: #dc3545;
+            color: white;
+        }
+
+        .priority.medium {
+            background-color: #ffc107;
+            color: black;
+        }
+
+        .priority.low {
+            background-color: #28a745;
+            color: white;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="sms-container">
+        <div class="header">
+            <h1>📱 SMS Notification</h1>
+            <p>From: {{.sender}}</p>
+        </div>
+
+        <div class="message-body">
+            {{.message}}
+        </div>
+
+        <div class="recipients">
+            <strong>Recipients:</strong>
+            {{range .recipients}}
+            <span>{{.}}</span>
+            {{end}}
+        </div>
+
+        <div class="meta-info">
+            <p><strong>Priority:</strong> <span class="priority {{.priority}}">{{.priority}}</span></p>
+            <p><strong>Sent:</strong> {{.timestamp}}</p>
+            <p><strong>Status:</strong> {{.status}}</p>
+        </div>
+    </div>
+</body>
+
+</html>

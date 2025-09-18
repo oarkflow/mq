@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JSON Engine - Workflow Platform</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+
+        .api-section {
+            margin-bottom: 30px;
+        }
+
+        .endpoint {
+            background: #f8f9fa;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 4px;
+            border-left: 4px solid #007bff;
+        }
+
+        .method {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 3px;
+            color: white;
+            font-weight: bold;
+            margin-right: 10px;
+        }
+
+        .post {
+            background-color: #28a745;
+        }
+
+        .get {
+            background-color: #17a2b8;
+        }
+
+        .code {
+            background: #f8f9fa;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+            font-family: monospace;
+            font-size: 14px;
+        }
+
+        .button {
+            display: inline-block;
+            padding: 10px 20px;
+            background: #007bff;
+            color: white;
+            text-decoration: none;
+            border-radius: 4px;
+            margin: 5px;
+        }
+
+        .button:hover {
+            background: #0056b3;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚀 JSON Engine - Workflow Platform</h1>
+            <p>Dynamic workflow engine built with user_config.go and setup.go integration</p>
+        </div>
+
+        <div class="api-section">
+            <h2>📧 Email Workflow API</h2>
+            <div class="endpoint">
+                <span class="method post">POST</span>
+                <strong>/api/v1/email/send</strong> - Send email through workflow engine
+                <div class="code">
+                    curl -X POST http://localhost:3000/api/v1/email/send \
+                    -H "Content-Type: application/json" \
+                    -d '{
+                    "to": "user@example.com",
+                    "from": "sender@example.com",
+                    "subject": "Test Email",
+                    "body": "Hello from JSON Engine!"
+                    }'
+                </div>
+            </div>
+            <div class="endpoint">
+                <span class="method get">GET</span>
+                <strong>/api/v1/email/dag</strong> - View email workflow DAG visualization
+            </div>
+        </div>
+
+        <div class="api-section">
+            <h2>📱 SMS Workflow API</h2>
+            <div class="endpoint">
+                <span class="method post">POST</span>
+                <strong>/api/v1/sms/send</strong> - Send SMS through workflow engine
+                <div class="code">
+                    curl -X POST http://localhost:3000/api/v1/sms/send \
+                    -H "Content-Type: application/json" \
+                    -d '{
+                    "message": "Hello from JSON Engine!",
+                    "recipients": ["+1234567890"],
+                    "sender": "JsonEngine",
+                    "priority": "medium"
+                    }'
+                </div>
+            </div>
+            <div class="endpoint">
+                <span class="method get">GET</span>
+                <strong>/api/v1/sms/dag</strong> - View SMS workflow DAG visualization
+            </div>
+        </div>
+
+        <div class="api-section">
+            <h2>📝 Blog Engine</h2>
+            <div class="endpoint">
+                <span class="method get">GET</span>
+                <strong>/api/v1/blog/*</strong> - Dynamic blog content generation
+                <div class="code">
+                    # Blog index
+                    curl http://localhost:3000/api/v1/blog/
+
+                    # Category posts
+                    curl http://localhost:3000/api/v1/blog/?category=Technology
+
+                    # Individual post
+                    curl http://localhost:3000/api/v1/blog/post/sample-post
+                </div>
+            </div>
+        </div>
+
+        <div class="api-section">
+            <h2>🔧 Quick Links</h2>
+            <a href="/api/v1/email/dag" class="button">📧 Email Workflow DAG</a>
+            <a href="/api/v1/sms/dag" class="button">📱 SMS Workflow DAG</a>
+            <a href="/api/v1/blog/" class="button">📝 Blog Engine</a>
+        </div>
+
+        <div class="api-section">
+            <h2>🏗️ Architecture</h2>
+            <p>This JSON Engine demonstrates:</p>
+            <ul>
+                <li><strong>user_config.go</strong> - Configuration management for both traditional and enhanced
+                    handlers</li>
+                <li><strong>setup.go</strong> - Service setup with enhanced workflow engine integration</li>
+                <li><strong>JSON-driven workflows</strong> - Dynamic handler creation from configuration files</li>
+                <li><strong>DAG visualization</strong> - Visual representation of workflow execution paths</li>
+                <li><strong>API integration</strong> - REST endpoints for workflow execution</li>
+            </ul>
+        </div>
+    </div>
+</body>
+
+</html>

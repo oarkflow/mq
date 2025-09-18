@@ -18,35 +18,60 @@ type FormatHandler struct {
 }
 
 func (h *FormatHandler) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
-	var data map[string]any
-	err := json.Unmarshal(task.Payload, &data)
+	data, err := dag.UnmarshalPayload[map[string]any](ctx, task.Payload)
 	if err != nil {
 		return mq.Result{Error: fmt.Errorf("failed to unmarshal task payload: %w", err), Ctx: ctx}
+	}
+	if data == nil {
+		data = make(map[string]any)
+	}
+
+	// Handle mapping first
+	if h.Payload.Mapping != nil {
+		for k, v := range h.Payload.Mapping {
+			_, val := dag.GetVal(ctx, v, data)
+			data[k] = val
+		}
 	}
 
 	formatType, ok := h.Payload.Data["format_type"].(string)
 	if !ok {
-		return mq.Result{Error: fmt.Errorf("format_type not specified"), Ctx: ctx}
+		// If no format_type specified, just return the data with mapping applied
+		resultPayload, err := json.Marshal(data)
+		if err != nil {
+			return mq.Result{Error: fmt.Errorf("failed to marshal result: %w", err), Ctx: ctx}
+		}
+		return mq.Result{Payload: resultPayload, Ctx: ctx}
 	}
 
 	var result map[string]any
+	// Copy data to result
+	if data != nil {
+		result = make(map[string]any)
+		for k, v := range data {
+			result[k] = v
+		}
+	} else {
+		result = make(map[string]any)
+	}
+
 	switch formatType {
 	case "string":
-		result = h.formatToString(data)
+		result = h.formatToString(result)
 	case "number":
-		result = h.formatToNumber(data)
+		result = h.formatToNumber(result)
 	case "date":
-		result = h.formatDate(data)
+		result = h.formatDate(result)
 	case "currency":
-		result = h.formatCurrency(data)
+		result = h.formatCurrency(result)
 	case "uppercase":
-		result = h.formatUppercase(data)
+		result = h.formatUppercase(result)
 	case "lowercase":
-		result = h.formatLowercase(data)
+		result = h.formatLowercase(result)
 	case "capitalize":
-		result = h.formatCapitalize(data)
+		result = h.formatCapitalize(result)
 	case "trim":
-		result = h.formatTrim(data)
+		result = h.formatTrim(result)
 	default:
 		return mq.Result{Error: fmt.Errorf("unsupported format_type: %s", formatType), Ctx: ctx}
 	}

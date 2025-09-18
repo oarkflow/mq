@@ -1,0 +1,69 @@
+{
+    "routes": [
+        {
+            "name": "SMS Workflow",
+            "route_uri": "/api/v1/sms/send",
+            "route_method": "POST",
+            "handler_key": "sms:workflow",
+            "operation": "custom",
+            "schema_file": "sms-send.json"
+        },
+        {
+            "name": "Email Workflow",
+            "route_uri": "/api/v1/email/send",
+            "route_method": "POST",
+            "handler_key": "email:workflow",
+            "operation": "custom",
+            "schema_file": "email-send.json"
+        },
+        {
+            "name": "Blog Engine",
+            "route_uri": "/api/v1/blog/*",
+            "route_method": "GET",
+            "handler_key": "blog:engine",
+            "operation": "custom"
+        },
+        {
+            "name": "SMS Workflow DAG",
+            "route_uri": "/api/v1/sms/dag",
+            "route_method": "GET",
+            "handler_key": "sms:workflow",
+            "operation": "custom"
+        },
+        {
+            "name": "Email Workflow DAG",
+            "route_uri": "/api/v1/email/dag",
+            "route_method": "GET",
+            "handler_key": "email:workflow",
+            "operation": "custom"
+        },
+        {
+            "name": "SMS Page",
+            "route_uri": "/sms",
+            "route_method": "GET",
+            "handler_key": "sms:workflow",
+            "operation": "custom"
+        },
+        {
+            "name": "Email Page",
+            "route_uri": "/email",
+            "route_method": "GET",
+            "handler_key": "email:workflow",
+            "operation": "custom"
+        },
+        {
+            "name": "Blog Page",
+            "route_uri": "/blog/*",
+            "route_method": "GET",
+            "handler_key": "blog:engine",
+            "operation": "custom"
+        },
+        {
+            "name": "Home Page",
+            "route_uri": "/",
+            "route_method": "GET",
+            "handler_key": "blog:engine",
+            "operation": "custom"
+        }
+    ]
+}

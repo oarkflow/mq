@@ -31,11 +31,149 @@ import (
 
 var ValidationInstance Validation
 
+// Enhanced service instances for workflow engine integration
+var EnhancedValidationInstance EnhancedValidation
+var EnhancedDAGServiceInstance EnhancedDAGService
+var EnhancedServiceManagerInstance EnhancedServiceManager
+
 func Setup(loader *Loader, serverApp *fiber.App, brokerAddr string) error {
 	if loader.UserConfig == nil || serverApp == nil {
 		return nil
 	}
 	return SetupServices(loader.Prefix(), serverApp, brokerAddr)
+}
+
+// Enhanced setup function that supports both traditional and enhanced DAG systems
+func SetupEnhanced(loader *Loader, serverApp *fiber.App, brokerAddr string, config *EnhancedServiceConfig) error {
+	if loader.UserConfig == nil || serverApp == nil {
+		return nil
+	}
+
+	// Initialize enhanced services
+	if config != nil {
+		if err := InitializeEnhancedServices(config); err != nil {
+			return fmt.Errorf("failed to initialize enhanced services: %w", err)
+		}
+	}
+
+	// Setup both traditional and enhanced services
+	return SetupEnhancedServices(loader.Prefix(), serverApp, brokerAddr)
+}
+
+// InitializeEnhancedServices initializes the enhanced service instances
+func InitializeEnhancedServices(config *EnhancedServiceConfig) error {
+	// Initialize enhanced service manager
+	EnhancedServiceManagerInstance = NewEnhancedServiceManager(config)
+	if err := EnhancedServiceManagerInstance.Initialize(config); err != nil {
+		return fmt.Errorf("failed to initialize enhanced service manager: %w", err)
+	}
+
+	// Initialize enhanced DAG service
+	EnhancedDAGServiceInstance = NewEnhancedDAGService(config)
+
+	// Initialize enhanced validation if config is provided
+	if config.ValidationConfig != nil {
+		validation, err := NewEnhancedValidation(config.ValidationConfig)
+		if err != nil {
+			return fmt.Errorf("failed to initialize enhanced validation: %w", err)
+		}
+		EnhancedValidationInstance = validation
+	}
+
+	return nil
+}
+
+// SetupEnhancedServices sets up both traditional and enhanced services with workflow engine support
+func SetupEnhancedServices(prefix string, router fiber.Router, brokerAddr string) error {
+	if router == nil {
+		return nil
+	}
+
+	// Setup traditional handlers
+	err := SetupHandlers(userConfig.Policy.Handlers, brokerAddr)
+	if err != nil {
+		return err
+	}
+
+	// Setup enhanced handlers if available
+	if len(userConfig.Policy.EnhancedHandlers) > 0 {
+		err = SetupEnhancedHandlers(userConfig.Policy.EnhancedHandlers, brokerAddr)
+		if err != nil {
+			return fmt.Errorf("failed to setup enhanced handlers: %w", err)
+		}
+	}
+
+	// Setup background handlers (both traditional and enhanced)
+	setupBackgroundHandlers(brokerAddr)
+	setupEnhancedBackgroundHandlers(brokerAddr)
+
+	// Setup static files and rendering
+	static := userConfig.Policy.Web.Static
+	if static != nil && static.Dir != "" {
+		router.Static(
+			static.Prefix,
+			static.Dir,
+			fiber.Static{
+				Compress:  static.Options.Compress,
+				ByteRange: static.Options.ByteRange,
+				Browse:    static.Options.Browse,
+				Index:     static.Options.IndexFile,
+			},
+		)
+	}
+
+	err = setupRender(prefix, router)
+	if err != nil {
+		return fmt.Errorf("failed to setup render: %w", err)
+	}
+
+	// Setup API routes (both traditional and enhanced)
+	return SetupEnhancedAPI(prefix, router, brokerAddr)
+}
+
+// SetupEnhancedHandler creates and configures an enhanced handler with workflow engine support
+func SetupEnhancedHandler(handler EnhancedHandler, brokerAddr string, async ...bool) (*dag.DAG, error) {
+	// For now, convert enhanced handler to traditional handler and use existing SetupHandler
+	traditionalHandler := Handler{
+		Name:       handler.Name,
+		Key:        handler.Key,
+		DisableLog: handler.DisableLog,
+		Debug:      handler.Debug,
+	}
+
+	// Convert enhanced nodes to traditional nodes
+	for _, enhancedNode := range handler.Nodes {
+		traditionalNode := Node{
+			Name:      enhancedNode.Name,
+			ID:        enhancedNode.ID,
+			NodeKey:   enhancedNode.NodeKey,
+			Node:      enhancedNode.Node,
+			FirstNode: enhancedNode.FirstNode,
+			Debug:     false, // Default to false
+		}
+		traditionalHandler.Nodes = append(traditionalHandler.Nodes, traditionalNode)
+	}
+
+	// Copy edges and convert loops to proper type
+	traditionalHandler.Edges = handler.Edges
+
+	// Convert enhanced loops (Edge type) to traditional loops (Loop type)
+	for _, enhancedLoop := range handler.Loops {
+		traditionalLoop := Loop{
+			Label:  enhancedLoop.Label,
+			Source: enhancedLoop.Source,
+			Target: enhancedLoop.Target,
+		}
+		traditionalHandler.Loops = append(traditionalHandler.Loops, traditionalLoop)
+	}
+
+	// Use existing SetupHandler function
+	dagInstance := SetupHandler(traditionalHandler, brokerAddr, async...)
+	if dagInstance.Error != nil {
+		return nil, dagInstance.Error
+	}
+
+	return dagInstance, nil
 }
 
 func SetupHandler(handler Handler, brokerAddr string, async ...bool) *dag.DAG {
@@ -715,4 +853,111 @@ func TopologicalSort(handlers map[string]*HandlerInfo) ([]string, error) {
 		return nil, fmt.Errorf("circular dependency detected in handlers")
 	}
 	return result, nil
+}
+
+// Enhanced setup functions for workflow engine integration
+
+// SetupEnhancedHandlers sets up enhanced handlers with workflow engine support
+func SetupEnhancedHandlers(availableHandlers []EnhancedHandler, brokerAddr string) error {
+	for _, handler := range availableHandlers {
+		fmt.Printf("Setting up enhanced handler: %s (key: %s)\n", handler.Name, handler.Key)
+		_, err := SetupEnhancedHandler(handler, brokerAddr)
+		if err != nil {
+			return fmt.Errorf("failed to setup enhanced handler %s: %w", handler.Key, err)
+		}
+	}
+	return nil
+}
+
+// setupEnhancedBackgroundHandlers sets up enhanced background handlers
+func setupEnhancedBackgroundHandlers(brokerAddress string) {
+	for _, handler := range userConfig.Policy.EnhancedHandlers {
+		if handler.WorkflowEnabled {
+			dagInstance, err := SetupEnhancedHandler(handler, brokerAddress)
+			if err != nil {
+				log.Error().Err(err).Msgf("Failed to setup enhanced background handler: %s", handler.Key)
+				continue
+			}
+
+			// Start background processing using traditional DAG
+			go func(dag *dag.DAG, key string) {
+				ctx := context.Background()
+				if err := dag.Consume(ctx); err != nil {
+					log.Error().Err(err).Msgf("Failed to start consumer for enhanced handler: %s", key)
+				}
+			}(dagInstance, handler.Key)
+		}
+	}
+}
+
+// SetupEnhancedAPI sets up API routes for both traditional and enhanced handlers
+func SetupEnhancedAPI(prefix string, router fiber.Router, brokerAddr string) error {
+	if prefix != "" {
+		prefix = "/" + prefix
+	}
+	api := router.Group(prefix)
+
+	// Setup traditional API routes
+	for _, configRoute := range userConfig.Policy.Web.Apis {
+		routeGroup := api.Group(configRoute.Prefix)
+		mws := setupMiddlewares(configRoute.Middlewares...)
+		if len(mws) > 0 {
+			routeGroup.Use(mws...)
+		}
+		for _, route := range configRoute.Routes {
+			switch route.Operation {
+			case "custom":
+				flow := setupFlow(route, routeGroup, brokerAddr)
+				path := CleanAndMergePaths(route.Uri)
+				switch route.Method {
+				case "GET":
+					routeGroup.Get(path, requestMiddleware(route.Model, route), ruleMiddleware(route.Rules), customRuleMiddleware(route, route.CustomRules), customHandler(flow))
+				case "POST":
+					routeGroup.Post(path, requestMiddleware(route.Model, route), ruleMiddleware(route.Rules), customRuleMiddleware(route, route.CustomRules), customHandler(flow))
+				case "PUT":
+					routeGroup.Put(path, requestMiddleware(route.Model, route), ruleMiddleware(route.Rules), customRuleMiddleware(route, route.CustomRules), customHandler(flow))
+				case "DELETE":
+					routeGroup.Delete(path, requestMiddleware(route.Model, route), ruleMiddleware(route.Rules), customRuleMiddleware(route, route.CustomRules), customHandler(flow))
+				case "PATCH":
+					routeGroup.Patch(path, requestMiddleware(route.Model, route), ruleMiddleware(route.Rules), customRuleMiddleware(route, route.CustomRules), customHandler(flow))
+				}
+			case "dag":
+				flow := setupFlow(route, routeGroup, brokerAddr)
+				path := CleanAndMergePaths(route.Uri)
+				routeGroup.Get(path, func(ctx *fiber.Ctx) error {
+					return getDAGPage(ctx, flow)
+				})
+			}
+		}
+	}
+
+	// Setup enhanced API routes for enhanced handlers
+	for _, handler := range userConfig.Policy.EnhancedHandlers {
+		if handler.WorkflowEnabled {
+			dagInstance, err := SetupEnhancedHandler(handler, brokerAddr)
+			if err != nil {
+				return fmt.Errorf("failed to setup enhanced handler for API: %w", err)
+			}
+
+			// Create API endpoint for enhanced handler (using traditional DAG handler)
+			path := fmt.Sprintf("/enhanced/%s", handler.Key)
+			api.Post(path, customHandler(dagInstance))
+
+			// Create DAG visualization endpoint (using traditional DAG visualization)
+			api.Get(path+"/dag", func(ctx *fiber.Ctx) error {
+				return getDAGPage(ctx, dagInstance)
+			})
+		}
+	}
+
+	return nil
+}
+
+// Helper functions for enhanced features (simplified implementation)
+
+// addEnhancedNode is a placeholder for future enhanced node functionality
+func addEnhancedNode(enhancedDAG interface{}, node EnhancedNode) error {
+	// For now, this is a placeholder implementation
+	// In the future, this would add enhanced nodes with workflow capabilities
+	return nil
 }

@@ -1,0 +1,136 @@
+{
+    "name": "Email Workflow Engine",
+    "key": "email:workflow",
+    "debug": false,
+    "disable_log": false,
+    "nodes": [
+        {
+            "id": "start",
+            "name": "Start Email Workflow",
+            "node": "start",
+            "first_node": true,
+            "data": {
+                "additional_data": {
+                    "workflow": "email_sending",
+                    "version": "1.0.0"
+                }
+            }
+        },
+        {
+            "id": "validate_email",
+            "name": "Validate Email Input",
+            "node": "data",
+            "data": {
+                "mapping": {
+                    "to": "body.to",
+                    "from": "body.from",
+                    "subject": "body.subject",
+                    "body": "body.body",
+                    "html": "body.html"
+                },
+                "additional_data": {
+                    "operation": "validate_fields",
+                    "validation_rules": {
+                        "to": { "required": true, "type": "email" },
+                        "from": { "required": true, "type": "email" },
+                        "subject": { "required": true, "max_length": 255 }
+                    }
+                }
+            }
+        },
+        {
+            "id": "prepare_template",
+            "name": "Prepare Email Template",
+            "node": "render-html",
+            "data": {
+                "additional_data": {
+                    "template_file": "templates/email-template.html",
+                    "engine": "handlebars"
+                }
+            }
+        },
+        {
+            "id": "send_email",
+            "name": "Send Email",
+            "node": "format",
+            "data": {
+                "mapping": {
+                    "provider": "eval.{{'smtp'}}",
+                    "status": "eval.{{'sent'}}",
+                    "message_id": "eval.{{'email_' + generateID()}}",
+                    "cost": "eval.{{0.001}}"
+                },
+                "additional_data": {
+                    "format_type": "string",
+                    "smtp_config": {
+                        "host": "smtp.gmail.com",
+                        "port": 587,
+                        "secure": false
+                    }
+                }
+            }
+        },
+        {
+            "id": "log_email_result",
+            "name": "Log Email Result",
+            "node": "log",
+            "data": {
+                "mapping": {
+                    "event": "eval.{{'email_sent'}}",
+                    "timestamp": "eval.{{now()}}",
+                    "result": "eval.{{{'to': to, 'subject': subject, 'status': status, 'message_id': message_id}}}"
+                },
+                "additional_data": {
+                    "operation": "info",
+                    "log_level": "info"
+                }
+            }
+        },
+        {
+            "id": "output",
+            "name": "Email Response",
+            "node": "output",
+            "data": {
+                "mapping": {
+                    "success": "eval.{{true}}",
+                    "message": "eval.{{'Email sent successfully'}}",
+                    "to": "to",
+                    "subject": "subject",
+                    "message_id": "message_id",
+                    "timestamp": "eval.{{now()}}",
+                    "status": "eval.{{'delivered'}}"
+                },
+                "templates": {
+                    "html": "email-template.html"
+                }
+            }
+        }
+    ],
+    "edges": [
+        {
+            "source": "start",
+            "label": "initialize",
+            "target": [ "validate_email" ]
+        },
+        {
+            "source": "validate_email",
+            "label": "validated",
+            "target": [ "prepare_template" ]
+        },
+        {
+            "source": "prepare_template",
+            "label": "template_ready",
+            "target": [ "send_email" ]
+        },
+        {
+            "source": "send_email",
+            "label": "sent",
+            "target": [ "log_email_result" ]
+        },
+        {
+            "source": "log_email_result",
+            "label": "logged",
+            "target": [ "output" ]
+        }
+    ]
+}

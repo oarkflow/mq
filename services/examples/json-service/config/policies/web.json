@@ -1,0 +1,16 @@
+{
+    "prefix": "/",
+    "middlewares": [
+        {"name": "cors"}
+    ],
+    "static": {
+        "dir": "./public",
+        "prefix": "/",
+        "options": {
+            "byte_range": true,
+            "browse": true,
+            "compress": true,
+            "index_file": "index.html"
+        }
+    }
+}

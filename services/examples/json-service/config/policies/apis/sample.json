@@ -1,0 +1,29 @@
+{
+    "routes": [
+        {
+            "route_uri": "/test-route",
+            "route_method": "POST",
+            "schema_file": "test-route.json",
+            "description": "Handle test route",
+            "model": "test_route",
+            "operation": "custom",
+            "handler_key": "print:check"
+        },
+        {
+            "route_uri": "/print",
+            "route_method": "GET",
+            "description": "Handles print",
+            "model": "print",
+            "operation": "custom",
+            "handler_key": "print:check"
+        },
+        {
+            "route_uri": "/send-email",
+            "route_method": "GET",
+            "description": "Handles send email",
+            "model": "print",
+            "operation": "custom",
+            "handler_key": "email:notification"
+        }
+    ]
+}

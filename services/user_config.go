@@ -322,6 +322,58 @@ type Policy struct {
 	ApplicationRules   []*filters.ApplicationRule `json:"application_rules" yaml:"application_rules"`
 	Handlers           []Handler                  `json:"handlers" yaml:"handlers"`
 	Flows              []Flow                     `json:"flows" yaml:"flows"`
+	// Enhanced configuration support
+	EnhancedHandlers  []EnhancedHandler         `json:"enhanced_handlers" yaml:"enhanced_handlers"`
+	EnhancedWorkflows []WorkflowDefinition      `json:"enhanced_workflows" yaml:"enhanced_workflows"`
+	ValidationRules   []ValidationServiceConfig `json:"validation_rules" yaml:"validation_rules"`
+}
+
+// Enhanced workflow configuration structures
+type WorkflowConfig struct {
+	Engine      string            `json:"engine" yaml:"engine"`
+	Version     string            `json:"version" yaml:"version"`
+	Timeout     string            `json:"timeout" yaml:"timeout"`
+	RetryPolicy *RetryPolicy      `json:"retry_policy,omitempty" yaml:"retry_policy,omitempty"`
+	Metadata    map[string]string `json:"metadata,omitempty" yaml:"metadata,omitempty"`
+}
+
+type RetryPolicy struct {
+	MaxAttempts  int    `json:"max_attempts" yaml:"max_attempts"`
+	BackoffType  string `json:"backoff_type" yaml:"backoff_type"`
+	InitialDelay string `json:"initial_delay" yaml:"initial_delay"`
+}
+
+type WorkflowDefinition struct {
+	ID          string            `json:"id" yaml:"id"`
+	Name        string            `json:"name" yaml:"name"`
+	Description string            `json:"description" yaml:"description"`
+	Version     string            `json:"version" yaml:"version"`
+	Steps       []WorkflowStep    `json:"steps" yaml:"steps"`
+	Metadata    map[string]string `json:"metadata,omitempty" yaml:"metadata,omitempty"`
+}
+
+type WorkflowStep struct {
+	ID        string            `json:"id" yaml:"id"`
+	Name      string            `json:"name" yaml:"name"`
+	Type      string            `json:"type" yaml:"type"`
+	Handler   string            `json:"handler" yaml:"handler"`
+	Input     map[string]any    `json:"input,omitempty" yaml:"input,omitempty"`
+	Condition string            `json:"condition,omitempty" yaml:"condition,omitempty"`
+	Metadata  map[string]string `json:"metadata,omitempty" yaml:"metadata,omitempty"`
+}
+
+type ValidationRule struct {
+	Field    string         `json:"field" yaml:"field"`
+	Type     string         `json:"type" yaml:"type"`
+	Required bool           `json:"required" yaml:"required"`
+	Message  string         `json:"message" yaml:"message"`
+	Options  map[string]any `json:"options,omitempty" yaml:"options,omitempty"`
+}
+
+type ValidationProcessor struct {
+	Name   string         `json:"name" yaml:"name"`
+	Type   string         `json:"type" yaml:"type"`
+	Config map[string]any `json:"config,omitempty" yaml:"config,omitempty"`
 }
 
 type UserConfig struct {
@@ -443,5 +495,85 @@ func (c *UserConfig) GetFlow(key string) *Flow {
 			return &flow
 		}
 	}
+	return nil
+}
+
+// Enhanced methods for workflow engine integration
+
+// GetEnhancedHandler retrieves an enhanced handler by key
+func (c *UserConfig) GetEnhancedHandler(handlerName string) *EnhancedHandler {
+	for _, handler := range c.Policy.EnhancedHandlers {
+		if handler.Key == handlerName {
+			return &handler
+		}
+	}
+	return nil
+}
+
+// GetEnhancedHandlerList returns list of all enhanced handler keys
+func (c *UserConfig) GetEnhancedHandlerList() (handlers []string) {
+	for _, handler := range c.Policy.EnhancedHandlers {
+		handlers = append(handlers, handler.Key)
+	}
+	return
+}
+
+// GetWorkflowDefinition retrieves a workflow definition by ID
+func (c *UserConfig) GetWorkflowDefinition(workflowID string) *WorkflowDefinition {
+	for _, workflow := range c.Policy.EnhancedWorkflows {
+		if workflow.ID == workflowID {
+			return &workflow
+		}
+	}
+	return nil
+}
+
+// GetValidationConfig retrieves validation configuration by name
+func (c *UserConfig) GetValidationConfig(name string) *ValidationServiceConfig {
+	for _, config := range c.Policy.ValidationRules {
+		// Since ValidationServiceConfig doesn't have a name field in enhanced_contracts,
+		// we'll use the index or a different approach
+		if len(c.Policy.ValidationRules) > 0 {
+			return &config
+		}
+	}
+	return nil
+}
+
+// IsEnhancedHandler checks if a handler is configured as enhanced
+func (c *UserConfig) IsEnhancedHandler(handlerName string) bool {
+	handler := c.GetEnhancedHandler(handlerName)
+	return handler != nil && handler.WorkflowEnabled
+}
+
+// GetAllHandlers returns both traditional and enhanced handlers
+func (c *UserConfig) GetAllHandlers() map[string]interface{} {
+	handlers := make(map[string]interface{})
+
+	// Add traditional handlers
+	for _, handler := range c.Policy.Handlers {
+		handlers[handler.Key] = handler
+	}
+
+	// Add enhanced handlers
+	for _, handler := range c.Policy.EnhancedHandlers {
+		handlers[handler.Key] = handler
+	}
+
+	return handlers
+}
+
+// GetHandlerByKey returns either traditional or enhanced handler by key
+func (c *UserConfig) GetHandlerByKey(key string) interface{} {
+	// Check traditional handlers first
+	if handler := c.GetHandler(key); handler != nil {
+		return *handler
+	}
+
+	// Check enhanced handlers
+	if handler := c.GetEnhancedHandler(key); handler != nil {
+		return *handler
+	}
+
 	return nil
 }

@@ -1,0 +1,32 @@
+{
+    "type": "object",
+    "properties": {
+        "message": {
+            "type": "string",
+            "maxLength": 160,
+            "minLength": 1,
+            "description": "SMS message content"
+        },
+        "recipients": {
+            "type": "array",
+            "items": {
+                "type": "string",
+                "pattern": "^\\+[1-9]\\d{1,14}$"
+            },
+            "minItems": 1,
+            "description": "Array of phone numbers in E.164 format"
+        },
+        "sender": {
+            "type": "string",
+            "description": "Sender identifier"
+        },
+        "priority": {
+            "type": "string",
+            "enum": [ "high", "medium", "low" ],
+            "default": "medium",
+            "description": "SMS priority level"
+        }
+    },
+    "required": [ "message", "recipients", "sender" ],
+    "additionalProperties": false
+}

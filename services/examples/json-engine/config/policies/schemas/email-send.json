@@ -1,0 +1,43 @@
+{
+    "type": "object",
+    "properties": {
+        "to": {
+            "type": "string",
+            "format": "email",
+            "description": "Recipient email address"
+        },
+        "from": {
+            "type": "string",
+            "format": "email",
+            "description": "Sender email address"
+        },
+        "subject": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1,
+            "description": "Email subject"
+        },
+        "body": {
+            "type": "string",
+            "description": "Plain text email body"
+        },
+        "html": {
+            "type": "string",
+            "description": "HTML email body"
+        },
+        "attachments": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "filename": { "type": "string" },
+                    "content": { "type": "string" },
+                    "contentType": { "type": "string" }
+                }
+            },
+            "description": "Email attachments"
+        }
+    },
+    "required": [ "to", "from", "subject" ],
+    "additionalProperties": false
+}

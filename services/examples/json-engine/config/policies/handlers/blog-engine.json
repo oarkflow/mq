@@ -1,0 +1,178 @@
+{
+    "name": "Blog Engine",
+    "key": "blog:engine",
+    "debug": false,
+    "disable_log": false,
+    "nodes": [
+        {
+            "id": "start",
+            "name": "Start Blog Engine",
+            "node": "start",
+            "first_node": true,
+            "data": {
+                "additional_data": {
+                    "workflow": "blog_rendering",
+                    "version": "1.0.0"
+                }
+            }
+        },
+        {
+            "id": "parse_route",
+            "name": "Parse Blog Route",
+            "node": "data",
+            "data": {
+                "mapping": {
+                    "path": "header.param.path",
+                    "category": "header.query.category",
+                    "tag": "header.query.tag"
+                },
+                "additional_data": {
+                    "operation": "extract",
+                    "default_path": "index"
+                }
+            }
+        },
+        {
+            "id": "load_content",
+            "name": "Load Blog Content",
+            "node": "condition",
+            "data": {
+                "conditions": {
+                    "post": {
+                        "filter": {
+                            "key": "path",
+                            "operator": "startsWith",
+                            "value": "post/"
+                        },
+                        "node": "load_post"
+                    },
+                    "category": {
+                        "filter": {
+                            "key": "category",
+                            "operator": "exists"
+                        },
+                        "node": "load_category"
+                    },
+                    "index": {
+                        "filter": {
+                            "key": "path",
+                            "operator": "eq",
+                            "value": "index"
+                        },
+                        "node": "load_index"
+                    }
+                },
+                "additional_data": {
+                    "default_action": "load_index"
+                }
+            }
+        },
+        {
+            "id": "load_post",
+            "name": "Load Blog Post",
+            "node": "format",
+            "data": {
+                "mapping": {
+                    "content_type": "eval.{{'post'}}",
+                    "title": "eval.{{'Sample Blog Post'}}",
+                    "author": "eval.{{'John Doe'}}",
+                    "date": "eval.{{now()}}",
+                    "content": "eval.{{'This is a sample blog post content. It demonstrates the blog engine workflow.'}}",
+                    "tags": "eval.{{['technology', 'workflow', 'automation']}}"
+                }
+            }
+        },
+        {
+            "id": "load_category",
+            "name": "Load Category Posts",
+            "node": "format",
+            "data": {
+                "mapping": {
+                    "content_type": "eval.{{'category'}}",
+                    "category": "category",
+                    "posts": "eval.{{[{'title': 'Post 1', 'slug': 'post-1'}, {'title': 'Post 2', 'slug': 'post-2'}]}}"
+                }
+            }
+        },
+        {
+            "id": "load_index",
+            "name": "Load Blog Index",
+            "node": "format",
+            "data": {
+                "mapping": {
+                    "content_type": "eval.{{'index'}}",
+                    "recent_posts": "eval.{{[{'title': 'Latest Post', 'slug': 'latest-post', 'excerpt': 'This is the latest blog post...'}]}}",
+                    "categories": "eval.{{['Technology', 'Tutorials', 'News']}}"
+                }
+            }
+        },
+        {
+            "id": "render_blog",
+            "name": "Render Blog Page",
+            "node": "render-html",
+            "data": {
+                "additional_data": {
+                    "template_file": "templates/blog.html"
+                }
+            }
+        },
+        {
+            "id": "output",
+            "name": "Blog Output",
+            "node": "output",
+            "data": {
+                "mapping": {
+                    "content_type": "eval.{{'text/html'}}",
+                    "rendered": "html_content"
+                }
+            }
+        }
+    ],
+    "edges": [
+        {
+            "source": "start",
+            "label": "initialize",
+            "target": [ "parse_route" ]
+        },
+        {
+            "source": "parse_route",
+            "label": "parsed",
+            "target": [ "load_content" ]
+        },
+        {
+            "source": "load_content.post",
+            "label": "load_post_content",
+            "target": [ "load_post" ]
+        },
+        {
+            "source": "load_content.category",
+            "label": "load_category_content",
+            "target": [ "load_category" ]
+        },
+        {
+            "source": "load_content.index",
+            "label": "load_index_content",
+            "target": [ "load_index" ]
+        },
+        {
+            "source": "load_post",
+            "label": "post_loaded",
+            "target": [ "render_blog" ]
+        },
+        {
+            "source": "load_category",
+            "label": "category_loaded",
+            "target": [ "render_blog" ]
+        },
+        {
+            "source": "load_index",
+            "label": "index_loaded",
+            "target": [ "render_blog" ]
+        },
+        {
+            "source": "render_blog",
+            "label": "rendered",
+            "target": [ "output" ]
+        }
+    ]
+}

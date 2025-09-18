@@ -1,0 +1,223 @@
+{
+    "name": "SMS Workflow Engine",
+    "key": "sms:workflow",
+    "debug": false,
+    "disable_log": false,
+    "nodes": [
+        {
+            "id": "start",
+            "name": "Start SMS Workflow",
+            "node": "start",
+            "first_node": true,
+            "data": {
+                "additional_data": {
+                    "workflow": "sms_sending",
+                    "version": "1.0.0"
+                }
+            }
+        },
+        {
+            "id": "validate_input",
+            "name": "Validate SMS Input",
+            "node": "data",
+            "data": {
+                "mapping": {
+                    "message": "body.message",
+                    "recipients": "body.recipients",
+                    "sender": "body.sender",
+                    "priority": "body.priority"
+                },
+                "additional_data": {
+                    "operation": "validate_fields",
+                    "validation_rules": {
+                        "message": { "required": true, "max_length": 1000 },
+                        "recipients": { "required": true, "type": "array" },
+                        "sender": { "required": true, "max_length": 255 },
+                        "priority": { "required": false, "type": "string" }
+                    }
+                }
+            }
+        },
+        {
+            "id": "select_provider",
+            "name": "Select SMS Provider",
+            "node": "condition",
+            "data": {
+                "conditions": {
+                    "premium": {
+                        "filter": {
+                            "key": "priority",
+                            "operator": "eq",
+                            "value": "high"
+                        },
+                        "node": "use_twilio"
+                    },
+                    "standard": {
+                        "filter": {
+                            "key": "priority",
+                            "operator": "eq",
+                            "value": "medium"
+                        },
+                        "node": "use_nexmo"
+                    },
+                    "bulk": {
+                        "filter": {
+                            "key": "priority",
+                            "operator": "eq",
+                            "value": "low"
+                        },
+                        "node": "use_aws"
+                    }
+                },
+                "additional_data": {
+                    "default_provider": "nexmo"
+                }
+            }
+        },
+        {
+            "id": "use_twilio",
+            "name": "Send via Twilio",
+            "node": "format",
+            "data": {
+                "mapping": {
+                    "provider": "eval.{{'twilio'}}",
+                    "cost": "eval.{{0.0075}}",
+                    "status": "eval.{{'sent'}}",
+                    "message_id": "eval.{{'twilio_' + generateID()}}"
+                },
+                "additional_data": {
+                    "format_type": "string",
+                    "provider_config": {
+                        "name": "Twilio",
+                        "type": "premium",
+                        "reliability": 0.99
+                    }
+                }
+            }
+        },
+        {
+            "id": "use_nexmo",
+            "name": "Send via Nexmo",
+            "node": "format",
+            "data": {
+                "mapping": {
+                    "provider": "eval.{{'nexmo'}}",
+                    "cost": "eval.{{0.0065}}",
+                    "status": "eval.{{'sent'}}",
+                    "message_id": "eval.{{'nexmo_' + generateID()}}"
+                },
+                "additional_data": {
+                    "format_type": "string",
+                    "provider_config": {
+                        "name": "Vonage (Nexmo)",
+                        "type": "standard",
+                        "reliability": 0.97
+                    }
+                }
+            }
+        },
+        {
+            "id": "use_aws",
+            "name": "Send via AWS SNS",
+            "node": "format",
+            "data": {
+                "mapping": {
+                    "provider": "eval.{{'aws'}}",
+                    "cost": "eval.{{0.0055}}",
+                    "status": "eval.{{'sent'}}",
+                    "message_id": "eval.{{'aws_' + generateID()}}"
+                },
+                "additional_data": {
+                    "format_type": "string",
+                    "provider_config": {
+                        "name": "AWS SNS",
+                        "type": "bulk",
+                        "reliability": 0.95
+                    }
+                }
+            }
+        },
+        {
+            "id": "log_result",
+            "name": "Log SMS Result",
+            "node": "log",
+            "data": {
+                "mapping": {
+                    "event": "eval.{{'sms_sent'}}",
+                    "timestamp": "eval.{{now()}}",
+                    "result": "eval.{{{'provider': provider, 'cost': cost, 'status': status, 'message_id': message_id}}}"
+                },
+                "additional_data": {
+                    "operation": "info",
+                    "log_level": "info"
+                }
+            }
+        },
+        {
+            "id": "output",
+            "name": "SMS Response",
+            "node": "output",
+            "data": {
+                "mapping": {
+                    "success": "eval.{{true}}",
+                    "message": "eval.{{'SMS sent successfully'}}",
+                    "provider_used": "provider",
+                    "cost": "cost",
+                    "message_id": "message_id",
+                    "timestamp": "eval.{{now()}}",
+                    "status": "eval.{{'delivered'}}"
+                },
+                "templates": {
+                    "html": "sms-template.html"
+                }
+            }
+        }
+    ],
+    "edges": [
+        {
+            "source": "start",
+            "label": "initialize",
+            "target": [ "validate_input" ]
+        },
+        {
+            "source": "validate_input",
+            "label": "validated",
+            "target": [ "select_provider" ]
+        },
+        {
+            "source": "select_provider.premium",
+            "label": "use_premium",
+            "target": [ "use_twilio" ]
+        },
+        {
+            "source": "select_provider.standard",
+            "label": "use_standard",
+            "target": [ "use_nexmo" ]
+        },
+        {
+            "source": "select_provider.bulk",
+            "label": "use_bulk",
+            "target": [ "use_aws" ]
+        },
+        {
+            "source": "use_twilio",
+            "label": "sent",
+            "target": [ "log_result" ]
+        },
+        {
+            "source": "use_nexmo",
+            "label": "sent",
+            "target": [ "log_result" ]
+        },
+        {
+            "source": "use_aws",
+            "label": "sent",
+            "target": [ "log_result" ]
+        },
+        {
+            "source": "log_result",
+            "label": "logged",
+            "target": [ "output" ]
+        }
+    ]
+}

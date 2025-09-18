@@ -1,54 +1,48 @@
 package main
 
 import (
-	"encoding/json"
-	"flag"
-	"fmt"
-	"io/ioutil"
-	"log"
-	"os"
+	"github.com/gofiber/fiber/v2"
+	"github.com/oarkflow/cli"
+	"github.com/oarkflow/cli/console"
+	"github.com/oarkflow/cli/contracts"
+
+	"github.com/oarkflow/mq"
+	"github.com/oarkflow/mq/dag"
+	"github.com/oarkflow/mq/handlers"
+	"github.com/oarkflow/mq/services"
+	dagConsole "github.com/oarkflow/mq/services/console"
 )
 
-func loadConfiguration(configPath string) (*AppConfiguration, error) {
-	data, err := ioutil.ReadFile(configPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read config file: %v", err)
-	}
-
-	var config AppConfiguration
-	if err := json.Unmarshal(data, &config); err != nil {
-		return nil, fmt.Errorf("failed to parse JSON config: %v", err)
-	}
-
-	return &config, nil
+func main() {
+	handlers.Init()
+	brokerAddr := ":5051"
+	loader := services.NewLoader("config")
+	loader.Load()
+	serverApp := fiber.New(fiber.Config{EnablePrintRoutes: true})
+	services.Setup(loader, serverApp, brokerAddr)
+	cli.Run("json-engine", "v1.0.0", func(client contracts.Cli) []contracts.Command {
+		return []contracts.Command{
+			console.NewListCommand(client),
+			dagConsole.NewRunHandler(loader.UserConfig, loader.ParsedPath, brokerAddr),
+			dagConsole.NewRunServer(serverApp),
+		}
+	})
 }
 
-func main() {
-	// Parse command line flags
-	configPath := flag.String("config", "sms-app.json", "Path to JSON configuration file")
-	flag.Parse()
-
-	// If positional args provided, use the first one
-	if len(os.Args) > 1 && !flag.Parsed() {
-		*configPath = os.Args[1]
-	}
-
-	// Load configuration first
-	config, err := loadConfiguration(*configPath)
-	if err != nil {
-		log.Fatalf("Failed to load configuration: %v", err)
-	}
-
-	// Create JSON engine with configuration
-	engine := NewJSONEngine(config)
-
-	// Compile configuration
-	if err := engine.Compile(); err != nil {
-		log.Fatalf("Failed to compile configuration: %v", err)
-	}
-
-	// Start server
-	if err := engine.Start(); err != nil {
-		log.Fatalf("Failed to start server: %v", err)
-	}
+func init() {
+	// Register standard handlers
+	dag.AddHandler("render-html", func(id string) mq.Processor { return handlers.NewRenderHTMLNode(id) })
+	dag.AddHandler("condition", func(id string) mq.Processor { return handlers.NewCondition(id) })
+	dag.AddHandler("output", func(id string) mq.Processor { return handlers.NewOutputHandler(id) })
+	dag.AddHandler("print", func(id string) mq.Processor { return handlers.NewPrintHandler(id) })
+	dag.AddHandler("format", func(id string) mq.Processor { return handlers.NewFormatHandler(id) })
+	dag.AddHandler("data", func(id string) mq.Processor { return handlers.NewDataHandler(id) })
+	dag.AddHandler("log", func(id string) mq.Processor { return handlers.NewLogHandler(id) })
+	dag.AddHandler("json", func(id string) mq.Processor { return handlers.NewJSONHandler(id) })
+	dag.AddHandler("split", func(id string) mq.Processor { return handlers.NewSplitHandler(id) })
+	dag.AddHandler("join", func(id string) mq.Processor { return handlers.NewJoinHandler(id) })
+	dag.AddHandler("field", func(id string) mq.Processor { return handlers.NewFieldHandler(id) })
+	dag.AddHandler("flatten", func(id string) mq.Processor { return handlers.NewFlattenHandler(id) })
+	dag.AddHandler("group", func(id string) mq.Processor { return handlers.NewGroupHandler(id) })
+	dag.AddHandler("start", func(id string) mq.Processor { return handlers.NewStartHandler(id) })
 }
