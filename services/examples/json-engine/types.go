@@ -2,7 +2,7 @@ package main
 
 import (
 	"github.com/gofiber/fiber/v2"
-	"github.com/oarkflow/mq/workflow"
+	"github.com/oarkflow/mq/dag"
 )
 
 // AppConfiguration represents the complete JSON configuration for an application
@@ -230,10 +230,11 @@ type FunctionConfig struct {
 // ValidatorConfig defines validation rules with complete flexibility
 type ValidatorConfig struct {
 	ID         string                 `json:"id"`
+	Name       string                 `json:"name,omitempty"`
 	Type       string                 `json:"type"` // "jsonschema", "custom", "regex", "builtin"
 	Field      string                 `json:"field,omitempty"`
 	Schema     interface{}            `json:"schema,omitempty"`
-	Rules      map[string]interface{} `json:"rules,omitempty"` // Generic rules
+	Rules      []ValidationRule       `json:"rules,omitempty"` // Array of validation rules
 	Messages   map[string]string      `json:"messages,omitempty"`
 	Expression string                 `json:"expression,omitempty"` // For expression-based validation
 	Config     map[string]interface{} `json:"config,omitempty"`
@@ -243,9 +244,10 @@ type ValidatorConfig struct {
 
 // ValidationRule defines individual validation rules with flexibility
 type ValidationRule struct {
-	Field      string                 `json:"field"`
+	Field      string                 `json:"field,omitempty"`
 	Type       string                 `json:"type"`
-	Required   bool                   `json:"required"`
+	Required   bool                   `json:"required,omitempty"`
+	Value      interface{}            `json:"value,omitempty"` // Generic value field for min/max, patterns, etc.
 	Min        interface{}            `json:"min,omitempty"`
 	Max        interface{}            `json:"max,omitempty"`
 	Pattern    string                 `json:"pattern,omitempty"`
@@ -259,7 +261,7 @@ type ValidationRule struct {
 // Generic runtime types for the JSON engine
 type JSONEngine struct {
 	app                  *fiber.App
-	workflowEngine       *workflow.WorkflowEngine
+	workflowEngine       *dag.WorkflowEngineManager
 	workflowEngineConfig *WorkflowEngineConfig
 	config               *AppConfiguration
 	templates            map[string]*Template
@@ -312,7 +314,7 @@ type Function struct {
 type Validator struct {
 	ID      string
 	Config  ValidatorConfig
-	Rules   map[string]interface{} // Generic rules instead of typed array
+	Rules   []ValidationRule       // Array of validation rules to match ValidatorConfig
 	Runtime map[string]interface{} // Runtime context
 }
 

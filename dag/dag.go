@@ -201,6 +201,51 @@ func (tm *DAG) GetDebugInfo() map[string]any {
 	return debugInfo
 }
 
+// EnableEnhancedFeatures configures the DAG with enhanced features
+func (tm *DAG) EnableEnhancedFeatures(config *EnhancedDAGConfig) error {
+	if config == nil {
+		return fmt.Errorf("enhanced DAG config cannot be nil")
+	}
+
+	// Get the logger from the server
+	var dagLogger logger.Logger
+	if tm.server != nil {
+		dagLogger = tm.server.Options().Logger()
+	} else {
+		// Create a null logger as fallback
+		dagLogger = &logger.NullLogger{}
+	}
+
+	// Initialize enhanced features if needed
+	if config.EnableStateManagement {
+		// State management is already built into the DAG
+		tm.SetDebug(true) // Enable debug for better state tracking
+	}
+
+	if config.EnableAdvancedRetry {
+		// Initialize retry manager if not already present
+		if tm.retryManager == nil {
+			tm.retryManager = NewNodeRetryManager(nil, dagLogger)
+		}
+	}
+
+	if config.EnableMetrics {
+		// Initialize metrics if not already present
+		if tm.metrics == nil {
+			tm.metrics = &TaskMetrics{}
+		}
+	}
+
+	if config.MaxConcurrentExecutions > 0 {
+		// Set up rate limiting
+		if tm.rateLimiter == nil {
+			tm.rateLimiter = NewRateLimiter(dagLogger)
+		}
+	}
+
+	return nil
+}
+
 // Use adds global middleware handlers that will be executed for all nodes in the DAG
 func (tm *DAG) Use(handlers ...mq.Handler) {
 	tm.middlewaresMu.Lock()

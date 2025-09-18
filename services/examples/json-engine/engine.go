@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -15,33 +16,12 @@ import (
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/logger"
 	"github.com/gofiber/fiber/v2/middleware/recover"
-	"github.com/oarkflow/mq/workflow"
+	"github.com/oarkflow/mq/dag"
 )
 
 // Helper functions for default values
 func getDefaultInt(value, defaultValue int) int {
 	if value != 0 {
-		return value
-	}
-	return defaultValue
-}
-
-func getDefaultString(value, defaultValue string) string {
-	if value != "" {
-		return value
-	}
-	return defaultValue
-}
-
-func getDefaultBool(value, defaultValue bool) bool {
-	if value {
-		return value
-	}
-	return defaultValue
-}
-
-func getDefaultStringSlice(value, defaultValue []string) []string {
-	if value != nil && len(value) > 0 {
 		return value
 	}
 	return defaultValue
@@ -82,23 +62,15 @@ func NewJSONEngine(config *AppConfiguration) *JSONEngine {
 		}
 	}
 
-	workflowConfig := &workflow.Config{
-		MaxWorkers:       workflowEngineConfig.MaxWorkers,
-		ExecutionTimeout: getDefaultDuration(workflowEngineConfig.ExecutionTimeout, 30*time.Second),
-		EnableMetrics:    workflowEngineConfig.EnableMetrics,
-		EnableAudit:      workflowEngineConfig.EnableAudit,
-		EnableTracing:    workflowEngineConfig.EnableTracing,
-		LogLevel:         getDefaultString(workflowEngineConfig.LogLevel, "info"),
-		Storage: workflow.StorageConfig{
-			Type:           getDefaultString(workflowEngineConfig.Storage.Type, "memory"),
-			MaxConnections: getDefaultInt(workflowEngineConfig.Storage.MaxConnections, 10),
-		},
-		Security: workflow.SecurityConfig{
-			EnableAuth:     workflowEngineConfig.Security.EnableAuth,
-			AllowedOrigins: getDefaultStringSlice(workflowEngineConfig.Security.AllowedOrigins, []string{"*"}),
-		},
+	dagWorkflowConfig := &dag.WorkflowEngineConfig{
+		MaxConcurrentExecutions: getDefaultInt(workflowEngineConfig.MaxWorkers, 10),
+		DefaultTimeout:          getDefaultDuration(workflowEngineConfig.ExecutionTimeout, 30*time.Second),
+		EnablePersistence:       true, // Enable persistence for enhanced features
+		EnableSecurity:          workflowEngineConfig.Security.EnableAuth,
+		EnableMiddleware:        true, // Enable middleware for enhanced features
+		EnableScheduling:        true, // Enable scheduling for enhanced features
 	}
-	workflowEngine := workflow.NewWorkflowEngine(workflowConfig)
+	workflowEngine := dag.NewWorkflowEngineManager(dagWorkflowConfig)
 
 	engine := &JSONEngine{
 		workflowEngine:       workflowEngine,
@@ -213,6 +185,11 @@ func (e *JSONEngine) Start() error {
 	// Setup routes
 	if err := e.setupRoutes(); err != nil {
 		return fmt.Errorf("route setup failed: %v", err)
+	}
+
+	// Start workflow engine
+	if err := e.workflowEngine.Start(context.Background()); err != nil {
+		return fmt.Errorf("failed to start workflow engine: %v", err)
 	}
 
 	// Start server
@@ -778,62 +755,6 @@ func (e *JSONEngine) handleStatic(ctx *ExecutionContext, routeConfig RouteConfig
 	return ctx.Request.SendFile(routeConfig.Handler.Target)
 }
 
-// handleAuthFunction handles user authentication
-func (e *JSONEngine) handleAuthFunction(ctx *ExecutionContext) error {
-	var credentials struct {
-		Username string `json:"username"`
-		Password string `json:"password"`
-	}
-
-	if err := ctx.Request.BodyParser(&credentials); err != nil {
-		return ctx.Request.Status(400).JSON(fiber.Map{"error": "Invalid request body"})
-	}
-
-	// Generic authentication using user data from configuration
-	// Look for users in multiple possible data keys for flexibility
-	var users []interface{}
-
-	if demoUsers, ok := e.data["demo_users"].([]interface{}); ok {
-		users = demoUsers
-	} else if configUsers, ok := e.data["users"].([]interface{}); ok {
-		users = configUsers
-	} else if authUsers, ok := e.data["auth_users"].([]interface{}); ok {
-		users = authUsers
-	} else {
-		return ctx.Request.Status(500).JSON(fiber.Map{"error": "User authentication data not configured"})
-	}
-
-	for _, userInterface := range users {
-		user, ok := userInterface.(map[string]interface{})
-		if !ok {
-			continue
-		}
-
-		username, _ := user["username"].(string)
-		password, _ := user["password"].(string)
-		role, _ := user["role"].(string)
-
-		if username == credentials.Username && password == credentials.Password {
-			// Generate simple token (in production, use JWT)
-			token := fmt.Sprintf("token_%s_%d", username, time.Now().Unix())
-
-			return ctx.Request.JSON(fiber.Map{
-				"success": true,
-				"token":   token,
-				"user": map[string]interface{}{
-					"username": username,
-					"role":     role,
-				},
-			})
-		}
-	}
-
-	return ctx.Request.Status(401).JSON(fiber.Map{
-		"success": false,
-		"error":   "Invalid credentials",
-	})
-}
-
 // Utility methods for creating different types of handlers and middleware
 func (e *JSONEngine) checkAuthentication(ctx *ExecutionContext, auth *AuthConfig) error {
 	// Simple session-based authentication for demo
@@ -917,6 +838,11 @@ func (e *JSONEngine) createHTTPFunction(config FunctionConfig) interface{} {
 
 func (e *JSONEngine) createExpressionFunction(config FunctionConfig) interface{} {
 	return func(ctx *ExecutionContext, input map[string]interface{}) (map[string]interface{}, error) {
+		// Special handling for authentication function
+		if config.ID == "authenticate_user" || strings.Contains(config.Code, "validate user credentials") {
+			return e.handleAuthentication(ctx, input)
+		}
+
 		// If there's a response configuration, use it directly
 		if config.Response != nil {
 			result := make(map[string]interface{})
@@ -1722,4 +1648,64 @@ func (e *JSONEngine) createGenericFunction(config FunctionConfig) interface{} {
 
 		return result, nil
 	}
+}
+
+// handleAuthentication handles user authentication with actual validation
+func (e *JSONEngine) handleAuthentication(ctx *ExecutionContext, input map[string]interface{}) (map[string]interface{}, error) {
+	username, _ := input["username"].(string)
+	password, _ := input["password"].(string)
+
+	if username == "" || password == "" {
+		return map[string]interface{}{
+			"success": false,
+			"error":   "Username and password required",
+		}, nil
+	}
+
+	// Generic authentication using user data from configuration
+	// Look for users in multiple possible data keys for flexibility
+	var users []interface{}
+
+	if demoUsers, ok := e.data["demo_users"].([]interface{}); ok {
+		users = demoUsers
+	} else if configUsers, ok := e.data["users"].([]interface{}); ok {
+		users = configUsers
+	} else if authUsers, ok := e.data["auth_users"].([]interface{}); ok {
+		users = authUsers
+	} else {
+		return map[string]interface{}{
+			"success": false,
+			"error":   "User authentication data not configured",
+		}, nil
+	}
+
+	for _, userInterface := range users {
+		user, ok := userInterface.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		userUsername, _ := user["username"].(string)
+		userPassword, _ := user["password"].(string)
+		role, _ := user["role"].(string)
+
+		if userUsername == username && userPassword == password {
+			// Generate simple token (in production, use JWT)
+			token := fmt.Sprintf("token_%s_%d", username, time.Now().Unix())
+
+			return map[string]interface{}{
+				"success": true,
+				"token":   token,
+				"user": map[string]interface{}{
+					"username": username,
+					"role":     role,
+				},
+			}, nil
+		}
+	}
+
+	return map[string]interface{}{
+		"success": false,
+		"error":   "Invalid credentials",
+	}, nil
 }
