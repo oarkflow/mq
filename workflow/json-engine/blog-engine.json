@@ -1,0 +1,261 @@
+{
+    "app": {
+        "name": "Simple Blog Engine",
+        "version": "1.0.0",
+        "description": "Complete blog system built from JSON configuration",
+        "port": "3000",
+        "host": "localhost"
+    },
+    "data": {
+        "app_title": "📝 Simple Blog Engine",
+        "users": [
+            { "username": "admin", "password": "admin123", "role": "admin" },
+            { "username": "author", "password": "author123", "role": "author" },
+            { "username": "reader", "password": "reader123", "role": "reader" }
+        ],
+        "blog_posts": [
+            {
+                "id": 1,
+                "title": "Welcome to the JSON-Driven Blog",
+                "content": "This entire blog application is built using only JSON configuration. No hardcoded logic!",
+                "author": "admin",
+                "created_at": "2024-01-15T10:00:00Z",
+                "updated_at": "2024-01-15T10:00:00Z",
+                "status": "published",
+                "tags": [ "json", "blog", "demo" ],
+                "slug": "welcome-json-blog"
+            },
+            {
+                "id": 2,
+                "title": "Building Dynamic Applications",
+                "content": "Learn how to create dynamic web applications using JSON-driven configuration...",
+                "author": "author",
+                "created_at": "2024-01-20T14:30:00Z",
+                "updated_at": "2024-01-20T14:30:00Z",
+                "status": "published",
+                "tags": [ "development", "tutorial" ],
+                "slug": "building-dynamic-applications"
+            },
+            {
+                "id": 3,
+                "title": "Draft Post Example",
+                "content": "This is a draft post that won't appear in the public blog...",
+                "author": "author",
+                "created_at": "2024-01-25T09:15:00Z",
+                "updated_at": "2024-01-25T09:15:00Z",
+                "status": "draft",
+                "tags": [ "draft" ],
+                "slug": "draft-post-example"
+            }
+        ],
+        "categories": [ "Technology", "Tutorial", "News", "Opinion" ],
+        "blog_config": {
+            "site_name": "My JSON Blog",
+            "description": "A blog powered by JSON configuration",
+            "posts_per_page": 5,
+            "allow_comments": true,
+            "show_author": true
+        }
+    },
+    "middleware": [
+        {
+            "id": "logging",
+            "name": "Request Logging",
+            "type": "logging",
+            "priority": 1,
+            "enabled": true,
+            "config": { }
+        },
+        {
+            "id": "auth",
+            "name": "Authentication",
+            "type": "auth",
+            "priority": 2,
+            "enabled": true,
+            "config": {
+                "skip_paths": [ "/", "/login", "/blog", "/blog/*", "/api/posts" ]
+            }
+        }
+    ],
+    "templates": {
+        "login_page": {
+            "type": "html",
+            "template": "<!DOCTYPE html>\n<html>\n<head>\n    <title>{{.app_title}} - Login</title>\n    <style>\n        body { font-family: Arial, sans-serif; max-width: 500px; margin: 100px auto; padding: 20px; background: #f5f5f5; }\n        .login-container { padding: 40px; border: 1px solid #ddd; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); background: white; }\n        .form-group { margin-bottom: 20px; }\n        label { display: block; margin-bottom: 5px; font-weight: bold; }\n        input { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }\n        button { width: 100%; background: #007bff; color: white; padding: 12px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; }\n        button:hover { background: #0056b3; }\n        .error { background: #f8d7da; border: 1px solid #f5c6cb; color: #721c24; padding: 10px; border-radius: 4px; margin-top: 10px; }\n        .success { background: #d4edda; border: 1px solid #c3e6cb; color: #155724; padding: 10px; border-radius: 4px; margin-top: 10px; }\n    </style>\n</head>\n<body>\n    <div class=\"login-container\">\n        <h1>🔐 Blog Admin Login</h1>\n        <div style=\"background: #e3f2fd; padding: 15px; border-radius: 4px; margin-bottom: 20px;\">\n            <h3>Demo Users:</h3>\n            {{range .users}}\n            <p><strong>{{.username}}</strong> / {{.password}} ({{.role}})</p>\n            {{end}}\n        </div>\n        <form id=\"loginForm\">\n            <div class=\"form-group\">\n                <label for=\"username\">Username:</label>\n                <input type=\"text\" id=\"username\" name=\"username\" required>\n            </div>\n            <div class=\"form-group\">\n                <label for=\"password\">Password:</label>\n                <input type=\"password\" id=\"password\" name=\"password\" required>\n            </div>\n            <button type=\"submit\">Login</button>\n        </form>\n        <div id=\"result\"></div>\n    </div>\n    <script>\n        document.getElementById('loginForm').addEventListener('submit', async function(e) {\n            e.preventDefault();\n            const username = document.getElementById('username').value;\n            const password = document.getElementById('password').value;\n            const resultDiv = document.getElementById('result');\n            try {\n                const response = await fetch('/auth/login', {\n                    method: 'POST',\n                    headers: { 'Content-Type': 'application/json' },\n                    body: JSON.stringify({ username, password })\n                });\n                const result = await response.json();\n                if (result.success) {\n                    resultDiv.innerHTML = '<div class=\"success\">✅ Login successful! Redirecting...</div>';\n                    sessionStorage.setItem('authToken', result.token);\n                    sessionStorage.setItem('user', JSON.stringify(result.user));\n                    setTimeout(() => { window.location.href = '/admin'; }, 1000);\n                } else {\n                    resultDiv.innerHTML = '<div class=\"error\">❌ ' + result.error + '</div>';\n                }\n            } catch (error) {\n                resultDiv.innerHTML = '<div class=\"error\">❌ ' + error.message + '</div>';\n            }\n        });\n    </script>\n</body>\n</html>"
+        },
+        "blog_home": {
+            "type": "html",
+            "template": "<!DOCTYPE html>\n<html>\n<head>\n    <title>{{.blog_config.site_name}}</title>\n    <style>\n        body { font-family: Georgia, serif; max-width: 800px; margin: 0 auto; padding: 20px; line-height: 1.6; }\n        .header { text-align: center; border-bottom: 2px solid #eee; padding-bottom: 20px; margin-bottom: 30px; }\n        .nav { text-align: center; margin-bottom: 30px; }\n        .nav a { margin: 0 15px; text-decoration: none; color: #007bff; }\n        .nav a:hover { text-decoration: underline; }\n        .post { margin-bottom: 40px; padding: 20px; border: 1px solid #eee; border-radius: 8px; }\n        .post-title { color: #333; margin-bottom: 10px; }\n        .post-meta { color: #666; font-size: 14px; margin-bottom: 15px; }\n        .post-content { margin-bottom: 15px; }\n        .post-tags { margin-top: 15px; }\n        .tag { background: #e9ecef; padding: 3px 8px; border-radius: 3px; font-size: 12px; margin-right: 5px; }\n        .read-more { color: #007bff; text-decoration: none; }\n        .read-more:hover { text-decoration: underline; }\n    </style>\n</head>\n<body>\n    <div class=\"header\">\n        <h1>{{.blog_config.site_name}}</h1>\n        <p>{{.blog_config.description}}</p>\n    </div>\n\n    <div class=\"nav\">\n        <a href=\"/\">Home</a>\n        <a href=\"/blog\">Blog</a>\n        <a href=\"/login\">Admin</a>\n        <a href=\"/docs\">Docs</a>\n    </div>\n\n    <div class=\"posts\">\n        {{range .blog_posts}}\n        {{if eq .status \"published\"}}\n        <article class=\"post\">\n            <h2 class=\"post-title\">{{.title}}</h2>\n            <div class=\"post-meta\">\n                By {{.author}} on {{.created_at}} \n                {{if $.blog_config.show_author}}• {{.author}}{{end}}\n            </div>\n            <div class=\"post-content\">\n                {{.content}}\n            </div>\n            <div class=\"post-tags\">\n                {{range .tags}}\n                <span class=\"tag\">{{.}}</span>\n                {{end}}\n            </div>\n            <a href=\"/blog/{{.slug}}\" class=\"read-more\">Read more →</a>\n        </article>\n        {{end}}\n        {{end}}\n    </div>\n\n    <div style=\"text-align: center; margin-top: 40px; padding-top: 20px; border-top: 1px solid #eee; color: #666;\">\n        <p>Powered by JSON-Driven Blog Engine</p>\n    </div>\n</body>\n</html>"
+        },
+        "admin_dashboard": {
+            "type": "html",
+            "template": "<!DOCTYPE html>\n<html>\n<head>\n    <title>{{.app_title}} - Admin</title>\n    <style>\n        body { font-family: Arial, sans-serif; max-width: 1200px; margin: 0 auto; padding: 20px; }\n        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; padding: 20px; background: #f8f9fa; border-radius: 8px; }\n        .user-info { font-size: 14px; color: #666; }\n        .logout-btn { background: #dc3545; color: white; padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; }\n        .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 30px; }\n        .stat-card { padding: 20px; background: white; border: 1px solid #ddd; border-radius: 8px; text-align: center; }\n        .stat-number { font-size: 2em; font-weight: bold; color: #007bff; }\n        .actions { margin-bottom: 30px; }\n        .btn { background: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; margin-right: 10px; text-decoration: none; display: inline-block; }\n        .btn-success { background: #28a745; }\n        .posts-table { width: 100%; border-collapse: collapse; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }\n        .posts-table th, .posts-table td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }\n        .posts-table th { background: #007bff; color: white; }\n        .status-published { color: #28a745; font-weight: bold; }\n        .status-draft { color: #ffc107; font-weight: bold; }\n        .post-actions { display: flex; gap: 5px; }\n        .btn-sm { padding: 5px 10px; font-size: 12px; }\n    </style>\n</head>\n<body>\n    <div class=\"header\">\n        <h1>{{.app_title}} - Admin Dashboard</h1>\n        <div>\n            <span class=\"user-info\" id=\"userInfo\">Loading...</span>\n            <button class=\"logout-btn\" onclick=\"logout()\">Logout</button>\n        </div>\n    </div>\n\n    <div class=\"stats\">\n        <div class=\"stat-card\">\n            <div class=\"stat-number\" id=\"totalPosts\">{{len .blog_posts}}</div>\n            <div>Total Posts</div>\n        </div>\n        <div class=\"stat-card\">\n            <div class=\"stat-number\" id=\"publishedPosts\">0</div>\n            <div>Published</div>\n        </div>\n        <div class=\"stat-card\">\n            <div class=\"stat-number\" id=\"draftPosts\">0</div>\n            <div>Drafts</div>\n        </div>\n        <div class=\"stat-card\">\n            <div class=\"stat-number\" id=\"totalAuthors\">{{len .users}}</div>\n            <div>Authors</div>\n        </div>\n    </div>\n\n    <div class=\"actions\">\n        <a href=\"/admin/posts/new\" class=\"btn btn-success\">➕ New Post</a>\n        <a href=\"/blog\" class=\"btn\">👁️ View Blog</a>\n        <button class=\"btn\" onclick=\"refreshStats()\">🔄 Refresh</button>\n    </div>\n\n    <table class=\"posts-table\">\n        <thead>\n            <tr>\n                <th>Title</th>\n                <th>Author</th>\n                <th>Status</th>\n                <th>Created</th>\n                <th>Tags</th>\n                <th>Actions</th>\n            </tr>\n        </thead>\n        <tbody>\n            {{range .blog_posts}}\n            <tr>\n                <td>{{.title}}</td>\n                <td>{{.author}}</td>\n                <td class=\"status-{{.status}}\">{{.status}}</td>\n                <td>{{.created_at}}</td>\n                <td>{{range .tags}}{{.}}, {{end}}</td>\n                <td class=\"post-actions\">\n                    <button class=\"btn btn-sm\" onclick=\"editPost({{.id}})\">Edit</button>\n                    <button class=\"btn btn-sm\" onclick=\"deletePost({{.id}})\">Delete</button>\n                    {{if eq .status \"draft\"}}\n                    <button class=\"btn btn-sm btn-success\" onclick=\"publishPost({{.id}})\">Publish</button>\n                    {{end}}\n                </td>\n            </tr>\n            {{end}}\n        </tbody>\n    </table>\n\n    <script>\n        let authToken = sessionStorage.getItem('authToken');\n        let user = JSON.parse(sessionStorage.getItem('user') || '{}');\n\n        window.onload = function() {\n            if (!authToken) {\n                window.location.href = '/login';\n                return;\n            }\n            document.getElementById('userInfo').textContent = 'Logged in as: ' + user.username + ' (' + user.role + ')';\n            calculateStats();\n        };\n\n        function calculateStats() {\n            const posts = {{.blog_posts}};\n            let published = 0, drafts = 0;\n            posts.forEach(post => {\n                if (post.status === 'published') published++;\n                if (post.status === 'draft') drafts++;\n            });\n            document.getElementById('publishedPosts').textContent = published;\n            document.getElementById('draftPosts').textContent = drafts;\n        }\n\n        function editPost(id) {\n            window.location.href = '/admin/posts/edit/' + id;\n        }\n\n        async function deletePost(id) {\n            if (confirm('Are you sure you want to delete this post?')) {\n                try {\n                    const response = await fetch('/api/posts/' + id, {\n                        method: 'DELETE',\n                        headers: { 'Authorization': 'Bearer ' + authToken }\n                    });\n                    const result = await response.json();\n                    if (result.success) {\n                        alert('Post deleted successfully!');\n                        window.location.reload();\n                    } else {\n                        alert('Error: ' + result.error);\n                    }\n                } catch (error) {\n                    alert('Error: ' + error.message);\n                }\n            }\n        }\n\n        async function publishPost(id) {\n            try {\n                const response = await fetch('/api/posts/' + id + '/publish', {\n                    method: 'POST',\n                    headers: { 'Authorization': 'Bearer ' + authToken }\n                });\n                const result = await response.json();\n                if (result.success) {\n                    alert('Post published successfully!');\n                    window.location.reload();\n                } else {\n                    alert('Error: ' + result.error);\n                }\n            } catch (error) {\n                alert('Error: ' + error.message);\n            }\n        }\n\n        function refreshStats() {\n            window.location.reload();\n        }\n\n        function logout() {\n            sessionStorage.removeItem('authToken');\n            sessionStorage.removeItem('user');\n            window.location.href = '/login';\n        }\n    </script>\n</body>\n</html>"
+        },
+        "home_page": {
+            "type": "html",
+            "template": "<!DOCTYPE html>\n<html>\n<head>\n    <title>{{.app_title}}</title>\n    <style>\n        body { font-family: Arial, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; }\n        .hero { text-align: center; padding: 40px 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border-radius: 10px; margin-bottom: 30px; }\n        .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin-bottom: 30px; }\n        .feature { padding: 20px; border: 1px solid #ddd; border-radius: 8px; background: #f9f9f9; }\n        .cta { text-align: center; }\n        .btn { display: inline-block; padding: 12px 24px; background: #007bff; color: white; text-decoration: none; border-radius: 4px; margin: 10px; }\n        .btn:hover { background: #0056b3; }\n    </style>\n</head>\n<body>\n    <div class=\"hero\">\n        <h1>{{.app_title}}</h1>\n        <p>Complete blog system built entirely from JSON configuration</p>\n        <p><strong>Version:</strong> {{.version}} | <strong>Engine:</strong> JSON-Driven Workflow</p>\n    </div>\n\n    <div class=\"features\">\n        <div class=\"feature\">\n            <h3>📝 Content Management</h3>\n            <p>Create, edit, and manage blog posts with ease</p>\n        </div>\n        <div class=\"feature\">\n            <h3>👥 Multi-Author</h3>\n            <p>Support for multiple authors and roles</p>\n        </div>\n        <div class=\"feature\">\n            <h3>🏷️ Tag System</h3>\n            <p>Organize posts with tags and categories</p>\n        </div>\n        <div class=\"feature\">\n            <h3>📊 Admin Dashboard</h3>\n            <p>Comprehensive admin interface for content management</p>\n        </div>\n        <div class=\"feature\">\n            <h3>🎨 Customizable</h3>\n            <p>Flexible templating system for custom designs</p>\n        </div>\n        <div class=\"feature\">\n            <h3>🔧 JSON-Driven</h3>\n            <p>Entire application defined in JSON configuration</p>\n        </div>\n    </div>\n\n    <div class=\"cta\">\n        <h2>Get Started</h2>\n        <a href=\"/blog\" class=\"btn\">📖 Read Blog</a>\n        <a href=\"/login\" class=\"btn\">🔐 Admin Login</a>\n        <a href=\"/docs\" class=\"btn\">📖 View Documentation</a>\n    </div>\n</body>\n</html>"
+        }
+    },
+    "functions": {
+        "authenticate_user": {
+            "id": "authenticate_user",
+            "name": "User Authentication",
+            "type": "builtin",
+            "handler": "authenticate"
+        },
+        "get_published_posts": {
+            "id": "get_published_posts",
+            "name": "Get Published Posts",
+            "type": "expression",
+            "response": {
+                "posts": "{{.blog_posts}}"
+            }
+        },
+        "create_post": {
+            "id": "create_post",
+            "name": "Create Blog Post",
+            "type": "custom",
+            "config": {
+                "action": "create",
+                "entity": "post"
+            }
+        },
+        "update_post": {
+            "id": "update_post",
+            "name": "Update Blog Post",
+            "type": "custom",
+            "config": {
+                "action": "update",
+                "entity": "post"
+            }
+        },
+        "delete_post": {
+            "id": "delete_post",
+            "name": "Delete Blog Post",
+            "type": "custom",
+            "config": {
+                "action": "delete",
+                "entity": "post"
+            }
+        },
+        "publish_post": {
+            "id": "publish_post",
+            "name": "Publish Blog Post",
+            "type": "custom",
+            "config": {
+                "action": "publish",
+                "entity": "post"
+            }
+        }
+    },
+    "validators": {
+        "post_validator": {
+            "id": "post_validator",
+            "type": "custom",
+            "rules": {
+                "title": { "required": true, "minLength": 5, "maxLength": 200 },
+                "content": { "required": true, "minLength": 50 },
+                "author": { "required": true },
+                "slug": { "required": true, "pattern": "^[a-z0-9-]+$" }
+            }
+        }
+    },
+    "routes": [
+        {
+            "path": "/",
+            "method": "GET",
+            "handler": {
+                "type": "template",
+                "target": "home_page"
+            }
+        },
+        {
+            "path": "/blog",
+            "method": "GET",
+            "handler": {
+                "type": "template",
+                "target": "blog_home"
+            }
+        },
+        {
+            "path": "/login",
+            "method": "GET",
+            "handler": {
+                "type": "template",
+                "target": "login_page"
+            }
+        },
+        {
+            "path": "/auth/login",
+            "method": "POST",
+            "handler": {
+                "type": "function",
+                "target": "authenticate_user"
+            }
+        },
+        {
+            "path": "/admin",
+            "method": "GET",
+            "handler": {
+                "type": "template",
+                "target": "admin_dashboard"
+            },
+            "auth": {
+                "required": true,
+                "redirect": "/login"
+            }
+        },
+        {
+            "path": "/api/posts",
+            "method": "GET",
+            "handler": {
+                "type": "function",
+                "target": "get_published_posts"
+            }
+        },
+        {
+            "path": "/api/posts",
+            "method": "POST",
+            "handler": {
+                "type": "function",
+                "target": "create_post"
+            },
+            "auth": {
+                "required": true
+            }
+        },
+        {
+            "path": "/api/posts/:id",
+            "method": "PUT",
+            "handler": {
+                "type": "function",
+                "target": "update_post"
+            },
+            "auth": {
+                "required": true
+            }
+        },
+        {
+            "path": "/api/posts/:id",
+            "method": "DELETE",
+            "handler": {
+                "type": "function",
+                "target": "delete_post"
+            },
+            "auth": {
+                "required": true
+            }
+        },
+        {
+            "path": "/api/posts/:id/publish",
+            "method": "POST",
+            "handler": {
+                "type": "function",
+                "target": "publish_post"
+            },
+            "auth": {
+                "required": true
+            }
+        }
+    ],
+    "workflows": [ ]
+}

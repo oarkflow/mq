@@ -1,10 +1,27 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
+	"fmt"
+	"io/ioutil"
 	"log"
 	"os"
 )
+
+func loadConfiguration(configPath string) (*AppConfiguration, error) {
+	data, err := ioutil.ReadFile(configPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read config file: %v", err)
+	}
+
+	var config AppConfiguration
+	if err := json.Unmarshal(data, &config); err != nil {
+		return nil, fmt.Errorf("failed to parse JSON config: %v", err)
+	}
+
+	return &config, nil
+}
 
 func main() {
 	// Parse command line flags
@@ -16,13 +33,14 @@ func main() {
 		*configPath = os.Args[1]
 	}
 
-	// Create JSON engine
-	engine := NewJSONEngine()
-
-	// Load configuration
-	if err := engine.LoadConfiguration(*configPath); err != nil {
+	// Load configuration first
+	config, err := loadConfiguration(*configPath)
+	if err != nil {
 		log.Fatalf("Failed to load configuration: %v", err)
 	}
+
+	// Create JSON engine with configuration
+	engine := NewJSONEngine(config)
 
 	// Compile configuration
 	if err := engine.Compile(); err != nil {
