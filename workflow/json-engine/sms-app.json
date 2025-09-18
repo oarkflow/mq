@@ -14,10 +14,50 @@
             { "username": "operator", "password": "password", "role": "operator" }
         ],
         "sms_providers": [
-            { "id": "auto", "name": "Auto-Select", "description": "Let the system choose the best provider", "cost": "Varies" },
-            { "id": "twilio", "name": "Twilio", "description": "Premium provider with high delivery rates", "cost": "$0.0075/SMS" },
-            { "id": "nexmo", "name": "Vonage (Nexmo)", "description": "Global coverage with competitive pricing", "cost": "$0.0065/SMS" },
-            { "id": "aws", "name": "AWS SNS", "description": "Reliable cloud-based SMS service", "cost": "$0.0055/SMS" }
+            {
+                "id": "twilio",
+                "name": "Twilio",
+                "type": "premium",
+                "countries": [ "US", "CA", "GB", "AU" ],
+                "rates": { "US": 0.0075, "CA": 0.0085, "GB": 0.0090, "AU": 0.0095 },
+                "max_length": 160,
+                "features": [ "delivery_receipt", "unicode", "shortcode" ],
+                "priority": 1,
+                "reliability": 0.99
+            },
+            {
+                "id": "nexmo",
+                "name": "Vonage (Nexmo)",
+                "type": "standard",
+                "countries": [ "US", "CA", "GB", "AU", "DE", "FR", "IN" ],
+                "rates": { "US": 0.0065, "CA": 0.0070, "GB": 0.0075, "AU": 0.0080, "DE": 0.0070, "FR": 0.0075, "IN": 0.0045 },
+                "max_length": 160,
+                "features": [ "delivery_receipt", "unicode" ],
+                "priority": 2,
+                "reliability": 0.97
+            },
+            {
+                "id": "aws",
+                "name": "AWS SNS",
+                "type": "bulk",
+                "countries": [ "US", "CA", "GB", "AU", "DE", "FR", "IN", "BR", "JP" ],
+                "rates": { "US": 0.0055, "CA": 0.0060, "GB": 0.0065, "AU": 0.0070, "DE": 0.0060, "FR": 0.0065, "IN": 0.0035, "BR": 0.0080, "JP": 0.0090 },
+                "max_length": 140,
+                "features": [ "bulk_sending" ],
+                "priority": 3,
+                "reliability": 0.95
+            }
+        ],
+        "countries": [
+            { "code": "US", "name": "United States", "providers": [ "twilio", "nexmo", "aws" ], "default_rate": 0.0075 },
+            { "code": "CA", "name": "Canada", "providers": [ "twilio", "nexmo", "aws" ], "default_rate": 0.0080 },
+            { "code": "GB", "name": "United Kingdom", "providers": [ "twilio", "nexmo", "aws" ], "default_rate": 0.0085 },
+            { "code": "AU", "name": "Australia", "providers": [ "twilio", "nexmo", "aws" ], "default_rate": 0.0090 },
+            { "code": "DE", "name": "Germany", "providers": [ "nexmo", "aws" ], "default_rate": 0.0070 },
+            { "code": "FR", "name": "France", "providers": [ "nexmo", "aws" ], "default_rate": 0.0075 },
+            { "code": "IN", "name": "India", "providers": [ "nexmo", "aws" ], "default_rate": 0.0045 },
+            { "code": "BR", "name": "Brazil", "providers": [ "aws" ], "default_rate": 0.0080 },
+            { "code": "JP", "name": "Japan", "providers": [ "aws" ], "default_rate": 0.0090 }
         ]
     },
     "middleware": [

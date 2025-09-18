@@ -1,0 +1,311 @@
+{
+    "app": {
+        "name": "SMS Workflow Application",
+        "version": "2.0.0",
+        "description": "Complete SMS workflow application with sub-workflows and JSONSchema validation",
+        "port": "3000",
+        "host": "localhost"
+    },
+    "data": {
+        "app_title": "🚀 SMS Workflow Pipeline",
+        "demo_users": [
+            { "username": "admin", "password": "password", "role": "admin" },
+            { "username": "manager", "password": "password", "role": "manager" },
+            { "username": "operator", "password": "password", "role": "operator" }
+        ],
+        "sms_providers": [
+            {
+                "id": "twilio",
+                "name": "Twilio",
+                "type": "premium",
+                "countries": [ "US", "CA", "GB", "AU" ],
+                "rates": { "US": 0.0075, "CA": 0.0085, "GB": 0.0090, "AU": 0.0095 },
+                "max_length": 160,
+                "features": [ "delivery_receipt", "unicode", "shortcode" ],
+                "priority": 1,
+                "reliability": 0.99
+            },
+            {
+                "id": "nexmo",
+                "name": "Vonage (Nexmo)",
+                "type": "standard",
+                "countries": [ "US", "CA", "GB", "AU", "DE", "FR", "IN" ],
+                "rates": { "US": 0.0065, "CA": 0.0070, "GB": 0.0075, "AU": 0.0080, "DE": 0.0070, "FR": 0.0075, "IN": 0.0045 },
+                "max_length": 160,
+                "features": [ "delivery_receipt", "unicode" ],
+                "priority": 2,
+                "reliability": 0.97
+            },
+            {
+                "id": "aws",
+                "name": "AWS SNS",
+                "type": "bulk",
+                "countries": [ "US", "CA", "GB", "AU", "DE", "FR", "IN", "BR", "JP" ],
+                "rates": { "US": 0.0055, "CA": 0.0060, "GB": 0.0065, "AU": 0.0070, "DE": 0.0060, "FR": 0.0065, "IN": 0.0035, "BR": 0.0080, "JP": 0.0090 },
+                "max_length": 140,
+                "features": [ "bulk_sending" ],
+                "priority": 3,
+                "reliability": 0.95
+            }
+        ],
+        "countries": [
+            { "code": "US", "name": "United States", "providers": [ "twilio", "nexmo", "aws" ], "default_rate": 0.0075 },
+            { "code": "CA", "name": "Canada", "providers": [ "twilio", "nexmo", "aws" ], "default_rate": 0.0080 },
+            { "code": "GB", "name": "United Kingdom", "providers": [ "twilio", "nexmo", "aws" ], "default_rate": 0.0085 },
+            { "code": "AU", "name": "Australia", "providers": [ "twilio", "nexmo", "aws" ], "default_rate": 0.0090 },
+            { "code": "DE", "name": "Germany", "providers": [ "nexmo", "aws" ], "default_rate": 0.0070 },
+            { "code": "FR", "name": "France", "providers": [ "nexmo", "aws" ], "default_rate": 0.0075 },
+            { "code": "IN", "name": "India", "providers": [ "nexmo", "aws" ], "default_rate": 0.0045 }
+        ]
+    },
+    "middleware": [
+        {
+            "id": "logging",
+            "name": "Request Logging",
+            "type": "logging",
+            "priority": 1,
+            "enabled": true,
+            "config": { }
+        }
+    ],
+    "templates": {
+        "login_page": {
+            "id": "login_page",
+            "name": "Login Page",
+            "type": "html",
+            "template": "<!DOCTYPE html><html><head><title>SMS Workflow - Login</title><style>body{font-family:Arial;max-width:500px;margin:100px auto;padding:20px}.login-container{padding:40px;border:1px solid #ddd;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,0.1)}.form-group{margin-bottom:20px}label{display:block;margin-bottom:5px;font-weight:bold}input{width:100%;padding:12px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box}button{width:100%;background:#007bff;color:white;padding:12px;border:none;border-radius:4px;cursor:pointer;font-size:16px}button:hover{background:#0056b3}.error{background:#f8d7da;border:1px solid #f5c6cb;color:#721c24;padding:10px;border-radius:4px;margin-top:10px}.success{background:#d4edda;border:1px solid #c3e6cb;color:#155724;padding:10px;border-radius:4px;margin-top:10px}.demo-users{background:#e3f2fd;padding:15px;border-radius:4px;margin-bottom:20px}</style></head><body><div class=\"login-container\"><h1>🔐 SMS Workflow Login</h1><div class=\"demo-users\"><h3>Demo Users:</h3>{{range .demo_users}}<p><strong>{{.username}}</strong>/{{.password}} ({{.role}})</p>{{end}}</div><form id=\"loginForm\"><div class=\"form-group\"><label for=\"username\">Username:</label><input type=\"text\" id=\"username\" required></div><div class=\"form-group\"><label for=\"password\">Password:</label><input type=\"password\" id=\"password\" required></div><button type=\"submit\">Login</button></form><div id=\"result\"></div></div><script>document.getElementById('loginForm').addEventListener('submit',async function(e){e.preventDefault();const username=document.getElementById('username').value;const password=document.getElementById('password').value;const resultDiv=document.getElementById('result');try{const response=await fetch('/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username,password})});const result=await response.json();if(result.success){resultDiv.innerHTML='<div class=\"success\">✅ Login successful! Redirecting...</div>';sessionStorage.setItem('authToken',result.token);sessionStorage.setItem('user',JSON.stringify(result.user));setTimeout(()=>{window.location.href='/sms';},1000);}else{resultDiv.innerHTML='<div class=\"error\">❌ '+result.error+'</div>';}}catch(error){resultDiv.innerHTML='<div class=\"error\">❌ '+error.message+'</div>';}});</script></body></html>"
+        },
+        "sms_page": {
+            "id": "sms_page",
+            "name": "SMS Workflow Page",
+            "type": "html",
+            "template": "<!DOCTYPE html><html><head><title>SMS Workflow</title><style>body{font-family:Arial;max-width:800px;margin:0 auto;padding:20px}.header{display:flex;justify-content:space-between;align-items:center;margin-bottom:30px;padding:20px;background:#f8f9fa;border-radius:8px}.form-group{margin-bottom:15px}label{display:block;margin-bottom:5px;font-weight:bold}input,textarea,select{width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box}button{background:#007bff;color:white;padding:10px 20px;border:none;border-radius:4px;cursor:pointer}.result{margin-top:15px;padding:10px;border-radius:4px}.success{background:#d4edda;border:1px solid #c3e6cb;color:#155724}.error{background:#f8d7da;border:1px solid #f5c6cb;color:#721c24}</style></head><body><div class=\"header\"><h1>SMS Workflow</h1><button onclick=\"logout()\">Logout</button></div><form id=\"smsForm\"><div class=\"form-group\"><label>Recipients:</label><input type=\"text\" id=\"recipients\" placeholder=\"+1234567890,+0987654321\" required></div><div class=\"form-group\"><label>Message:</label><textarea id=\"message\" rows=\"4\" placeholder=\"Enter SMS message...\" required></textarea></div><button type=\"submit\">Send SMS</button></form><div id=\"result\"></div><script>let authToken=sessionStorage.getItem('authToken');if(!authToken){window.location.href='/login';}document.getElementById('smsForm').addEventListener('submit',async function(e){e.preventDefault();const recipients=document.getElementById('recipients').value.split(',');const message=document.getElementById('message').value;const resultDiv=document.getElementById('result');try{const response=await fetch('/api/sms/send',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+authToken},body:JSON.stringify({recipients,message})});const result=await response.json();if(result.success){resultDiv.innerHTML='<div class=\"success\">✅ SMS sent successfully! Provider: '+result.provider_used+', Cost: $'+result.cost+'</div>';}else{resultDiv.innerHTML='<div class=\"error\">❌ '+result.error+'</div>';}}catch(error){resultDiv.innerHTML='<div class=\"error\">❌ '+error.message+'</div>';}});function logout(){sessionStorage.removeItem('authToken');window.location.href='/login';}</script></body></html>"
+        }
+    },
+    "functions": {
+        "authenticate_user": {
+            "id": "authenticate_user",
+            "name": "User Authentication",
+            "type": "expression",
+            "code": "validate user credentials and return token"
+        },
+        "extract_country_code": {
+            "id": "extract_country_code",
+            "name": "Extract Country Code",
+            "type": "expression",
+            "code": "{ \"country_codes\": [\"US\"], \"extracted\": true }"
+        },
+        "analyze_message_requirements": {
+            "id": "analyze_message_requirements",
+            "name": "Analyze Message Requirements",
+            "type": "expression",
+            "code": "{ \"message_length\": 50, \"requires_unicode\": false, \"message_count\": 1 }"
+        },
+        "calculate_provider_costs": {
+            "id": "calculate_provider_costs",
+            "name": "Calculate Provider Costs",
+            "type": "expression",
+            "code": "{ \"twilio_cost\": 0.0075, \"nexmo_cost\": 0.0065, \"aws_cost\": 0.0055 }"
+        },
+        "select_optimal_provider": {
+            "id": "select_optimal_provider",
+            "name": "Select Optimal Provider",
+            "type": "expression",
+            "code": "{ \"provider\": \"twilio\", \"cost\": 0.0075, \"reason\": \"best reliability\" }"
+        },
+        "send_sms": {
+            "id": "send_sms",
+            "name": "Send SMS",
+            "type": "expression",
+            "code": "{ \"success\": true, \"message_id\": \"msg_12345\", \"provider_used\": \"twilio\", \"status\": \"sent\" }"
+        },
+        "log_sms_result": {
+            "id": "log_sms_result",
+            "name": "Log SMS Result",
+            "type": "expression",
+            "code": "{ \"success\": true, \"provider_used\": \"twilio\", \"cost\": 0.0075, \"message\": \"SMS sent successfully\", \"timestamp\": 1640995200000 }"
+        }
+    },
+    "validators": {
+        "sms_input": {
+            "id": "sms_input",
+            "name": "SMS Input Validator",
+            "type": "required",
+            "field": "message",
+            "rules": [
+                { "type": "required", "message": "Message is required" },
+                { "type": "length", "value": { "min": 1, "max": 160 }, "message": "Message must be 1-160 characters" }
+            ]
+        },
+        "user_permissions": {
+            "id": "user_permissions",
+            "name": "User Permissions Validator",
+            "type": "required",
+            "field": "role",
+            "rules": [
+                { "type": "required", "message": "User role required" }
+            ]
+        }
+    },
+    "workflows": [
+        {
+            "id": "auth_subworkflow",
+            "name": "Authentication Sub-Workflow",
+            "description": "Handle user authentication and authorization",
+            "version": "1.0.0",
+            "nodes": [
+                {
+                    "id": "validate_credentials",
+                    "name": "Validate User Credentials",
+                    "type": "function",
+                    "description": "Check username and password",
+                    "function": "authenticate_user"
+                },
+                {
+                    "id": "check_permissions",
+                    "name": "Check SMS Permissions",
+                    "type": "validator",
+                    "description": "Validate user has SMS sending permissions",
+                    "config": { "validator": "user_permissions" }
+                }
+            ],
+            "edges": [
+                { "id": "creds_to_perms", "from": "validate_credentials", "to": "check_permissions" }
+            ],
+            "variables": { "username": "", "password": "", "user_role": "" },
+            "options": { "async": false, "timeout": "10s" }
+        },
+        {
+            "id": "provider_selection_subworkflow",
+            "name": "SMS Provider Selection Sub-Workflow",
+            "description": "Select optimal SMS provider based on country, cost, and message requirements",
+            "version": "1.0.0",
+            "nodes": [
+                {
+                    "id": "extract_country",
+                    "name": "Extract Country from Phone",
+                    "type": "function",
+                    "description": "Parse country code from phone number",
+                    "function": "extract_country_code"
+                },
+                {
+                    "id": "analyze_message",
+                    "name": "Analyze Message Requirements",
+                    "type": "function",
+                    "description": "Analyze message length and content requirements",
+                    "function": "analyze_message_requirements"
+                },
+                {
+                    "id": "calculate_costs",
+                    "name": "Calculate Provider Costs",
+                    "type": "function",
+                    "description": "Calculate cost for each provider based on country and message count",
+                    "function": "calculate_provider_costs"
+                },
+                {
+                    "id": "select_optimal_provider",
+                    "name": "Select Optimal Provider",
+                    "type": "function",
+                    "description": "Choose provider with best cost/reliability ratio",
+                    "function": "select_optimal_provider"
+                }
+            ],
+            "edges": [
+                { "id": "extract_to_analyze", "from": "extract_country", "to": "analyze_message" },
+                { "id": "analyze_to_calculate", "from": "analyze_message", "to": "calculate_costs" },
+                { "id": "calculate_to_select", "from": "calculate_costs", "to": "select_optimal_provider" }
+            ],
+            "variables": { "recipients": [ ], "message": "", "country_codes": [ ], "selected_provider": "" },
+            "options": { "async": false, "timeout": "15s" }
+        },
+        {
+            "id": "sms_workflow",
+            "name": "Main SMS Sending Workflow",
+            "description": "Complete SMS workflow using authentication and provider selection sub-workflows",
+            "version": "2.0.0",
+            "nodes": [
+                {
+                    "id": "authenticate",
+                    "name": "User Authentication",
+                    "type": "subworkflow",
+                    "description": "Authenticate user using auth sub-workflow",
+                    "sub_workflow": "auth_subworkflow",
+                    "input_mapping": { "username": "username", "password": "password" },
+                    "output_mapping": { "auth_token": "token", "user_info": "user" }
+                },
+                {
+                    "id": "validate_input",
+                    "name": "Validate SMS Input",
+                    "type": "validator",
+                    "description": "Validate SMS message and recipients",
+                    "config": { "validator": "sms_input" }
+                },
+                {
+                    "id": "select_provider",
+                    "name": "Select SMS Provider",
+                    "type": "subworkflow",
+                    "description": "Select optimal provider using provider selection sub-workflow",
+                    "sub_workflow": "provider_selection_subworkflow",
+                    "input_mapping": { "recipients": "recipients", "message": "message" },
+                    "output_mapping": { "provider": "selected_provider", "cost": "estimated_cost" }
+                },
+                {
+                    "id": "send_sms",
+                    "name": "Send SMS",
+                    "type": "function",
+                    "description": "Send SMS via selected provider",
+                    "function": "send_sms"
+                },
+                {
+                    "id": "log_result",
+                    "name": "Log SMS Result",
+                    "type": "function",
+                    "description": "Log SMS sending result with cost and provider info",
+                    "function": "log_sms_result"
+                }
+            ],
+            "edges": [
+                { "id": "auth_to_validate", "from": "authenticate", "to": "validate_input" },
+                { "id": "validate_to_select", "from": "validate_input", "to": "select_provider" },
+                { "id": "select_to_send", "from": "select_provider", "to": "send_sms" },
+                { "id": "send_to_log", "from": "send_sms", "to": "log_result" }
+            ],
+            "variables": { "username": "", "password": "", "recipients": [ ], "message": "", "provider": "", "cost": 0 },
+            "options": { "async": false, "timeout": "60s", "retry": { "max_attempts": 3, "delay": "5s", "backoff_type": "exponential" } }
+        }
+    ],
+    "routes": [
+        {
+            "id": "login_page",
+            "method": "GET",
+            "path": "/login",
+            "description": "Login page",
+            "handler": { "type": "template", "target": "login_page" },
+            "response": { "type": "html" }
+        },
+        {
+            "id": "auth_login",
+            "method": "POST",
+            "path": "/auth/login",
+            "description": "User authentication endpoint",
+            "handler": { "type": "function", "target": "authenticate_user" },
+            "response": { "type": "json" }
+        },
+        {
+            "id": "sms_page",
+            "method": "GET",
+            "path": "/sms",
+            "description": "SMS workflow interface",
+            "handler": { "type": "template", "target": "sms_page" },
+            "response": { "type": "html" }
+        },
+        {
+            "id": "sms_send",
+            "method": "POST",
+            "path": "/api/sms/send",
+            "description": "Execute SMS workflow",
+            "handler": { "type": "workflow", "target": "sms_workflow" },
+            "response": { "type": "json" }
+        }
+    ]
+}

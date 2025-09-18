@@ -2,6 +2,7 @@ package main
 
 import (
 	"github.com/gofiber/fiber/v2"
+	"github.com/oarkflow/mq/workflow"
 )
 
 // AppConfiguration represents the complete JSON configuration for an application
@@ -27,213 +28,250 @@ type AppMetadata struct {
 
 // RouteConfig defines HTTP routes
 type RouteConfig struct {
-	ID          string                 `json:"id"`
-	Method      string                 `json:"method"`
-	Path        string                 `json:"path"`
-	Description string                 `json:"description"`
-	Middleware  []string               `json:"middleware"`
-	Handler     HandlerConfig          `json:"handler"`
-	Auth        *AuthConfig            `json:"auth,omitempty"`
-	Response    ResponseConfig         `json:"response"`
-	Parameters  map[string]interface{} `json:"parameters,omitempty"`
+	Path       string            `json:"path"`
+	Method     string            `json:"method"`
+	Handler    HandlerConfig     `json:"handler"`
+	Middleware []string          `json:"middleware,omitempty"`
+	Template   string            `json:"template,omitempty"`
+	Variables  map[string]string `json:"variables,omitempty"`
+	Auth       *AuthConfig       `json:"auth,omitempty"`
+	Response   *ResponseConfig   `json:"response,omitempty"`
 }
 
-// HandlerConfig defines route handler behavior
+// ResponseConfig defines response handling
+type ResponseConfig struct {
+	Type     string `json:"type"` // "json", "html", "text"
+	Template string `json:"template,omitempty"`
+}
+
+// HandlerConfig defines how to handle a route
 type HandlerConfig struct {
-	Type       string                 `json:"type"` // "template", "workflow", "function", "redirect", "static"
-	Target     string                 `json:"target"`
-	Input      map[string]interface{} `json:"input,omitempty"`
-	Transform  []TransformConfig      `json:"transform,omitempty"`
-	Conditions []ConditionConfig      `json:"conditions,omitempty"`
+	Type           string                 `json:"type"` // "workflow", "template", "function", "redirect"
+	Target         string                 `json:"target"`
+	Input          map[string]interface{} `json:"input,omitempty"`
+	Output         map[string]interface{} `json:"output,omitempty"`
+	ErrorHandling  *ErrorHandlingConfig   `json:"error_handling,omitempty"`
+	Authentication *AuthConfig            `json:"authentication,omitempty"`
+	Validation     []string               `json:"validation,omitempty"`
 }
 
-// MiddlewareConfig defines middleware behavior
+// ErrorHandlingConfig defines error handling behavior
+type ErrorHandlingConfig struct {
+	Retry      *RetryConfig `json:"retry,omitempty"`
+	Fallback   string       `json:"fallback,omitempty"`
+	StatusCode int          `json:"status_code,omitempty"`
+	Message    string       `json:"message,omitempty"`
+}
+
+// RetryConfig defines retry behavior
+type RetryConfig struct {
+	MaxAttempts int    `json:"max_attempts"`
+	Delay       string `json:"delay"`
+	Backoff     string `json:"backoff,omitempty"`
+}
+
+// AuthConfig defines authentication requirements
+type AuthConfig struct {
+	Required bool     `json:"required"`
+	Type     string   `json:"type,omitempty"`
+	Roles    []string `json:"roles,omitempty"`
+	Scopes   []string `json:"scopes,omitempty"`
+	Redirect string   `json:"redirect,omitempty"`
+}
+
+// MiddlewareConfig defines middleware
 type MiddlewareConfig struct {
-	ID         string                 `json:"id"`
-	Name       string                 `json:"name"`
-	Type       string                 `json:"type"` // "auth", "cors", "logging", "ratelimit", "custom"
-	Priority   int                    `json:"priority"`
-	Enabled    bool                   `json:"enabled"`
-	Config     map[string]interface{} `json:"config"`
-	Conditions []ConditionConfig      `json:"conditions,omitempty"`
-	Functions  []string               `json:"functions,omitempty"`
+	ID        string                 `json:"id"`
+	Name      string                 `json:"name"`
+	Type      string                 `json:"type"`
+	Priority  int                    `json:"priority"`
+	Config    map[string]interface{} `json:"config,omitempty"`
+	Functions []string               `json:"functions,omitempty"`
+	Enabled   bool                   `json:"enabled"`
 }
 
-// TemplateConfig defines HTML templates
+// TemplateConfig defines templates
 type TemplateConfig struct {
-	ID         string                 `json:"id"`
-	Name       string                 `json:"name"`
-	Type       string                 `json:"type"` // "html", "json", "xml", "text"
-	Template   string                 `json:"template"`
-	Layout     string                 `json:"layout,omitempty"`
-	Partials   []string               `json:"partials,omitempty"`
-	Data       map[string]interface{} `json:"data,omitempty"`
-	Scripts    []ScriptConfig         `json:"scripts,omitempty"`
-	Styles     []StyleConfig          `json:"styles,omitempty"`
-	Components []ComponentConfig      `json:"components,omitempty"`
+	Type         string                 `json:"type"` // "html", "text", "json"
+	Content      string                 `json:"content,omitempty"`
+	Template     string                 `json:"template,omitempty"` // Alternative field name for content
+	File         string                 `json:"file,omitempty"`
+	Variables    map[string]interface{} `json:"variables,omitempty"`
+	Data         map[string]interface{} `json:"data,omitempty"`
+	Partials     map[string]string      `json:"partials,omitempty"`
+	Helpers      []string               `json:"helpers,omitempty"`
+	CacheEnabled bool                   `json:"cache_enabled"`
 }
 
-// WorkflowConfig defines workflow nodes and execution
+// WorkflowConfig defines workflows
 type WorkflowConfig struct {
-	ID          string                 `json:"id"`
-	Name        string                 `json:"name"`
-	Description string                 `json:"description"`
-	Version     string                 `json:"version"`
-	Nodes       []NodeConfig           `json:"nodes"`
-	Edges       []EdgeConfig           `json:"edges"`
-	Variables   map[string]interface{} `json:"variables"`
-	Triggers    []TriggerConfig        `json:"triggers"`
-	Options     ExecutionOptions       `json:"options"`
+	ID           string                 `json:"id"`
+	Name         string                 `json:"name"`
+	Description  string                 `json:"description,omitempty"`
+	Version      string                 `json:"version,omitempty"`
+	Nodes        []NodeConfig           `json:"nodes"`
+	Edges        []EdgeConfig           `json:"edges"`
+	Variables    map[string]interface{} `json:"variables,omitempty"`
+	Triggers     []TriggerConfig        `json:"triggers,omitempty"`
+	SubWorkflows []SubWorkflowConfig    `json:"sub_workflows,omitempty"`
+	JSONSchema   *JSONSchemaConfig      `json:"json_schema,omitempty"`
 }
 
-// NodeConfig defines workflow node behavior
+// NodeConfig defines workflow nodes
 type NodeConfig struct {
+	ID            string                 `json:"id"`
+	Type          string                 `json:"type"`
+	Name          string                 `json:"name"`
+	Description   string                 `json:"description,omitempty"`
+	Function      string                 `json:"function,omitempty"`
+	SubWorkflow   string                 `json:"sub_workflow,omitempty"`
+	Input         map[string]interface{} `json:"input,omitempty"`
+	Output        map[string]interface{} `json:"output,omitempty"`
+	InputMapping  map[string]interface{} `json:"input_mapping,omitempty"`
+	OutputMapping map[string]interface{} `json:"output_mapping,omitempty"`
+	Config        map[string]interface{} `json:"config,omitempty"`
+	Conditions    []ConditionConfig      `json:"conditions,omitempty"`
+	ErrorHandling *ErrorHandlingConfig   `json:"error_handling,omitempty"`
+	Timeout       string                 `json:"timeout,omitempty"`
+	Retry         *RetryConfig           `json:"retry,omitempty"`
+}
+
+// EdgeConfig defines workflow edges
+type EdgeConfig struct {
+	ID          string            `json:"id"`
+	From        string            `json:"from"`
+	To          string            `json:"to"`
+	Condition   string            `json:"condition,omitempty"`
+	Variables   map[string]string `json:"variables,omitempty"`
+	Transform   string            `json:"transform,omitempty"`
+	Description string            `json:"description,omitempty"`
+}
+
+// ConditionConfig defines conditional logic
+type ConditionConfig struct {
+	Field    string      `json:"field"`
+	Operator string      `json:"operator"`
+	Value    interface{} `json:"value"`
+	Logic    string      `json:"logic,omitempty"` // "AND", "OR"
+}
+
+// TriggerConfig defines workflow triggers
+type TriggerConfig struct {
+	Type       string                 `json:"type"` // "http", "cron", "event"
+	Config     map[string]interface{} `json:"config"`
+	Enabled    bool                   `json:"enabled"`
+	Conditions []ConditionConfig      `json:"conditions,omitempty"`
+}
+
+// SubWorkflowConfig defines sub-workflow mappings
+type SubWorkflowConfig struct {
+	ID            string                 `json:"id"`
+	WorkflowID    string                 `json:"workflow_id"`
+	InputMapping  map[string]interface{} `json:"input_mapping,omitempty"`
+	OutputMapping map[string]interface{} `json:"output_mapping,omitempty"`
+}
+
+// JSONSchemaConfig defines JSON schema validation
+type JSONSchemaConfig struct {
+	Input  map[string]interface{} `json:"input,omitempty"`
+	Output map[string]interface{} `json:"output,omitempty"`
+}
+
+// FunctionConfig defines custom functions
+type FunctionConfig struct {
 	ID          string                 `json:"id"`
 	Name        string                 `json:"name"`
-	Type        string                 `json:"type"` // "function", "http", "template", "validator", "transformer", "condition", "loop", "parallel"
-	Description string                 `json:"description"`
-	Function    string                 `json:"function,omitempty"`
-	Input       map[string]interface{} `json:"input,omitempty"`
-	Output      map[string]interface{} `json:"output,omitempty"`
+	Description string                 `json:"description,omitempty"`
+	Type        string                 `json:"type"` // "builtin", "custom", "external", "http"
+	Handler     string                 `json:"handler,omitempty"`
+	Method      string                 `json:"method,omitempty"`  // For HTTP functions
+	URL         string                 `json:"url,omitempty"`     // For HTTP functions
+	Headers     map[string]string      `json:"headers,omitempty"` // For HTTP functions
+	Code        string                 `json:"code,omitempty"`    // For custom code functions
+	Parameters  []ParameterConfig      `json:"parameters,omitempty"`
+	Returns     []ParameterConfig      `json:"returns,omitempty"`
 	Config      map[string]interface{} `json:"config,omitempty"`
-	Conditions  []ConditionConfig      `json:"conditions,omitempty"`
-	Retry       *RetryConfig           `json:"retry,omitempty"`
+	Async       bool                   `json:"async"`
 	Timeout     string                 `json:"timeout,omitempty"`
 }
 
-// EdgeConfig defines connections between nodes
-type EdgeConfig struct {
-	ID         string            `json:"id"`
-	From       string            `json:"from"`
-	To         string            `json:"to"`
-	Conditions []ConditionConfig `json:"conditions,omitempty"`
-	Transform  *TransformConfig  `json:"transform,omitempty"`
-}
-
-// FunctionConfig defines reusable functions
-type FunctionConfig struct {
-	ID         string                 `json:"id"`
-	Name       string                 `json:"name"`
-	Type       string                 `json:"type"` // "js", "expression", "http", "sql", "template"
-	Code       string                 `json:"code,omitempty"`
-	URL        string                 `json:"url,omitempty"`
-	Method     string                 `json:"method,omitempty"`
-	Headers    map[string]string      `json:"headers,omitempty"`
-	Body       string                 `json:"body,omitempty"`
-	Query      string                 `json:"query,omitempty"`
-	Parameters map[string]interface{} `json:"parameters,omitempty"`
-	Response   ResponseConfig         `json:"response,omitempty"`
+// ParameterConfig defines function parameters
+type ParameterConfig struct {
+	Name        string      `json:"name"`
+	Type        string      `json:"type"`
+	Required    bool        `json:"required"`
+	Default     interface{} `json:"default,omitempty"`
+	Description string      `json:"description,omitempty"`
+	Validation  []string    `json:"validation,omitempty"`
 }
 
 // ValidatorConfig defines validation rules
 type ValidatorConfig struct {
-	ID         string                 `json:"id"`
-	Name       string                 `json:"name"`
-	Type       string                 `json:"type"` // "required", "email", "phone", "regex", "length", "range", "custom"
-	Field      string                 `json:"field"`
-	Rules      []ValidationRule       `json:"rules"`
-	Message    string                 `json:"message"`
-	Parameters map[string]interface{} `json:"parameters,omitempty"`
+	ID         string            `json:"id"`
+	Type       string            `json:"type"` // "jsonschema", "custom", "regex"
+	Field      string            `json:"field,omitempty"`
+	Schema     interface{}       `json:"schema,omitempty"`
+	Rules      []ValidationRule  `json:"rules,omitempty"`
+	Messages   map[string]string `json:"messages,omitempty"`
+	StrictMode bool              `json:"strict_mode"`
+	AllowEmpty bool              `json:"allow_empty"`
 }
 
-// Supporting types
-type AuthConfig struct {
-	Required    bool                   `json:"required"`
-	Type        string                 `json:"type"` // "session", "token", "basic", "oauth"
-	Provider    string                 `json:"provider,omitempty"`
-	Redirect    string                 `json:"redirect,omitempty"`
-	Permissions []string               `json:"permissions,omitempty"`
-	Config      map[string]interface{} `json:"config,omitempty"`
-}
-
-type ResponseConfig struct {
-	Type        string                 `json:"type"` // "json", "html", "redirect", "file", "stream"
-	Template    string                 `json:"template,omitempty"`
-	Data        map[string]interface{} `json:"data,omitempty"`
-	Status      int                    `json:"status,omitempty"`
-	Headers     map[string]string      `json:"headers,omitempty"`
-	ContentType string                 `json:"content_type,omitempty"`
-}
-
-type TransformConfig struct {
-	Type       string                 `json:"type"` // "map", "filter", "reduce", "expression", "template"
-	Expression string                 `json:"expression,omitempty"`
-	Template   string                 `json:"template,omitempty"`
-	Source     string                 `json:"source,omitempty"`
-	Target     string                 `json:"target,omitempty"`
-	Function   string                 `json:"function,omitempty"`
-	Parameters map[string]interface{} `json:"parameters,omitempty"`
-}
-
-type ConditionConfig struct {
-	Type       string      `json:"type"` // "equals", "contains", "exists", "expression", "function"
-	Field      string      `json:"field,omitempty"`
-	Value      interface{} `json:"value,omitempty"`
-	Expression string      `json:"expression,omitempty"`
-	Function   string      `json:"function,omitempty"`
-	Operator   string      `json:"operator,omitempty"` // "and", "or", "not"
-}
-
-type ScriptConfig struct {
-	Type    string `json:"type"` // "inline", "file", "url"
-	Content string `json:"content"`
-	Src     string `json:"src,omitempty"`
-}
-
-type StyleConfig struct {
-	Type    string `json:"type"` // "inline", "file", "url"
-	Content string `json:"content"`
-	Href    string `json:"href,omitempty"`
-}
-
-type ComponentConfig struct {
-	ID       string                 `json:"id"`
-	Type     string                 `json:"type"`
-	Template string                 `json:"template"`
-	Data     map[string]interface{} `json:"data,omitempty"`
-	Props    map[string]interface{} `json:"props,omitempty"`
-}
-
-type TriggerConfig struct {
-	Type       string            `json:"type"` // "http", "schedule", "event", "webhook"
-	Schedule   string            `json:"schedule,omitempty"`
-	Event      string            `json:"event,omitempty"`
-	Path       string            `json:"path,omitempty"`
-	Method     string            `json:"method,omitempty"`
+// ValidationRule defines individual validation rules
+type ValidationRule struct {
+	Field      string            `json:"field"`
+	Type       string            `json:"type"`
+	Required   bool              `json:"required"`
+	Min        interface{}       `json:"min,omitempty"`
+	Max        interface{}       `json:"max,omitempty"`
+	Pattern    string            `json:"pattern,omitempty"`
+	CustomRule string            `json:"custom_rule,omitempty"`
+	Message    string            `json:"message,omitempty"`
 	Conditions []ConditionConfig `json:"conditions,omitempty"`
 }
 
-type ExecutionOptions struct {
-	Async    bool         `json:"async"`
-	Timeout  string       `json:"timeout,omitempty"`
-	Retry    *RetryConfig `json:"retry,omitempty"`
-	Priority string       `json:"priority,omitempty"`
-	MaxNodes int          `json:"max_nodes,omitempty"`
+// Provider configuration for SMS/communication services
+type ProviderConfig struct {
+	ID          string                 `json:"id"`
+	Name        string                 `json:"name"`
+	Type        string                 `json:"type"` // "sms", "email", "push"
+	Enabled     bool                   `json:"enabled"`
+	Priority    int                    `json:"priority"`
+	Config      map[string]interface{} `json:"config"`
+	Countries   []string               `json:"countries,omitempty"`
+	RateLimit   *RateLimitConfig       `json:"rate_limit,omitempty"`
+	Costs       map[string]float64     `json:"costs,omitempty"`
+	Features    []string               `json:"features,omitempty"`
+	Reliability float64                `json:"reliability"`
 }
 
-type RetryConfig struct {
-	MaxAttempts int    `json:"max_attempts"`
-	Delay       string `json:"delay"`
-	BackoffType string `json:"backoff_type"` // "fixed", "exponential", "linear"
+// RateLimitConfig defines rate limiting
+type RateLimitConfig struct {
+	RequestsPerSecond int `json:"requests_per_second"`
+	BurstSize         int `json:"burst_size"`
+	WindowSize        int `json:"window_size"`
 }
 
-type ValidationRule struct {
-	Type       string                 `json:"type"`
-	Value      interface{}            `json:"value,omitempty"`
-	Message    string                 `json:"message"`
-	Parameters map[string]interface{} `json:"parameters,omitempty"`
+// Country configuration for routing
+type CountryConfig struct {
+	Code        string            `json:"code"`
+	Name        string            `json:"name"`
+	Providers   []string          `json:"providers"`
+	DefaultRate float64           `json:"default_rate"`
+	Regulations map[string]string `json:"regulations,omitempty"`
 }
 
 // Runtime types for the JSON engine
 type JSONEngine struct {
-	app        *fiber.App
-	config     *AppConfiguration
-	templates  map[string]*Template
-	workflows  map[string]*Workflow
-	functions  map[string]*Function
-	validators map[string]*Validator
-	middleware map[string]*Middleware
-	data       map[string]interface{}
+	app            *fiber.App
+	workflowEngine *workflow.WorkflowEngine
+	config         *AppConfiguration
+	templates      map[string]*Template
+	workflows      map[string]*Workflow
+	functions      map[string]*Function
+	validators     map[string]*Validator
+	middleware     map[string]*Middleware
+	data           map[string]interface{}
 }
 
 type Template struct {

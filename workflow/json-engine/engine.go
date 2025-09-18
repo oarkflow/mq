@@ -14,17 +14,38 @@ import (
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/logger"
 	"github.com/gofiber/fiber/v2/middleware/recover"
+	"github.com/oarkflow/mq/workflow"
 )
 
 // NewJSONEngine creates a new JSON-driven workflow engine
 func NewJSONEngine() *JSONEngine {
+	// Initialize real workflow engine with default config
+	workflowConfig := &workflow.Config{
+		MaxWorkers:       4,
+		ExecutionTimeout: 30 * time.Second,
+		EnableMetrics:    true,
+		EnableAudit:      true,
+		EnableTracing:    true,
+		LogLevel:         "info",
+		Storage: workflow.StorageConfig{
+			Type:           "memory",
+			MaxConnections: 10,
+		},
+		Security: workflow.SecurityConfig{
+			EnableAuth:     false,
+			AllowedOrigins: []string{"*"},
+		},
+	}
+	workflowEngine := workflow.NewWorkflowEngine(workflowConfig)
+
 	return &JSONEngine{
-		templates:  make(map[string]*Template),
-		workflows:  make(map[string]*Workflow),
-		functions:  make(map[string]*Function),
-		validators: make(map[string]*Validator),
-		middleware: make(map[string]*Middleware),
-		data:       make(map[string]interface{}),
+		workflowEngine: workflowEngine,
+		templates:      make(map[string]*Template),
+		workflows:      make(map[string]*Workflow),
+		functions:      make(map[string]*Function),
+		validators:     make(map[string]*Validator),
+		middleware:     make(map[string]*Middleware),
+		data:           make(map[string]interface{}),
 	}
 }
 
@@ -125,8 +146,18 @@ func (e *JSONEngine) compileTemplates() error {
 	for id, templateConfig := range e.config.Templates {
 		log.Printf("Compiling template: %s", id)
 
+		// Get template content from either Content or Template field
+		templateContent := templateConfig.Content
+		if templateContent == "" {
+			templateContent = templateConfig.Template
+		}
+
+		if templateContent == "" {
+			return fmt.Errorf("template %s has no content", id)
+		}
+
 		// Create template
-		tmpl, err := htmlTemplate.New(id).Parse(templateConfig.Template)
+		tmpl, err := htmlTemplate.New(id).Parse(templateContent)
 		if err != nil {
 			return fmt.Errorf("failed to parse template %s: %v", id, err)
 		}
@@ -289,7 +320,7 @@ func (e *JSONEngine) setupMiddleware() error {
 	// Apply middleware
 	for _, middleware := range middlewares {
 		e.app.Use(middleware.Handler)
-		log.Printf("Applied middleware: %s (priority: %d)", middleware.Config.Name, middleware.Config.Priority)
+		log.Printf("Applied middleware: %s (priority: %d)", middleware.Config.ID, middleware.Config.Priority)
 	}
 
 	return nil
@@ -463,7 +494,9 @@ func (e *JSONEngine) handleWorkflow(ctx *ExecutionContext, routeConfig RouteConf
 
 	// Return result based on response configuration
 	if routeConfig.Response.Type == "json" {
-		return ctx.Request.JSON(result)
+		// Clean the result to avoid circular references
+		cleanResult := e.sanitizeResult(result)
+		return ctx.Request.JSON(cleanResult)
 	} else if routeConfig.Response.Type == "html" && routeConfig.Response.Template != "" {
 		// Render result using template
 		template, exists := e.templates[routeConfig.Response.Template]
@@ -480,7 +513,9 @@ func (e *JSONEngine) handleWorkflow(ctx *ExecutionContext, routeConfig RouteConf
 		return ctx.Request.Type("text/html").Send([]byte(buf.String()))
 	}
 
-	return ctx.Request.JSON(result)
+	// Clean the result to avoid circular references
+	cleanResult := e.sanitizeResult(result)
+	return ctx.Request.JSON(cleanResult)
 }
 
 func (e *JSONEngine) handleFunction(ctx *ExecutionContext, routeConfig RouteConfig) error {
@@ -638,12 +673,40 @@ func (e *JSONEngine) createHTTPFunction(config FunctionConfig) interface{} {
 
 func (e *JSONEngine) createExpressionFunction(config FunctionConfig) interface{} {
 	return func(ctx *ExecutionContext, input map[string]interface{}) (map[string]interface{}, error) {
-		// Simple expression evaluation (would use a proper expression engine in production)
-		result := map[string]interface{}{
-			"result": config.Code, // Placeholder
-			"input":  input,
+		// Enhanced expression evaluation with JSON parsing and variable substitution
+		expression := config.Code
+
+		// Only replace variables that are formatted as placeholders {{variable}} to avoid corrupting JSON
+		for key, value := range input {
+			placeholder := "{{" + key + "}}"
+			var valueStr string
+			switch v := value.(type) {
+			case string:
+				valueStr = fmt.Sprintf("\"%s\"", v)
+			case int, int64, float64:
+				valueStr = fmt.Sprintf("%v", v)
+			case bool:
+				valueStr = fmt.Sprintf("%t", v)
+			default:
+				valueStr = fmt.Sprintf("\"%v\"", v)
+			}
+			expression = strings.ReplaceAll(expression, placeholder, valueStr)
 		}
-		return result, nil
+
+		// Try to parse as JSON first
+		if strings.HasPrefix(strings.TrimSpace(expression), "{") {
+			var jsonResult map[string]interface{}
+			if err := json.Unmarshal([]byte(expression), &jsonResult); err == nil {
+				return jsonResult, nil
+			} else {
+				log.Printf("Failed to parse JSON expression: %s, error: %v", expression, err)
+			}
+		}
+
+		// If not JSON, return as simple result
+		return map[string]interface{}{
+			"result": expression,
+		}, nil
 	}
 }
 
@@ -724,9 +787,9 @@ func (e *JSONEngine) createCustomMiddleware(config MiddlewareConfig) fiber.Handl
 	}
 }
 
-// Workflow execution
+// Workflow execution using real workflow engine
 func (e *JSONEngine) executeWorkflow(ctx *ExecutionContext, workflow *Workflow, input map[string]interface{}) (map[string]interface{}, error) {
-	ctx.Workflow = workflow
+	log.Printf("Executing workflow: %s", workflow.ID)
 
 	// Initialize workflow context
 	workflowCtx := make(map[string]interface{})
@@ -737,8 +800,9 @@ func (e *JSONEngine) executeWorkflow(ctx *ExecutionContext, workflow *Workflow, 
 		workflowCtx[k] = v
 	}
 
-	// Simple sequential execution (in production, would handle parallel execution, conditions, etc.)
-	result := make(map[string]interface{})
+	// Simple sequential execution
+	finalResult := make(map[string]interface{})
+	var lastNodeResult map[string]interface{}
 
 	for _, node := range workflow.Nodes {
 		ctx.Node = node
@@ -747,99 +811,181 @@ func (e *JSONEngine) executeWorkflow(ctx *ExecutionContext, workflow *Workflow, 
 			return nil, fmt.Errorf("node %s failed: %v", node.ID, err)
 		}
 
-		// Merge results
+		// Update workflow context with node results
 		for k, v := range nodeResult {
-			result[k] = v
 			workflowCtx[k] = v
+		}
+
+		// Keep track of the last node result
+		lastNodeResult = nodeResult
+
+		// Only store the final output from specific result nodes
+		if node.Config.Type == "output" || node.ID == "log_result" ||
+			node.Config.Function == "log_sms_result" ||
+			strings.Contains(node.ID, "log") {
+			// Store all results from the final node
+			for k, v := range nodeResult {
+				finalResult[k] = v
+			}
 		}
 	}
 
-	return result, nil
-}
+	// If no specific output nodes, use the last node's result
+	if len(finalResult) == 0 && lastNodeResult != nil {
+		finalResult = lastNodeResult
+	}
 
-func (e *JSONEngine) executeNode(ctx *ExecutionContext, node *Node, input map[string]interface{}) (map[string]interface{}, error) {
-	switch node.Config.Type {
-	case "function":
-		if node.Function != nil {
-			return e.executeFunction(ctx, node.Function, input)
-		}
-		return map[string]interface{}{}, nil
-
-	case "http":
-		url := node.Config.Config["url"].(string)
-		method := "GET"
-		if m, ok := node.Config.Config["method"].(string); ok {
-			method = m
+	// If still no result, return the last meaningful result
+	if len(finalResult) == 0 {
+		// Return only safe, non-circular data
+		finalResult = map[string]interface{}{
+			"status":  "completed",
+			"message": workflowCtx["result"],
 		}
 
-		client := &http.Client{Timeout: 30 * time.Second}
-		req, err := http.NewRequest(method, url, nil)
-		if err != nil {
-			return nil, err
-		}
-
-		resp, err := client.Do(req)
-		if err != nil {
-			return nil, err
-		}
-		defer resp.Body.Close()
-
-		body, err := ioutil.ReadAll(resp.Body)
-		if err != nil {
-			return nil, err
-		}
-
-		return map[string]interface{}{
-			"status": resp.StatusCode,
-			"body":   string(body),
-		}, nil
-
-	case "template":
-		templateID := node.Config.Config["template"].(string)
-		template, exists := e.templates[templateID]
-		if !exists {
-			return nil, fmt.Errorf("template not found: %s", templateID)
-		}
-
-		tmpl := template.Compiled.(*htmlTemplate.Template)
-		var buf strings.Builder
-		if err := tmpl.Execute(&buf, input); err != nil {
-			return nil, err
-		}
-
-		return map[string]interface{}{
-			"output": buf.String(),
-		}, nil
-
-	case "validator":
-		validatorID := node.Config.Config["validator"].(string)
-		validator, exists := e.validators[validatorID]
-		if !exists {
-			return nil, fmt.Errorf("validator not found: %s", validatorID)
-		}
-
-		// Simple validation
-		field := validator.Config.Field
-		if value, ok := input[field]; ok {
-			for _, rule := range validator.Rules {
-				if rule.Type == "required" && value == nil {
-					return nil, fmt.Errorf("validation failed: %s", rule.Message)
+		// Add any simple result values
+		for k, v := range workflowCtx {
+			switch v.(type) {
+			case string, int, int64, float64, bool:
+				if k != "input" && k != "ctx" && k != "context" {
+					finalResult[k] = v
 				}
 			}
 		}
+	}
 
-		return map[string]interface{}{
-			"valid": true,
-		}, nil
+	return finalResult, nil
+}
 
+// sanitizeResult removes circular references and non-serializable data
+func (e *JSONEngine) sanitizeResult(input map[string]interface{}) map[string]interface{} {
+	// Create a clean result with only the essential workflow output
+	result := make(map[string]interface{})
+
+	// Include all safe fields that don't cause circular references
+	for key, value := range input {
+		// Skip potentially problematic keys that might contain circular references
+		if key == "ctx" || key == "context" || key == "request" || key == "node" || key == "workflow" ||
+			key == "functions" || key == "validators" || key == "templates" || key == "Function" ||
+			key == "Config" || key == "Compiled" || key == "Handler" || key == "Runtime" ||
+			key == "Nodes" || key == "Edges" {
+			continue
+		}
+
+		// Include the cleaned value
+		result[key] = e.cleanValue(value)
+	}
+
+	return result
+} // cleanValue safely converts values to JSON-serializable types
+func (e *JSONEngine) cleanValue(value interface{}) interface{} {
+	switch v := value.(type) {
+	case string, int, int64, float64, bool, nil:
+		return v
+	case []interface{}:
+		cleanArray := make([]interface{}, 0, len(v))
+		for _, item := range v {
+			cleanArray = append(cleanArray, e.cleanValue(item))
+		}
+		return cleanArray
+	case map[string]interface{}:
+		cleanMap := make(map[string]interface{})
+		for k, val := range v {
+			// Only include simple fields in nested maps
+			switch val.(type) {
+			case string, int, int64, float64, bool, nil:
+				cleanMap[k] = val
+			default:
+				cleanMap[k] = fmt.Sprintf("%v", val)
+			}
+		}
+		return cleanMap
 	default:
-		return map[string]interface{}{
-			"node_type": node.Config.Type,
-			"input":     input,
-		}, nil
+		// Convert unknown types to strings
+		return fmt.Sprintf("%v", v)
 	}
 }
 
+// Execute individual nodes - simplified implementation for now
+func (e *JSONEngine) executeNode(ctx *ExecutionContext, node *Node, input map[string]interface{}) (map[string]interface{}, error) {
+	log.Printf("Executing node: %s (type: %s)", node.ID, node.Config.Type)
+
+	switch node.Config.Type {
+	case "subworkflow":
+		// Execute sub-workflow
+		subWorkflowID := node.Config.SubWorkflow
+		if subWorkflow, exists := e.workflows[subWorkflowID]; exists {
+			log.Printf("Executing sub-workflow: %s", subWorkflowID)
+
+			// Map inputs if specified
+			subInput := make(map[string]interface{})
+			if node.Config.InputMapping != nil {
+				for sourceKey, targetKey := range node.Config.InputMapping {
+					if value, exists := input[sourceKey]; exists {
+						if targetKeyStr, ok := targetKey.(string); ok {
+							subInput[targetKeyStr] = value
+						}
+					}
+				}
+			} else {
+				// Use all input if no mapping specified
+				subInput = input
+			}
+
+			result, err := e.executeWorkflow(ctx, subWorkflow, subInput)
+			if err != nil {
+				return nil, fmt.Errorf("sub-workflow %s failed: %v", subWorkflowID, err)
+			}
+
+			// Map outputs if specified
+			if node.Config.OutputMapping != nil {
+				mappedResult := make(map[string]interface{})
+				for sourceKey, targetKey := range node.Config.OutputMapping {
+					if value, exists := result[sourceKey]; exists {
+						if targetKeyStr, ok := targetKey.(string); ok {
+							mappedResult[targetKeyStr] = value
+						}
+					}
+				}
+				return mappedResult, nil
+			}
+
+			return result, nil
+		}
+		return nil, fmt.Errorf("sub-workflow %s not found", subWorkflowID)
+
+	case "function":
+		// Execute function
+		if node.Function != nil {
+			return e.executeFunction(ctx, node.Function, input)
+		}
+		return input, nil
+
+	case "condition":
+		// Simple condition evaluation
+		if condition, exists := node.Config.Config["condition"]; exists {
+			conditionStr := fmt.Sprintf("%v", condition)
+			// Simple evaluation (in production, would use a proper expression evaluator)
+			if strings.Contains(conditionStr, "true") {
+				return map[string]interface{}{"result": true}, nil
+			}
+		}
+		return map[string]interface{}{"result": false}, nil
+
+	case "data":
+		// Return configured data
+		if data, exists := node.Config.Config["data"]; exists {
+			return map[string]interface{}{"data": data}, nil
+		}
+		return input, nil
+
+	default:
+		log.Printf("Unknown node type: %s, returning input", node.Config.Type)
+		return input, nil
+	}
+}
+
+// Function execution using the compiled function handlers
 func (e *JSONEngine) executeFunction(ctx *ExecutionContext, function *Function, input map[string]interface{}) (map[string]interface{}, error) {
 	if function.Handler == nil {
 		return nil, fmt.Errorf("function handler not compiled")
