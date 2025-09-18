@@ -84,7 +84,7 @@ func NewWorkflowEngineAdapter(config *WorkflowEngineAdapterConfig) *WorkflowEngi
 		definitions: make(map[string]*WorkflowDefinition),
 		executions:  make(map[string]*ExecutionResult),
 		stateManager: &WorkflowStateManager{
-			stateStore: make(map[string]interface{}),
+			stateStore: make(map[string]any),
 		},
 	}
 
@@ -184,7 +184,7 @@ func (a *WorkflowEngineAdapter) RegisterWorkflow(ctx context.Context, definition
 	return nil
 }
 
-func (a *WorkflowEngineAdapter) ExecuteWorkflow(ctx context.Context, workflowID string, input map[string]interface{}) (*ExecutionResult, error) {
+func (a *WorkflowEngineAdapter) ExecuteWorkflow(ctx context.Context, workflowID string, input map[string]any) (*ExecutionResult, error) {
 	a.mu.RLock()
 	definition, exists := a.definitions[workflowID]
 	a.mu.RUnlock()
@@ -200,7 +200,7 @@ func (a *WorkflowEngineAdapter) ExecuteWorkflow(ctx context.Context, workflowID 
 		Status:     ExecutionStatusRunning,
 		StartTime:  time.Now(),
 		Input:      input,
-		Output:     make(map[string]interface{}),
+		Output:     make(map[string]any),
 	}
 
 	// Store execution
@@ -251,10 +251,10 @@ func (a *WorkflowEngineAdapter) executeWorkflowAsync(ctx context.Context, execut
 
 		// Update execution with node results
 		if execution.NodeExecutions == nil {
-			execution.NodeExecutions = make(map[string]interface{})
+			execution.NodeExecutions = make(map[string]any)
 		}
 
-		execution.NodeExecutions[node.ID] = map[string]interface{}{
+		execution.NodeExecutions[node.ID] = map[string]any{
 			"status":     "completed",
 			"started_at": time.Now().Add(-time.Millisecond * 100),
 			"ended_at":   time.Now(),
@@ -274,7 +274,7 @@ func (a *WorkflowEngineAdapter) executeWorkflowAsync(ctx context.Context, execut
 		if i == len(definition.Nodes)-1 {
 			// Last node - complete execution
 			execution.Status = ExecutionStatusCompleted
-			execution.Output = map[string]interface{}{
+			execution.Output = map[string]any{
 				"result":         "workflow completed successfully",
 				"nodes_executed": len(definition.Nodes),
 			}

@@ -23,13 +23,13 @@ const (
 
 // WALEntry represents a single entry in the Write-Ahead Log
 type WALEntry struct {
-	ID         string                 `json:"id"`
-	Type       WALEntryType           `json:"type"`
-	Timestamp  time.Time              `json:"timestamp"`
-	SequenceID uint64                 `json:"sequence_id"`
-	Data       json.RawMessage        `json:"data"`
-	Metadata   map[string]interface{} `json:"metadata,omitempty"`
-	Checksum   string                 `json:"checksum"`
+	ID         string          `json:"id"`
+	Type       WALEntryType    `json:"type"`
+	Timestamp  time.Time       `json:"timestamp"`
+	SequenceID uint64          `json:"sequence_id"`
+	Data       json.RawMessage `json:"data"`
+	Metadata   map[string]any  `json:"metadata,omitempty"`
+	Checksum   string          `json:"checksum"`
 }
 
 // WALSegment represents a segment of WAL entries
@@ -188,7 +188,7 @@ func NewWALManager(config *WALConfig, storage WALStorage) *WALManager {
 }
 
 // WriteEntry writes an entry to the WAL
-func (wm *WALManager) WriteEntry(ctx context.Context, entryType WALEntryType, data json.RawMessage, metadata map[string]interface{}) error {
+func (wm *WALManager) WriteEntry(ctx context.Context, entryType WALEntryType, data json.RawMessage, metadata map[string]any) error {
 	entry := WALEntry{
 		ID:         generateID(),
 		Type:       entryType,

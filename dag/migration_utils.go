@@ -41,7 +41,7 @@ func (m *MigrationUtility) ConvertDAGToWorkflow(workflowID, workflowName, versio
 			EnableAudit:   true,
 			EnableMetrics: true,
 		},
-		Metadata:  make(map[string]interface{}),
+		Metadata:  make(map[string]any),
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 		CreatedBy: "migration-utility",
@@ -68,7 +68,7 @@ func (m *MigrationUtility) ConvertDAGToWorkflow(workflowID, workflowName, versio
 				ToNode:   edge.To.ID,
 				Label:    edge.Label,
 				Priority: 1,
-				Metadata: make(map[string]interface{}),
+				Metadata: make(map[string]any),
 			}
 
 			// Add condition for conditional edges
@@ -102,7 +102,7 @@ func (m *MigrationUtility) convertDAGNodeToWorkflowNode(dagNode *Node) WorkflowN
 			X: 0, // Default position - will need to be set by UI
 			Y: 0,
 		},
-		Metadata: make(map[string]interface{}),
+		Metadata: make(map[string]any),
 	}
 
 	// Convert node type
@@ -116,7 +116,7 @@ func (m *MigrationUtility) convertDAGNodeToWorkflowNode(dagNode *Node) WorkflowN
 	// Create basic configuration
 	workflowNode.Config = WorkflowNodeConfig{
 		Variables: make(map[string]string),
-		Custom:    make(map[string]interface{}),
+		Custom:    make(map[string]any),
 	}
 
 	// Add original DAG node information to metadata
@@ -394,7 +394,7 @@ func (m *MigrationUtility) GenerateWorkflowTemplate(name, id string) *WorkflowDe
 			EnableAudit:   true,
 			EnableMetrics: true,
 		},
-		Metadata:  make(map[string]interface{}),
+		Metadata:  make(map[string]any),
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 		CreatedBy: "migration-utility",

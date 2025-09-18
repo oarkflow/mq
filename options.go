@@ -16,9 +16,9 @@ type ThresholdConfig struct {
 }
 
 type MetricsRegistry interface {
-	Register(metricName string, value interface{})
+	Register(metricName string, value any)
 	Increment(metricName string)
-	Get(metricName string) interface{}
+	Get(metricName string) any
 }
 
 type CircuitBreakerConfig struct {

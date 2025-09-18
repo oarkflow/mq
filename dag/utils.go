@@ -161,7 +161,7 @@ func (tm *DAG) GetActivityLogger() *ActivityLogger {
 }
 
 // LogActivity logs an activity entry
-func (tm *DAG) LogActivity(ctx context.Context, level ActivityLevel, activityType ActivityType, message string, details map[string]interface{}) {
+func (tm *DAG) LogActivity(ctx context.Context, level ActivityLevel, activityType ActivityType, message string, details map[string]any) {
 	if tm.activityLogger != nil {
 		tm.activityLogger.LogWithContext(ctx, level, activityType, message, details)
 	}

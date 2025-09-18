@@ -224,7 +224,7 @@ log.Fatal(app.Listen(":3000"))
 ```go
 // Execute workflow programmatically
 ctx := context.Background()
-input := map[string]interface{}{
+input := map[string]any{
     "name":  "John Doe",
     "email": "john@example.com",
 }
@@ -311,7 +311,7 @@ Config: dag.WorkflowNodeConfig{
 
     // Storage processor config
     StorageType: "memory",
-    StorageConfig: map[string]interface{}{...},
+    StorageConfig: map[string]any{...},
 }
 ```
 

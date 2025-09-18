@@ -13,16 +13,16 @@ import (
 type EnhancedValidation interface {
 	Validation
 	// Enhanced methods for workflow integration
-	ValidateWorkflowInput(ctx context.Context, input map[string]interface{}, rules []*dag.WorkflowValidationRule) (ValidationResult, error)
+	ValidateWorkflowInput(ctx context.Context, input map[string]any, rules []*dag.WorkflowValidationRule) (ValidationResult, error)
 	CreateValidationProcessor(rules []*dag.WorkflowValidationRule) (*dag.ValidatorProcessor, error)
 }
 
 // Enhanced validation result for workflow integration
 type ValidationResult struct {
-	Valid   bool                   `json:"valid"`
-	Errors  map[string]string      `json:"errors,omitempty"`
-	Data    map[string]interface{} `json:"data"`
-	Message string                 `json:"message,omitempty"`
+	Valid   bool              `json:"valid"`
+	Errors  map[string]string `json:"errors,omitempty"`
+	Data    map[string]any    `json:"data"`
+	Message string            `json:"message,omitempty"`
 }
 
 // Enhanced DAG Service for workflow engine integration
@@ -42,7 +42,7 @@ type EnhancedDAGService interface {
 	// Workflow engine integration
 	GetWorkflowEngine(dagKey string) *dag.WorkflowEngineManager
 	CreateWorkflowFromHandler(handler EnhancedHandler) (*dag.WorkflowDefinition, error)
-	ExecuteWorkflow(ctx context.Context, workflowID string, input map[string]interface{}) (*dag.ExecutionResult, error)
+	ExecuteWorkflow(ctx context.Context, workflowID string, input map[string]any) (*dag.ExecutionResult, error)
 }
 
 // Enhanced Handler that supports workflow engine features
@@ -113,8 +113,8 @@ type EnhancedEdge struct {
 
 // Workflow processor configurations
 type WorkflowProcessorConfig struct {
-	Type   string                 `json:"type" yaml:"type"`
-	Config map[string]interface{} `json:"config" yaml:"config"`
+	Type   string         `json:"type" yaml:"type"`
+	Config map[string]any `json:"config" yaml:"config"`
 }
 
 type HTMLProcessorConfig struct {
@@ -141,7 +141,7 @@ type AuthProcessorConfig struct {
 
 type ValidatorProcessorConfig struct {
 	ValidationRules []*dag.WorkflowValidationRule `json:"validation_rules" yaml:"validation_rules"`
-	Schema          map[string]interface{}        `json:"schema" yaml:"schema"`
+	Schema          map[string]any                `json:"schema" yaml:"schema"`
 	StrictMode      bool                          `json:"strict_mode" yaml:"strict_mode"`
 }
 
@@ -168,11 +168,11 @@ type NotifyProcessorConfig struct {
 }
 
 type WebhookProcessorConfig struct {
-	ListenPath string                 `json:"listen_path" yaml:"listen_path"`
-	Secret     string                 `json:"secret" yaml:"secret"`
-	Signature  string                 `json:"signature" yaml:"signature"`
-	Transforms map[string]interface{} `json:"transforms" yaml:"transforms"`
-	Timeout    string                 `json:"timeout" yaml:"timeout"`
+	ListenPath string         `json:"listen_path" yaml:"listen_path"`
+	Secret     string         `json:"secret" yaml:"secret"`
+	Signature  string         `json:"signature" yaml:"signature"`
+	Transforms map[string]any `json:"transforms" yaml:"transforms"`
+	Timeout    string         `json:"timeout" yaml:"timeout"`
 }
 
 // Enhanced service manager
@@ -181,7 +181,7 @@ type EnhancedServiceManager interface {
 	Initialize(config *EnhancedServiceConfig) error
 	Start(ctx context.Context) error
 	Stop(ctx context.Context) error
-	Health() map[string]interface{}
+	Health() map[string]any
 
 	// Enhanced DAG management
 	RegisterEnhancedHandler(handler EnhancedHandler) error
@@ -190,7 +190,7 @@ type EnhancedServiceManager interface {
 
 	// Workflow engine integration
 	GetWorkflowEngine() *dag.WorkflowEngineManager
-	ExecuteEnhancedWorkflow(ctx context.Context, key string, input map[string]interface{}) (*dag.ExecutionResult, error)
+	ExecuteEnhancedWorkflow(ctx context.Context, key string, input map[string]any) (*dag.ExecutionResult, error)
 
 	// HTTP integration
 	RegisterHTTPRoutes(app *fiber.App) error

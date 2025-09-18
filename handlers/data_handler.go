@@ -115,14 +115,14 @@ func (h *DataHandler) sortData(data map[string]any) map[string]any {
 		}
 	}
 
-	if dataArray, ok := data["data"].([]interface{}); ok {
+	if dataArray, ok := data["data"].([]any); ok {
 		sortField := h.getSortField()
 		sortOrder := h.getSortOrder() // "asc" or "desc"
 
 		// Convert to slice of maps for sorting
-		var records []map[string]interface{}
+		var records []map[string]any
 		for _, item := range dataArray {
-			if record, ok := item.(map[string]interface{}); ok {
+			if record, ok := item.(map[string]any); ok {
 				records = append(records, record)
 			}
 		}
@@ -139,8 +139,8 @@ func (h *DataHandler) sortData(data map[string]any) map[string]any {
 			return comparison < 0
 		})
 
-		// Convert back to []interface{}
-		var sortedData []interface{}
+		// Convert back to []any
+		var sortedData []any
 		for _, record := range records {
 			sortedData = append(sortedData, record)
 		}
@@ -161,13 +161,13 @@ func (h *DataHandler) deduplicateData(data map[string]any) map[string]any {
 		}
 	}
 
-	if dataArray, ok := data["data"].([]interface{}); ok {
+	if dataArray, ok := data["data"].([]any); ok {
 		dedupeFields := h.getDedupeFields()
 		seen := make(map[string]bool)
-		var uniqueData []interface{}
+		var uniqueData []any
 
 		for _, item := range dataArray {
-			if record, ok := item.(map[string]interface{}); ok {
+			if record, ok := item.(map[string]any); ok {
 				key := h.createDedupeKey(record, dedupeFields)
 				if !seen[key] {
 					seen[key] = true
@@ -281,7 +281,7 @@ func (h *DataHandler) validateFields(data map[string]any) map[string]any {
 		result[key] = value
 	}
 
-	validationResults := make(map[string]interface{})
+	validationResults := make(map[string]any)
 	allValid := true
 
 	for field, rules := range validationRules {
@@ -323,14 +323,14 @@ func (h *DataHandler) pivotData(data map[string]any) map[string]any {
 	// Simplified pivot implementation
 	result := make(map[string]any)
 
-	if dataArray, ok := data["data"].([]interface{}); ok {
+	if dataArray, ok := data["data"].([]any); ok {
 		pivotField := h.getPivotField()
 		valueField := h.getValueField()
 
-		pivoted := make(map[string]interface{})
+		pivoted := make(map[string]any)
 
 		for _, item := range dataArray {
-			if record, ok := item.(map[string]interface{}); ok {
+			if record, ok := item.(map[string]any); ok {
 				if pivotVal, ok := record[pivotField]; ok {
 					if val, ok := record[valueField]; ok {
 						key := fmt.Sprintf("%v", pivotVal)
@@ -351,11 +351,11 @@ func (h *DataHandler) unpivotData(data map[string]any) map[string]any {
 	result := make(map[string]any)
 	unpivotFields := h.getUnpivotFields()
 
-	var unpivotedData []interface{}
+	var unpivotedData []any
 
 	for _, field := range unpivotFields {
 		if val, ok := data[field]; ok {
-			record := map[string]interface{}{
+			record := map[string]any{
 				"field": field,
 				"value": val,
 			}
@@ -370,7 +370,7 @@ func (h *DataHandler) unpivotData(data map[string]any) map[string]any {
 }
 
 // Helper functions
-func (h *DataHandler) compareValues(a, b interface{}) int {
+func (h *DataHandler) compareValues(a, b any) int {
 	if a == nil && b == nil {
 		return 0
 	}
@@ -404,7 +404,7 @@ func (h *DataHandler) compareValues(a, b interface{}) int {
 	return 0
 }
 
-func (h *DataHandler) createDedupeKey(record map[string]interface{}, fields []string) string {
+func (h *DataHandler) createDedupeKey(record map[string]any, fields []string) string {
 	var keyParts []string
 	for _, field := range fields {
 		keyParts = append(keyParts, fmt.Sprintf("%v", record[field]))
@@ -545,7 +545,7 @@ func (h *DataHandler) evaluateCondition(data map[string]any, condition string) b
 	return false
 }
 
-func (h *DataHandler) castValue(val interface{}, targetType string) interface{} {
+func (h *DataHandler) castValue(val any, targetType string) any {
 	switch targetType {
 	case "string":
 		return fmt.Sprintf("%v", val)
@@ -569,8 +569,8 @@ func (h *DataHandler) castValue(val interface{}, targetType string) interface{} 
 	}
 }
 
-func (h *DataHandler) validateField(val interface{}, rules map[string]interface{}) map[string]interface{} {
-	result := map[string]interface{}{
+func (h *DataHandler) validateField(val any, rules map[string]any) map[string]any {
+	result := map[string]any{
 		"valid":  true,
 		"errors": []string{},
 	}
@@ -610,7 +610,7 @@ func (h *DataHandler) validateField(val interface{}, rules map[string]interface{
 	return result
 }
 
-func (h *DataHandler) validateType(val interface{}, expectedType string) bool {
+func (h *DataHandler) validateType(val any, expectedType string) bool {
 	actualType := reflect.TypeOf(val).String()
 	switch expectedType {
 	case "string":
@@ -626,7 +626,7 @@ func (h *DataHandler) validateType(val interface{}, expectedType string) bool {
 	}
 }
 
-func (h *DataHandler) normalizeValue(val interface{}, normType string) interface{} {
+func (h *DataHandler) normalizeValue(val any, normType string) any {
 	switch normType {
 	case "lowercase":
 		if str, ok := val.(string); ok {
@@ -644,7 +644,7 @@ func (h *DataHandler) normalizeValue(val interface{}, normType string) interface
 	return val
 }
 
-func toFloat64(val interface{}) (float64, bool) {
+func toFloat64(val any) (float64, bool) {
 	switch v := val.(type) {
 	case float64:
 		return v, true
@@ -676,11 +676,11 @@ func (h *DataHandler) getSortOrder() string {
 }
 
 func (h *DataHandler) getDedupeFields() []string {
-	// Support both []string and []interface{} for dedupe_fields
+	// Support both []string and []any for dedupe_fields
 	if fields, ok := h.Payload.Data["dedupe_fields"].([]string); ok {
 		return fields
 	}
-	if fields, ok := h.Payload.Data["dedupe_fields"].([]interface{}); ok {
+	if fields, ok := h.Payload.Data["dedupe_fields"].([]any); ok {
 		var result []string
 		for _, field := range fields {
 			if str, ok := field.(string); ok {
@@ -692,11 +692,11 @@ func (h *DataHandler) getDedupeFields() []string {
 	return nil
 }
 
-func (h *DataHandler) getCalculations() map[string]map[string]interface{} {
-	result := make(map[string]map[string]interface{})
-	if calc, ok := h.Payload.Data["calculations"].(map[string]interface{}); ok {
+func (h *DataHandler) getCalculations() map[string]map[string]any {
+	result := make(map[string]map[string]any)
+	if calc, ok := h.Payload.Data["calculations"].(map[string]any); ok {
 		for key, value := range calc {
-			if calcMap, ok := value.(map[string]interface{}); ok {
+			if calcMap, ok := value.(map[string]any); ok {
 				result[key] = calcMap
 			}
 		}
@@ -704,11 +704,11 @@ func (h *DataHandler) getCalculations() map[string]map[string]interface{} {
 	return result
 }
 
-func (h *DataHandler) getConditions() map[string]map[string]interface{} {
-	result := make(map[string]map[string]interface{})
-	if cond, ok := h.Payload.Data["conditions"].(map[string]interface{}); ok {
+func (h *DataHandler) getConditions() map[string]map[string]any {
+	result := make(map[string]map[string]any)
+	if cond, ok := h.Payload.Data["conditions"].(map[string]any); ok {
 		for key, value := range cond {
-			if condMap, ok := value.(map[string]interface{}); ok {
+			if condMap, ok := value.(map[string]any); ok {
 				result[key] = condMap
 			}
 		}
@@ -718,7 +718,7 @@ func (h *DataHandler) getConditions() map[string]map[string]interface{} {
 
 func (h *DataHandler) getCastConfig() map[string]string {
 	result := make(map[string]string)
-	if cast, ok := h.Payload.Data["cast"].(map[string]interface{}); ok {
+	if cast, ok := h.Payload.Data["cast"].(map[string]any); ok {
 		for key, value := range cast {
 			if str, ok := value.(string); ok {
 				result[key] = str
@@ -728,11 +728,11 @@ func (h *DataHandler) getCastConfig() map[string]string {
 	return result
 }
 
-func (h *DataHandler) getValidationRules() map[string]map[string]interface{} {
-	result := make(map[string]map[string]interface{})
-	if rules, ok := h.Payload.Data["validation_rules"].(map[string]interface{}); ok {
+func (h *DataHandler) getValidationRules() map[string]map[string]any {
+	result := make(map[string]map[string]any)
+	if rules, ok := h.Payload.Data["validation_rules"].(map[string]any); ok {
 		for key, value := range rules {
-			if ruleMap, ok := value.(map[string]interface{}); ok {
+			if ruleMap, ok := value.(map[string]any); ok {
 				result[key] = ruleMap
 			}
 		}
@@ -741,7 +741,7 @@ func (h *DataHandler) getValidationRules() map[string]map[string]interface{} {
 }
 
 func (h *DataHandler) getTargetFields() []string {
-	if fields, ok := h.Payload.Data["fields"].([]interface{}); ok {
+	if fields, ok := h.Payload.Data["fields"].([]any); ok {
 		var result []string
 		for _, field := range fields {
 			if str, ok := field.(string); ok {
@@ -775,7 +775,7 @@ func (h *DataHandler) getValueField() string {
 }
 
 func (h *DataHandler) getUnpivotFields() []string {
-	if fields, ok := h.Payload.Data["unpivot_fields"].([]interface{}); ok {
+	if fields, ok := h.Payload.Data["unpivot_fields"].([]any); ok {
 		var result []string
 		for _, field := range fields {
 			if str, ok := field.(string); ok {

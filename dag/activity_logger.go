@@ -46,23 +46,23 @@ const (
 
 // ActivityEntry represents a single activity log entry
 type ActivityEntry struct {
-	ID          string                 `json:"id"`
-	Timestamp   time.Time              `json:"timestamp"`
-	DAGName     string                 `json:"dag_name"`
-	Level       ActivityLevel          `json:"level"`
-	Type        ActivityType           `json:"type"`
-	Message     string                 `json:"message"`
-	TaskID      string                 `json:"task_id,omitempty"`
-	NodeID      string                 `json:"node_id,omitempty"`
-	Duration    time.Duration          `json:"duration,omitempty"`
-	Success     *bool                  `json:"success,omitempty"`
-	Error       string                 `json:"error,omitempty"`
-	Details     map[string]interface{} `json:"details,omitempty"`
-	ContextData map[string]interface{} `json:"context_data,omitempty"`
-	UserID      string                 `json:"user_id,omitempty"`
-	SessionID   string                 `json:"session_id,omitempty"`
-	TraceID     string                 `json:"trace_id,omitempty"`
-	SpanID      string                 `json:"span_id,omitempty"`
+	ID          string         `json:"id"`
+	Timestamp   time.Time      `json:"timestamp"`
+	DAGName     string         `json:"dag_name"`
+	Level       ActivityLevel  `json:"level"`
+	Type        ActivityType   `json:"type"`
+	Message     string         `json:"message"`
+	TaskID      string         `json:"task_id,omitempty"`
+	NodeID      string         `json:"node_id,omitempty"`
+	Duration    time.Duration  `json:"duration,omitempty"`
+	Success     *bool          `json:"success,omitempty"`
+	Error       string         `json:"error,omitempty"`
+	Details     map[string]any `json:"details,omitempty"`
+	ContextData map[string]any `json:"context_data,omitempty"`
+	UserID      string         `json:"user_id,omitempty"`
+	SessionID   string         `json:"session_id,omitempty"`
+	TraceID     string         `json:"trace_id,omitempty"`
+	SpanID      string         `json:"span_id,omitempty"`
 }
 
 // ActivityFilter provides filtering options for activity queries
@@ -242,12 +242,12 @@ func (al *ActivityLogger) flushRoutine() {
 }
 
 // Log logs an activity entry
-func (al *ActivityLogger) Log(level ActivityLevel, activityType ActivityType, message string, details map[string]interface{}) {
+func (al *ActivityLogger) Log(level ActivityLevel, activityType ActivityType, message string, details map[string]any) {
 	al.LogWithContext(context.Background(), level, activityType, message, details)
 }
 
 // LogWithContext logs an activity entry with context information
-func (al *ActivityLogger) LogWithContext(ctx context.Context, level ActivityLevel, activityType ActivityType, message string, details map[string]interface{}) {
+func (al *ActivityLogger) LogWithContext(ctx context.Context, level ActivityLevel, activityType ActivityType, message string, details map[string]any) {
 	entry := ActivityEntry{
 		ID:          mq.NewID(),
 		Timestamp:   time.Now(),
@@ -256,7 +256,7 @@ func (al *ActivityLogger) LogWithContext(ctx context.Context, level ActivityLeve
 		Type:        activityType,
 		Message:     message,
 		Details:     details,
-		ContextData: make(map[string]interface{}),
+		ContextData: make(map[string]any),
 	}
 
 	// Extract context information
@@ -288,7 +288,7 @@ func (al *ActivityLogger) LogWithContext(ctx context.Context, level ActivityLeve
 	}
 
 	// Extract additional context data
-	for key, value := range map[string]interface{}{
+	for key, value := range map[string]any{
 		"method":     ctx.Value("method"),
 		"user_agent": ctx.Value("user_agent"),
 		"ip_address": ctx.Value("ip_address"),
@@ -306,7 +306,7 @@ func (al *ActivityLogger) LogWithContext(ctx context.Context, level ActivityLeve
 func (al *ActivityLogger) LogTaskStart(ctx context.Context, taskID string, nodeID string) {
 	al.LogWithContext(ctx, ActivityLevelInfo, ActivityTypeTaskStart,
 		fmt.Sprintf("Task %s started on node %s", taskID, nodeID),
-		map[string]interface{}{
+		map[string]any{
 			"task_id": taskID,
 			"node_id": nodeID,
 		})
@@ -326,7 +326,7 @@ func (al *ActivityLogger) LogTaskComplete(ctx context.Context, taskID string, no
 		NodeID:    nodeID,
 		Duration:  duration,
 		Success:   &success,
-		Details: map[string]interface{}{
+		Details: map[string]any{
 			"task_id":  taskID,
 			"node_id":  nodeID,
 			"duration": duration.String(),
@@ -350,7 +350,7 @@ func (al *ActivityLogger) LogTaskFail(ctx context.Context, taskID string, nodeID
 		Duration:  duration,
 		Success:   &success,
 		Error:     err.Error(),
-		Details: map[string]interface{}{
+		Details: map[string]any{
 			"task_id":  taskID,
 			"node_id":  nodeID,
 			"duration": duration.String(),

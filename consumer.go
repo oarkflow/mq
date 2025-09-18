@@ -894,7 +894,7 @@ func (c *Consumer) handleStats(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Gather consumer and pool stats using formatted metrics.
-	stats := map[string]interface{}{
+	stats := map[string]any{
 		"consumer_id":  c.id,
 		"queue":        c.queue,
 		"pool_metrics": c.pool.FormattedMetrics(),

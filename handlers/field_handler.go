@@ -272,7 +272,7 @@ func (h *FieldHandler) toPascalCase(s string) string {
 }
 
 func (h *FieldHandler) getTargetFields() []string {
-	if fields, ok := h.Payload.Data["fields"].([]interface{}); ok {
+	if fields, ok := h.Payload.Data["fields"].([]any); ok {
 		var result []string
 		for _, field := range fields {
 			if str, ok := field.(string); ok {
@@ -286,7 +286,7 @@ func (h *FieldHandler) getTargetFields() []string {
 
 func (h *FieldHandler) getFieldMapping() map[string]string {
 	result := make(map[string]string)
-	if mapping, ok := h.Payload.Data["mapping"].(map[string]interface{}); ok {
+	if mapping, ok := h.Payload.Data["mapping"].(map[string]any); ok {
 		for key, value := range mapping {
 			if str, ok := value.(string); ok {
 				result[key] = str
@@ -296,18 +296,18 @@ func (h *FieldHandler) getFieldMapping() map[string]string {
 	return result
 }
 
-func (h *FieldHandler) getNewFields() map[string]interface{} {
-	if fields, ok := h.Payload.Data["new_fields"].(map[string]interface{}); ok {
+func (h *FieldHandler) getNewFields() map[string]any {
+	if fields, ok := h.Payload.Data["new_fields"].(map[string]any); ok {
 		return fields
 	}
-	return make(map[string]interface{})
+	return make(map[string]any)
 }
 
-func (h *FieldHandler) getMergeConfig() map[string]map[string]interface{} {
-	result := make(map[string]map[string]interface{})
-	if config, ok := h.Payload.Data["merge_config"].(map[string]interface{}); ok {
+func (h *FieldHandler) getMergeConfig() map[string]map[string]any {
+	result := make(map[string]map[string]any)
+	if config, ok := h.Payload.Data["merge_config"].(map[string]any); ok {
 		for key, value := range config {
-			if configMap, ok := value.(map[string]interface{}); ok {
+			if configMap, ok := value.(map[string]any); ok {
 				result[key] = configMap
 			}
 		}

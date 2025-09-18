@@ -78,12 +78,12 @@ type HealthCheck interface {
 
 // HealthCheckResult represents the result of a health check
 type HealthCheckResult struct {
-	Name      string                 `json:"name"`
-	Status    HealthStatus           `json:"status"`
-	Message   string                 `json:"message"`
-	Duration  time.Duration          `json:"duration"`
-	Timestamp time.Time              `json:"timestamp"`
-	Metadata  map[string]interface{} `json:"metadata,omitempty"`
+	Name      string         `json:"name"`
+	Status    HealthStatus   `json:"status"`
+	Message   string         `json:"message"`
+	Duration  time.Duration  `json:"duration"`
+	Timestamp time.Time      `json:"timestamp"`
+	Metadata  map[string]any `json:"metadata,omitempty"`
 }
 
 // HealthStatus represents the health status
@@ -373,7 +373,7 @@ func (mhc *MemoryHealthCheck) Check(ctx context.Context) *HealthCheckResult {
 		Status:    status,
 		Message:   message,
 		Timestamp: time.Now(),
-		Metadata: map[string]interface{}{
+		Metadata: map[string]any{
 			"alloc_mb":   allocMB,
 			"sys_mb":     sysMB,
 			"gc_cycles":  m.NumGC,
@@ -414,7 +414,7 @@ func (ghc *GoRoutineHealthCheck) Check(ctx context.Context) *HealthCheckResult {
 		Status:    status,
 		Message:   message,
 		Timestamp: time.Now(),
-		Metadata: map[string]interface{}{
+		Metadata: map[string]any{
 			"count": count,
 		},
 	}
@@ -439,7 +439,7 @@ func (dshc *DiskSpaceHealthCheck) Check(ctx context.Context) *HealthCheckResult 
 		Status:    HealthStatusHealthy,
 		Message:   "Disk space OK",
 		Timestamp: time.Now(),
-		Metadata: map[string]interface{}{
+		Metadata: map[string]any{
 			"available_gb": 100.0, // Placeholder
 		},
 	}
@@ -757,7 +757,7 @@ func (ms *MetricsServer) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	metrics := ms.registry.GetAllMetrics()
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	json.NewEncoder(w).Encode(map[string]any{
 		"timestamp": time.Now(),
 		"metrics":   metrics,
 	})
@@ -768,7 +768,7 @@ func (ms *MetricsServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 	results := ms.healthChecker.RunChecks(r.Context())
 	overallHealth := ms.healthChecker.GetOverallHealth()
 
-	response := map[string]interface{}{
+	response := map[string]any{
 		"status":    overallHealth,
 		"timestamp": time.Now(),
 		"checks":    results,
@@ -804,7 +804,7 @@ func (ms *MetricsServer) handleAlerts(w http.ResponseWriter, r *http.Request) {
 	})
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	json.NewEncoder(w).Encode(map[string]any{
 		"timestamp": time.Now(),
 		"alerts":    alerts,
 	})

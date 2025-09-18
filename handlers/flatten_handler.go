@@ -57,11 +57,11 @@ func (h *FlattenHandler) flattenSettings(data map[string]any) map[string]any {
 		result[key] = value
 	}
 
-	if settingsArray, ok := data[sourceField].([]interface{}); ok {
+	if settingsArray, ok := data[sourceField].([]any); ok {
 		flattened := make(map[string]any)
 
 		for _, item := range settingsArray {
-			if setting, ok := item.(map[string]interface{}); ok {
+			if setting, ok := item.(map[string]any); ok {
 				key, keyExists := setting["key"].(string)
 				value, valueExists := setting["value"]
 				valueType, typeExists := setting["value_type"].(string)
@@ -96,11 +96,11 @@ func (h *FlattenHandler) flattenKeyValue(data map[string]any) map[string]any {
 		result[key] = value
 	}
 
-	if kvArray, ok := data[sourceField].([]interface{}); ok {
+	if kvArray, ok := data[sourceField].([]any); ok {
 		flattened := make(map[string]any)
 
 		for _, item := range kvArray {
-			if kvPair, ok := item.(map[string]interface{}); ok {
+			if kvPair, ok := item.(map[string]any); ok {
 				if key, keyExists := kvPair[keyField]; keyExists {
 					if value, valueExists := kvPair[valueField]; valueExists {
 						if keyStr, ok := key.(string); ok {
@@ -139,9 +139,9 @@ func (h *FlattenHandler) flattenArray(data map[string]any) map[string]any {
 		}
 	}
 
-	if array, ok := data[sourceField].([]interface{}); ok {
+	if array, ok := data[sourceField].([]any); ok {
 		for i, item := range array {
-			if obj, ok := item.(map[string]interface{}); ok {
+			if obj, ok := item.(map[string]any); ok {
 				for key, value := range obj {
 					result[fmt.Sprintf("%s_%d_%s", sourceField, i, key)] = value
 				}
@@ -162,17 +162,17 @@ func (h *FlattenHandler) flattenRecursive(obj map[string]any, prefix string, res
 		}
 
 		switch v := value.(type) {
-		case map[string]interface{}:
+		case map[string]any:
 			nestedMap := make(map[string]any)
 			for k, val := range v {
 				nestedMap[k] = val
 			}
 			h.flattenRecursive(nestedMap, newKey, result, separator)
-		case []interface{}:
+		case []any:
 			// For arrays, create numbered fields
 			for i, item := range v {
 				itemKey := fmt.Sprintf("%s%s%d", newKey, separator, i)
-				if itemMap, ok := item.(map[string]interface{}); ok {
+				if itemMap, ok := item.(map[string]any); ok {
 					nestedMap := make(map[string]any)
 					for k, val := range itemMap {
 						nestedMap[k] = val
@@ -188,7 +188,7 @@ func (h *FlattenHandler) flattenRecursive(obj map[string]any, prefix string, res
 	}
 }
 
-func (h *FlattenHandler) convertValue(value interface{}, valueType string) interface{} {
+func (h *FlattenHandler) convertValue(value any, valueType string) any {
 	switch valueType {
 	case "string":
 		return fmt.Sprintf("%v", value)
@@ -213,7 +213,7 @@ func (h *FlattenHandler) convertValue(value interface{}, valueType string) inter
 		return value
 	case "json":
 		if str, ok := value.(string); ok {
-			var jsonVal interface{}
+			var jsonVal any
 			if err := json.Unmarshal([]byte(str), &jsonVal); err == nil {
 				return jsonVal
 			}

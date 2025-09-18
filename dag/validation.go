@@ -236,8 +236,8 @@ func (v *DAGValidator) GetTopologicalOrder() ([]string, error) {
 }
 
 // GetNodeStatistics returns DAG statistics
-func (v *DAGValidator) GetNodeStatistics() map[string]interface{} {
-	stats := make(map[string]interface{})
+func (v *DAGValidator) GetNodeStatistics() map[string]any {
+	stats := make(map[string]any)
 
 	nodeCount := 0
 	edgeCount := 0

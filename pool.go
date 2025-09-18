@@ -153,7 +153,7 @@ type Metrics struct {
 
 // Plugin is used to inject custom behavior before or after task processing.
 type Plugin interface {
-	Initialize(config interface{}) error
+	Initialize(config any) error
 	BeforeTask(task *QueueTask)
 	AfterTask(task *QueueTask, result Result)
 }
@@ -161,7 +161,7 @@ type Plugin interface {
 // DefaultPlugin is a no-op implementation of Plugin.
 type DefaultPlugin struct{}
 
-func (dp *DefaultPlugin) Initialize(config interface{}) error { return nil }
+func (dp *DefaultPlugin) Initialize(config any) error { return nil }
 func (dp *DefaultPlugin) BeforeTask(task *QueueTask) {
 	Logger.Info().Str("taskID", task.payload.ID).Msg("BeforeTask plugin invoked")
 }
@@ -274,7 +274,7 @@ func (dlq *DeadLetterQueue) Size() int {
 }
 
 // GetStats returns statistics about the DLQ
-func (dlq *DeadLetterQueue) GetStats() map[string]interface{} {
+func (dlq *DeadLetterQueue) GetStats() map[string]any {
 	dlq.mu.RLock()
 	defer dlq.mu.RUnlock()
 
@@ -302,7 +302,7 @@ func (dlq *DeadLetterQueue) GetStats() map[string]interface{} {
 		}
 	}
 
-	return map[string]interface{}{
+	return map[string]any{
 		"total_tasks":  len(dlq.tasks),
 		"max_size":     dlq.maxSize,
 		"error_counts": errorCounts,
@@ -324,7 +324,7 @@ func NewInMemoryMetricsRegistry() *InMemoryMetricsRegistry {
 	}
 }
 
-func (m *InMemoryMetricsRegistry) Register(metricName string, value interface{}) {
+func (m *InMemoryMetricsRegistry) Register(metricName string, value any) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if v, ok := value.(int64); ok {
@@ -338,7 +338,7 @@ func (m *InMemoryMetricsRegistry) Increment(metricName string) {
 	m.metrics[metricName]++
 }
 
-func (m *InMemoryMetricsRegistry) Get(metricName string) interface{} {
+func (m *InMemoryMetricsRegistry) Get(metricName string) any {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.metrics[metricName]

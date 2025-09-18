@@ -63,7 +63,7 @@ func (h *JSONHandler) parseJSON(data map[string]any) map[string]any {
 	for _, field := range fields {
 		if val, ok := data[field]; ok {
 			if str, ok := val.(string); ok {
-				var parsed interface{}
+				var parsed any
 				if err := json.Unmarshal([]byte(str), &parsed); err == nil {
 					targetField := h.getTargetFieldForSource(field)
 					result[targetField] = parsed
@@ -125,7 +125,7 @@ func (h *JSONHandler) prettyPrintJSON(data map[string]any) map[string]any {
 
 	for _, field := range fields {
 		if val, ok := data[field]; ok {
-			var prettyJSON interface{}
+			var prettyJSON any
 
 			// If it's a string, try to parse it first
 			if str, ok := val.(string); ok {
@@ -157,7 +157,7 @@ func (h *JSONHandler) minifyJSON(data map[string]any) map[string]any {
 
 	for _, field := range fields {
 		if val, ok := data[field]; ok {
-			var minifyJSON interface{}
+			var minifyJSON any
 
 			// If it's a string, try to parse it first
 			if str, ok := val.(string); ok {
@@ -190,7 +190,7 @@ func (h *JSONHandler) validateJSON(data map[string]any) map[string]any {
 	for _, field := range fields {
 		if val, ok := data[field]; ok {
 			if str, ok := val.(string); ok {
-				var temp interface{}
+				var temp any
 				if err := json.Unmarshal([]byte(str), &temp); err == nil {
 					result[field+"_valid_json"] = true
 					result[field+"_json_type"] = h.getJSONType(temp)
@@ -219,7 +219,7 @@ func (h *JSONHandler) extractFields(data map[string]any) map[string]any {
 	}
 
 	if val, ok := data[sourceField]; ok {
-		var jsonData map[string]interface{}
+		var jsonData map[string]any
 
 		// If it's a string, parse it
 		if str, ok := val.(string); ok {
@@ -227,7 +227,7 @@ func (h *JSONHandler) extractFields(data map[string]any) map[string]any {
 				result["extract_error"] = err.Error()
 				return result
 			}
-		} else if obj, ok := val.(map[string]interface{}); ok {
+		} else if obj, ok := val.(map[string]any); ok {
 			jsonData = obj
 		} else {
 			result["extract_error"] = "source field is not a JSON object or string"
@@ -245,7 +245,7 @@ func (h *JSONHandler) extractFields(data map[string]any) map[string]any {
 	return result
 }
 
-func (h *JSONHandler) extractNestedField(data map[string]interface{}, fieldPath string) interface{} {
+func (h *JSONHandler) extractNestedField(data map[string]any, fieldPath string) any {
 	// Simple implementation for dot notation
 	// For more complex path extraction, could use jsonpath library
 	if val, ok := data[fieldPath]; ok {
@@ -254,11 +254,11 @@ func (h *JSONHandler) extractNestedField(data map[string]interface{}, fieldPath 
 	return nil
 }
 
-func (h *JSONHandler) getJSONType(val interface{}) string {
+func (h *JSONHandler) getJSONType(val any) string {
 	switch val.(type) {
-	case map[string]interface{}:
+	case map[string]any:
 		return "object"
-	case []interface{}:
+	case []any:
 		return "array"
 	case string:
 		return "string"
@@ -274,7 +274,7 @@ func (h *JSONHandler) getJSONType(val interface{}) string {
 }
 
 func (h *JSONHandler) getTargetFields() []string {
-	if fields, ok := h.Payload.Data["fields"].([]interface{}); ok {
+	if fields, ok := h.Payload.Data["fields"].([]any); ok {
 		var result []string
 		for _, field := range fields {
 			if str, ok := field.(string); ok {
@@ -294,7 +294,7 @@ func (h *JSONHandler) getSourceField() string {
 }
 
 func (h *JSONHandler) getFieldsToExtract() []string {
-	if fields, ok := h.Payload.Data["extract_fields"].([]interface{}); ok {
+	if fields, ok := h.Payload.Data["extract_fields"].([]any); ok {
 		var result []string
 		for _, field := range fields {
 			if str, ok := field.(string); ok {
@@ -308,7 +308,7 @@ func (h *JSONHandler) getFieldsToExtract() []string {
 
 func (h *JSONHandler) getTargetFieldForSource(sourceField string) string {
 	// Check if there's a specific mapping
-	if mapping, ok := h.Payload.Data["field_mapping"].(map[string]interface{}); ok {
+	if mapping, ok := h.Payload.Data["field_mapping"].(map[string]any); ok {
 		if target, ok := mapping[sourceField].(string); ok {
 			return target
 		}

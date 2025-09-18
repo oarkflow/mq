@@ -282,7 +282,7 @@ func Unmarshal(data any, dst any) error {
 // Enhanced helper functions
 
 // getHandlerInfo returns information about the handler (traditional or enhanced)
-func (receiver *RunHandler) getHandlerInfo(name string) (interface{}, bool) {
+func (receiver *RunHandler) getHandlerInfo(name string) (any, bool) {
 	// Check enhanced handlers first
 	if enhancedHandler := receiver.userConfig.GetEnhancedHandler(name); enhancedHandler != nil {
 		return *enhancedHandler, true

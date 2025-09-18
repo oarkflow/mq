@@ -451,7 +451,7 @@ func getVal(c context.Context, v string, data map[string]any) (key string, val a
 
 func init() {
 	// define custom functions for use in config
-	expr.AddFunction("trim", func(params ...interface{}) (interface{}, error) {
+	expr.AddFunction("trim", func(params ...any) (any, error) {
 		if len(params) == 0 || len(params) > 1 || params[0] == nil {
 			return nil, errors.New("Invalid number of arguments")
 		}
@@ -461,7 +461,7 @@ func init() {
 		}
 		return strings.TrimSpace(val), nil
 	})
-	expr.AddFunction("upper", func(params ...interface{}) (interface{}, error) {
+	expr.AddFunction("upper", func(params ...any) (any, error) {
 		if len(params) == 0 || len(params) > 1 || params[0] == nil {
 			return nil, errors.New("Invalid number of arguments")
 		}
@@ -471,7 +471,7 @@ func init() {
 		}
 		return strings.ToUpper(val), nil
 	})
-	expr.AddFunction("lower", func(params ...interface{}) (interface{}, error) {
+	expr.AddFunction("lower", func(params ...any) (any, error) {
 		if len(params) == 0 || len(params) > 1 || params[0] == nil {
 			return nil, errors.New("Invalid number of arguments")
 		}
@@ -481,7 +481,7 @@ func init() {
 		}
 		return strings.ToLower(val), nil
 	})
-	expr.AddFunction("date", func(params ...interface{}) (interface{}, error) {
+	expr.AddFunction("date", func(params ...any) (any, error) {
 		if len(params) == 0 || len(params) > 1 || params[0] == nil {
 			return nil, errors.New("Invalid number of arguments")
 		}
@@ -495,7 +495,7 @@ func init() {
 		}
 		return t.Format("2006-01-02"), nil
 	})
-	expr.AddFunction("datetime", func(params ...interface{}) (interface{}, error) {
+	expr.AddFunction("datetime", func(params ...any) (any, error) {
 		if len(params) == 0 || len(params) > 1 || params[0] == nil {
 			return nil, errors.New("Invalid number of arguments")
 		}
@@ -509,7 +509,7 @@ func init() {
 		}
 		return t.Format(time.RFC3339), nil
 	})
-	expr.AddFunction("addSecondsToNow", func(params ...interface{}) (interface{}, error) {
+	expr.AddFunction("addSecondsToNow", func(params ...any) (any, error) {
 		if len(params) == 0 || len(params) > 1 || params[0] == nil {
 			return nil, errors.New("Invalid number of arguments")
 		}
@@ -529,7 +529,7 @@ func init() {
 		t = t.Add(time.Duration(params[0].(int)) * time.Second)
 		return t, nil
 	})
-	expr.AddFunction("values", func(params ...interface{}) (interface{}, error) {
+	expr.AddFunction("values", func(params ...any) (any, error) {
 		if len(params) == 0 || len(params) > 2 {
 			return nil, errors.New("Invalid number of arguments")
 		}
@@ -556,15 +556,15 @@ func init() {
 		}
 		return values, nil
 	})
-	expr.AddFunction("uniqueid", func(params ...interface{}) (interface{}, error) {
+	expr.AddFunction("uniqueid", func(params ...any) (any, error) {
 		// create a new xid
 		return mq.NewID(), nil
 	})
-	expr.AddFunction("now", func(params ...interface{}) (interface{}, error) {
+	expr.AddFunction("now", func(params ...any) (any, error) {
 		// get the current time in UTC
 		return time.Now().UTC(), nil
 	})
-	expr.AddFunction("toString", func(params ...interface{}) (interface{}, error) {
+	expr.AddFunction("toString", func(params ...any) (any, error) {
 		if len(params) == 0 || len(params) > 1 || params[0] == nil {
 			return nil, errors.New("Invalid number of arguments")
 		}

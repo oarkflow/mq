@@ -191,9 +191,9 @@ func (api *WorkflowAPI) ExecuteWorkflow(c *fiber.Ctx) error {
 		})
 	}
 
-	var input map[string]interface{}
+	var input map[string]any
 	if err := c.BodyParser(&input); err != nil {
-		input = make(map[string]interface{})
+		input = make(map[string]any)
 	}
 
 	execution, err := api.enhancedDAG.ExecuteWorkflow(c.Context(), id, input)

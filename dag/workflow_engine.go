@@ -134,7 +134,7 @@ func NewAdvancedWorkflowStateManager() *AdvancedWorkflowStateManager {
 }
 
 // CreateExecution creates a new workflow execution
-func (sm *AdvancedWorkflowStateManager) CreateExecution(ctx context.Context, workflowID string, input map[string]interface{}) (*WorkflowExecution, error) {
+func (sm *AdvancedWorkflowStateManager) CreateExecution(ctx context.Context, workflowID string, input map[string]any) (*WorkflowExecution, error) {
 	execution := &WorkflowExecution{
 		ID:             generateExecutionID(),
 		WorkflowID:     workflowID,
@@ -175,7 +175,7 @@ func (sm *AdvancedWorkflowStateManager) UpdateExecution(ctx context.Context, exe
 }
 
 // ListExecutions returns all executions
-func (sm *AdvancedWorkflowStateManager) ListExecutions(ctx context.Context, filters map[string]interface{}) ([]*WorkflowExecution, error) {
+func (sm *AdvancedWorkflowStateManager) ListExecutions(ctx context.Context, filters map[string]any) ([]*WorkflowExecution, error) {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 
@@ -203,7 +203,7 @@ type ScheduledTask struct {
 	ID         string
 	WorkflowID string
 	Schedule   string
-	Input      map[string]interface{}
+	Input      map[string]any
 	NextRun    time.Time
 	LastRun    *time.Time
 	Enabled    bool
@@ -313,7 +313,7 @@ func (e *WorkflowExecutor) Stop(ctx context.Context) {
 }
 
 // ExecuteWorkflow executes a workflow
-func (e *WorkflowExecutor) ExecuteWorkflow(ctx context.Context, workflowID string, input map[string]interface{}) (*WorkflowExecution, error) {
+func (e *WorkflowExecutor) ExecuteWorkflow(ctx context.Context, workflowID string, input map[string]any) (*WorkflowExecution, error) {
 	// Create execution
 	execution, err := e.stateManager.CreateExecution(ctx, workflowID, input)
 	if err != nil {
@@ -345,7 +345,7 @@ func (e *WorkflowExecutor) executeWorkflowAsync(ctx context.Context, execution *
 	time.Sleep(100 * time.Millisecond)
 
 	execution.Status = ExecutionStatusCompleted
-	execution.Output = map[string]interface{}{
+	execution.Output = map[string]any{
 		"result": "workflow completed successfully",
 		"input":  execution.Input,
 	}
@@ -537,7 +537,7 @@ func (m *WorkflowEngineManager) RegisterWorkflow(ctx context.Context, definition
 }
 
 // ExecuteWorkflow executes a workflow
-func (m *WorkflowEngineManager) ExecuteWorkflow(ctx context.Context, workflowID string, input map[string]interface{}) (*ExecutionResult, error) {
+func (m *WorkflowEngineManager) ExecuteWorkflow(ctx context.Context, workflowID string, input map[string]any) (*ExecutionResult, error) {
 	execution, err := m.executor.ExecuteWorkflow(ctx, workflowID, input)
 	if err != nil {
 		return nil, err

@@ -262,16 +262,16 @@ type AlertHandler interface {
 
 // Alert represents a monitoring alert
 type Alert struct {
-	ID          string                 `json:"id"`
-	Timestamp   time.Time              `json:"timestamp"`
-	Severity    AlertSeverity          `json:"severity"`
-	Type        AlertType              `json:"type"`
-	Message     string                 `json:"message"`
-	Details     map[string]interface{} `json:"details"`
-	NodeID      string                 `json:"node_id,omitempty"`
-	TaskID      string                 `json:"task_id,omitempty"`
-	Threshold   interface{}            `json:"threshold,omitempty"`
-	ActualValue interface{}            `json:"actual_value,omitempty"`
+	ID          string         `json:"id"`
+	Timestamp   time.Time      `json:"timestamp"`
+	Severity    AlertSeverity  `json:"severity"`
+	Type        AlertType      `json:"type"`
+	Message     string         `json:"message"`
+	Details     map[string]any `json:"details"`
+	NodeID      string         `json:"node_id,omitempty"`
+	TaskID      string         `json:"task_id,omitempty"`
+	Threshold   any            `json:"threshold,omitempty"`
+	ActualValue any            `json:"actual_value,omitempty"`
 }
 
 type AlertSeverity string
@@ -394,7 +394,7 @@ func (m *Monitor) performHealthCheck() {
 				Message:     "High failure rate detected",
 				Threshold:   m.thresholds.MaxFailureRate,
 				ActualValue: failureRate,
-				Details: map[string]interface{}{
+				Details: map[string]any{
 					"failed_tasks": metrics.TasksFailed,
 					"total_tasks":  metrics.TasksTotal,
 				},
@@ -412,7 +412,7 @@ func (m *Monitor) performHealthCheck() {
 			Message:     "High task load detected",
 			Threshold:   m.thresholds.MaxTasksInProgress,
 			ActualValue: metrics.TasksInProgress,
-			Details: map[string]interface{}{
+			Details: map[string]any{
 				"tasks_in_progress": metrics.TasksInProgress,
 			},
 		})
@@ -430,7 +430,7 @@ func (m *Monitor) performHealthCheck() {
 				NodeID:      nodeID,
 				Threshold:   m.thresholds.MaxNodeFailures,
 				ActualValue: failures,
-				Details: map[string]interface{}{
+				Details: map[string]any{
 					"node_id":  nodeID,
 					"failures": failures,
 				},
@@ -448,7 +448,7 @@ func (m *Monitor) performHealthCheck() {
 			Message:     "Average execution time is too high",
 			Threshold:   m.thresholds.MaxExecutionTime,
 			ActualValue: metrics.AverageExecutionTime,
-			Details: map[string]interface{}{
+			Details: map[string]any{
 				"average_execution_time": metrics.AverageExecutionTime.String(),
 			},
 		})

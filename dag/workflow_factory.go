@@ -149,7 +149,7 @@ func (p *APIWorkflowProcessor) ProcessTask(ctx context.Context, task *mq.Task) m
 
 	// In real implementation, make HTTP request
 	// For now, simulate API call
-	result := map[string]interface{}{
+	result := map[string]any{
 		"api_called": true,
 		"url":        config.URL,
 		"method":     config.Method,
@@ -174,7 +174,7 @@ type TransformWorkflowProcessor struct {
 func (p *TransformWorkflowProcessor) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 	config := p.GetConfig()
 
-	var payload map[string]interface{}
+	var payload map[string]any
 	if err := json.Unmarshal(task.Payload, &payload); err != nil {
 		return mq.Result{
 			TaskID: task.ID,
@@ -205,7 +205,7 @@ type DecisionWorkflowProcessor struct {
 func (p *DecisionWorkflowProcessor) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 	config := p.GetConfig()
 
-	var inputData map[string]interface{}
+	var inputData map[string]any
 	if err := json.Unmarshal(task.Payload, &inputData); err != nil {
 		return mq.Result{
 			TaskID: task.ID,
@@ -248,13 +248,13 @@ func (p *TimerWorkflowProcessor) ProcessTask(ctx context.Context, task *mq.Task)
 	if config.Duration > 0 {
 		// In real implementation, this might use a scheduler
 		// For demo, we just add the delay info to the result
-		result := map[string]interface{}{
+		result := map[string]any{
 			"timer_delay":  config.Duration.String(),
 			"schedule":     config.Schedule,
 			"timer_set_at": "simulated",
 		}
 
-		var inputData map[string]interface{}
+		var inputData map[string]any
 		if err := json.Unmarshal(task.Payload, &inputData); err == nil {
 			for key, value := range inputData {
 				result[key] = value
@@ -294,14 +294,14 @@ func (p *DatabaseWorkflowProcessor) ProcessTask(ctx context.Context, task *mq.Ta
 	}
 
 	// Simulate database operation
-	result := map[string]interface{}{
+	result := map[string]any{
 		"db_query_executed": true,
 		"query":             config.Query,
 		"connection":        config.Connection,
 		"executed_at":       "simulated",
 	}
 
-	var inputData map[string]interface{}
+	var inputData map[string]any
 	if err := json.Unmarshal(task.Payload, &inputData); err == nil {
 		for key, value := range inputData {
 			result[key] = value
@@ -334,7 +334,7 @@ func (p *EmailWorkflowProcessor) ProcessTask(ctx context.Context, task *mq.Task)
 	}
 
 	// Simulate email sending
-	result := map[string]interface{}{
+	result := map[string]any{
 		"email_sent": true,
 		"to":         config.EmailTo,
 		"subject":    config.Subject,
@@ -342,7 +342,7 @@ func (p *EmailWorkflowProcessor) ProcessTask(ctx context.Context, task *mq.Task)
 		"sent_at":    "simulated",
 	}
 
-	var inputData map[string]interface{}
+	var inputData map[string]any
 	if err := json.Unmarshal(task.Payload, &inputData); err == nil {
 		for key, value := range inputData {
 			result[key] = value
@@ -375,14 +375,14 @@ func (p *WebhookProcessor) ProcessTask(ctx context.Context, task *mq.Task) mq.Re
 	}
 
 	// Simulate webhook sending
-	result := map[string]interface{}{
+	result := map[string]any{
 		"webhook_sent": true,
 		"url":          config.URL,
 		"method":       config.Method,
 		"sent_at":      "simulated",
 	}
 
-	var inputData map[string]interface{}
+	var inputData map[string]any
 	if err := json.Unmarshal(task.Payload, &inputData); err == nil {
 		for key, value := range inputData {
 			result[key] = value
@@ -415,7 +415,7 @@ func (p *SubDAGWorkflowProcessor) ProcessTask(ctx context.Context, task *mq.Task
 	}
 
 	// Simulate sub-DAG execution
-	result := map[string]interface{}{
+	result := map[string]any{
 		"sub_dag_executed": true,
 		"sub_workflow_id":  config.SubWorkflowID,
 		"input_mapping":    config.InputMapping,
@@ -423,7 +423,7 @@ func (p *SubDAGWorkflowProcessor) ProcessTask(ctx context.Context, task *mq.Task
 		"executed_at":      "simulated",
 	}
 
-	var inputData map[string]interface{}
+	var inputData map[string]any
 	if err := json.Unmarshal(task.Payload, &inputData); err == nil {
 		for key, value := range inputData {
 			result[key] = value
@@ -446,12 +446,12 @@ type ParallelWorkflowProcessor struct {
 
 func (p *ParallelWorkflowProcessor) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 	// Simulate parallel processing
-	result := map[string]interface{}{
+	result := map[string]any{
 		"parallel_executed": true,
 		"executed_at":       "simulated",
 	}
 
-	var inputData map[string]interface{}
+	var inputData map[string]any
 	if err := json.Unmarshal(task.Payload, &inputData); err == nil {
 		for key, value := range inputData {
 			result[key] = value
@@ -474,12 +474,12 @@ type LoopWorkflowProcessor struct {
 
 func (p *LoopWorkflowProcessor) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 	// Simulate loop processing
-	result := map[string]interface{}{
+	result := map[string]any{
 		"loop_executed": true,
 		"executed_at":   "simulated",
 	}
 
-	var inputData map[string]interface{}
+	var inputData map[string]any
 	if err := json.Unmarshal(task.Payload, &inputData); err == nil {
 		for key, value := range inputData {
 			result[key] = value

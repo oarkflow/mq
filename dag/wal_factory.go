@@ -115,7 +115,7 @@ func (w *WALEnabledStorageWrapper) SaveTask(ctx context.Context, task *storage.P
 	}
 
 	// Write to WAL first
-	if err := w.walManager.WriteEntry(ctx, wal.WALEntryTypeTaskUpdate, taskData, map[string]interface{}{
+	if err := w.walManager.WriteEntry(ctx, wal.WALEntryTypeTaskUpdate, taskData, map[string]any{
 		"task_id": task.ID,
 		"dag_id":  task.DAGID,
 	}); err != nil {
@@ -135,7 +135,7 @@ func (w *WALEnabledStorageWrapper) LogActivity(ctx context.Context, logEntry *st
 	}
 
 	// Write to WAL first
-	if err := w.walManager.WriteEntry(ctx, wal.WALEntryTypeActivityLog, logData, map[string]interface{}{
+	if err := w.walManager.WriteEntry(ctx, wal.WALEntryTypeActivityLog, logData, map[string]any{
 		"task_id": logEntry.TaskID,
 		"dag_id":  logEntry.DAGID,
 		"action":  logEntry.Action,

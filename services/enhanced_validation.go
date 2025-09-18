@@ -43,7 +43,7 @@ func (ev *enhancedValidation) Rules() []Rule {
 }
 
 // ValidateWorkflowInput validates input using workflow validation rules
-func (ev *enhancedValidation) ValidateWorkflowInput(ctx context.Context, input map[string]interface{}, rules []*dag.WorkflowValidationRule) (ValidationResult, error) {
+func (ev *enhancedValidation) ValidateWorkflowInput(ctx context.Context, input map[string]any, rules []*dag.WorkflowValidationRule) (ValidationResult, error) {
 	result := ValidationResult{
 		Valid:  true,
 		Errors: make(map[string]string),
@@ -88,7 +88,7 @@ func (ev *enhancedValidation) CreateValidationProcessor(rules []*dag.WorkflowVal
 }
 
 // Helper method to validate individual fields
-func (ev *enhancedValidation) validateField(input map[string]interface{}, rule *dag.WorkflowValidationRule, result *ValidationResult) error {
+func (ev *enhancedValidation) validateField(input map[string]any, rule *dag.WorkflowValidationRule, result *ValidationResult) error {
 	value, exists := input[rule.Field]
 
 	// Check required fields
@@ -134,7 +134,7 @@ func (ev *enhancedValidation) validateField(input map[string]interface{}, rule *
 	return nil
 }
 
-func (ev *enhancedValidation) validateString(value interface{}, rule *dag.WorkflowValidationRule, result *ValidationResult) error {
+func (ev *enhancedValidation) validateString(value any, rule *dag.WorkflowValidationRule, result *ValidationResult) error {
 	str, ok := value.(string)
 	if !ok {
 		result.Valid = false
@@ -172,7 +172,7 @@ func (ev *enhancedValidation) validateString(value interface{}, rule *dag.Workfl
 	return nil
 }
 
-func (ev *enhancedValidation) validateNumber(value interface{}, rule *dag.WorkflowValidationRule, result *ValidationResult) error {
+func (ev *enhancedValidation) validateNumber(value any, rule *dag.WorkflowValidationRule, result *ValidationResult) error {
 	var num float64
 	var ok bool
 
@@ -212,7 +212,7 @@ func (ev *enhancedValidation) validateNumber(value interface{}, rule *dag.Workfl
 	return nil
 }
 
-func (ev *enhancedValidation) validateEmail(value interface{}, rule *dag.WorkflowValidationRule, result *ValidationResult) error {
+func (ev *enhancedValidation) validateEmail(value any, rule *dag.WorkflowValidationRule, result *ValidationResult) error {
 	email, ok := value.(string)
 	if !ok {
 		result.Valid = false
@@ -233,7 +233,7 @@ func (ev *enhancedValidation) validateEmail(value interface{}, rule *dag.Workflo
 	return nil
 }
 
-func (ev *enhancedValidation) validateBool(value interface{}, rule *dag.WorkflowValidationRule, result *ValidationResult) error {
+func (ev *enhancedValidation) validateBool(value any, rule *dag.WorkflowValidationRule, result *ValidationResult) error {
 	_, ok := value.(bool)
 	if !ok {
 		result.Valid = false
@@ -244,7 +244,7 @@ func (ev *enhancedValidation) validateBool(value interface{}, rule *dag.Workflow
 	return nil
 }
 
-func (ev *enhancedValidation) validateCustom(value interface{}, rule *dag.WorkflowValidationRule, result *ValidationResult) error {
+func (ev *enhancedValidation) validateCustom(value any, rule *dag.WorkflowValidationRule, result *ValidationResult) error {
 	// Custom validation logic - implement based on your needs
 	// For now, just accept any value for custom types
 	return nil

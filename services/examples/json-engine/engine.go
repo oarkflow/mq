@@ -80,8 +80,8 @@ func NewJSONEngine(config *AppConfiguration) *JSONEngine {
 		functions:            make(map[string]*Function),
 		validators:           make(map[string]*Validator),
 		middleware:           make(map[string]*Middleware),
-		data:                 make(map[string]interface{}),
-		genericData:          make(map[string]interface{}),
+		data:                 make(map[string]any),
+		genericData:          make(map[string]any),
 	}
 
 	// Store the configuration
@@ -115,7 +115,7 @@ func (e *JSONEngine) Compile() error {
 
 	// Initialize genericData with config data for backward compatibility
 	if e.genericData == nil {
-		e.genericData = make(map[string]interface{})
+		e.genericData = make(map[string]any)
 	}
 
 	// Merge config data into genericData
@@ -153,7 +153,7 @@ func (e *JSONEngine) Compile() error {
 
 	// Initialize genericData with config data for backward compatibility
 	if e.genericData == nil {
-		e.genericData = make(map[string]interface{})
+		e.genericData = make(map[string]any)
 	}
 
 	// Merge config data into genericData
@@ -248,7 +248,7 @@ func (e *JSONEngine) compileFunctions() error {
 		function := &Function{
 			ID:      id,
 			Config:  functionConfig,
-			Runtime: make(map[string]interface{}),
+			Runtime: make(map[string]any),
 		}
 
 		// Compile function based on type - completely generic approach
@@ -284,7 +284,7 @@ func (e *JSONEngine) compileValidators() error {
 			ID:      id,
 			Config:  validatorConfig,
 			Rules:   validatorConfig.Rules, // Now using generic map
-			Runtime: make(map[string]interface{}),
+			Runtime: make(map[string]any),
 		}
 	}
 	return nil
@@ -301,7 +301,7 @@ func (e *JSONEngine) compileWorkflows() error {
 			Nodes:  make(map[string]*Node),
 			Edges:  make([]*Edge, 0),
 			Runtime: &WorkflowRuntime{
-				Context:   make(map[string]interface{}),
+				Context:   make(map[string]any),
 				Variables: workflowConfig.Variables,
 				Status:    "ready",
 			},
@@ -312,8 +312,8 @@ func (e *JSONEngine) compileWorkflows() error {
 			node := &Node{
 				ID:      nodeConfig.ID,
 				Config:  nodeConfig,
-				Inputs:  make(map[string]interface{}),
-				Outputs: make(map[string]interface{}),
+				Inputs:  make(map[string]any),
+				Outputs: make(map[string]any),
 			}
 
 			// Link function if specified
@@ -436,15 +436,15 @@ func (e *JSONEngine) createRouteHandler(routeConfig RouteConfig) fiber.Handler {
 		// Create execution context with enhanced generic data
 		ctx := &ExecutionContext{
 			Request:    c,
-			Data:       make(map[string]interface{}),
-			Variables:  make(map[string]interface{}),
-			Session:    make(map[string]interface{}),
-			User:       make(map[string]interface{}),
+			Data:       make(map[string]any),
+			Variables:  make(map[string]any),
+			Session:    make(map[string]any),
+			User:       make(map[string]any),
 			Functions:  e.functions,
 			Validators: e.validators,
 			Config:     e.config,
-			Runtime:    make(map[string]interface{}),
-			Context:    make(map[string]interface{}),
+			Runtime:    make(map[string]any),
+			Context:    make(map[string]any),
 		}
 
 		// Add global and generic data to context
@@ -508,7 +508,7 @@ func (e *JSONEngine) handleTemplate(ctx *ExecutionContext, routeConfig RouteConf
 	}
 
 	// Prepare template data
-	data := make(map[string]interface{})
+	data := make(map[string]any)
 
 	// Add global data
 	for k, v := range e.data {
@@ -529,7 +529,7 @@ func (e *JSONEngine) handleTemplate(ctx *ExecutionContext, routeConfig RouteConf
 	if templateID == "employee_form" {
 		if emp, exists := data["employee"]; !exists || emp == nil {
 			// For add mode: provide empty employee object and set isEditMode to false
-			data["employee"] = map[string]interface{}{
+			data["employee"] = map[string]any{
 				"id":         "",
 				"name":       "",
 				"email":      "",
@@ -542,7 +542,7 @@ func (e *JSONEngine) handleTemplate(ctx *ExecutionContext, routeConfig RouteConf
 			data["isEditMode"] = false
 		} else {
 			// For edit mode: ensure employee has all required fields and set isEditMode to true
-			if empMap, ok := emp.(map[string]interface{}); ok {
+			if empMap, ok := emp.(map[string]any); ok {
 				// Fill in any missing fields with empty values
 				fields := []string{"id", "name", "email", "department", "position", "salary", "hire_date", "status"}
 				for _, field := range fields {
@@ -557,7 +557,7 @@ func (e *JSONEngine) handleTemplate(ctx *ExecutionContext, routeConfig RouteConf
 	}
 
 	// Add request data
-	data["request"] = map[string]interface{}{
+	data["request"] = map[string]any{
 		"method":  ctx.Request.Method(),
 		"path":    ctx.Request.Path(),
 		"query":   ctx.Request.Queries(),
@@ -602,7 +602,7 @@ func (e *JSONEngine) handleTemplate(ctx *ExecutionContext, routeConfig RouteConf
 }
 
 // renderTemplate renders a template with data
-func (e *JSONEngine) renderTemplate(template *Template, data map[string]interface{}) (string, error) {
+func (e *JSONEngine) renderTemplate(template *Template, data map[string]any) (string, error) {
 	tmpl := template.Compiled.(*htmlTemplate.Template)
 	var buf strings.Builder
 	if err := tmpl.Execute(&buf, data); err != nil {
@@ -669,7 +669,7 @@ func (e *JSONEngine) handleFunction(ctx *ExecutionContext, routeConfig RouteConf
 	}
 
 	// Prepare input data
-	input := make(map[string]interface{})
+	input := make(map[string]any)
 
 	// Add handler input if specified
 	if routeConfig.Handler.Input != nil {
@@ -680,7 +680,7 @@ func (e *JSONEngine) handleFunction(ctx *ExecutionContext, routeConfig RouteConf
 
 	// Add request body for POST/PUT requests
 	if ctx.Request.Method() == "POST" || ctx.Request.Method() == "PUT" {
-		var body map[string]interface{}
+		var body map[string]any
 		if err := ctx.Request.BodyParser(&body); err == nil {
 			for k, v := range body {
 				input[k] = v
@@ -721,7 +721,7 @@ func (e *JSONEngine) handleFunction(ctx *ExecutionContext, routeConfig RouteConf
 		}
 
 		// Merge function result with context data
-		templateData := make(map[string]interface{})
+		templateData := make(map[string]any)
 
 		// Add global data first
 		for k, v := range ctx.Data {
@@ -765,7 +765,7 @@ func (e *JSONEngine) checkAuthentication(ctx *ExecutionContext, auth *AuthConfig
 			token = ctx.Request.Query("token")
 		}
 		if token == "" && ctx.Request.Method() == "POST" {
-			var body map[string]interface{}
+			var body map[string]any
 			if err := ctx.Request.BodyParser(&body); err == nil {
 				if t, ok := body["token"].(string); ok {
 					token = t
@@ -778,7 +778,7 @@ func (e *JSONEngine) checkAuthentication(ctx *ExecutionContext, auth *AuthConfig
 		}
 
 		// Simple token validation (in real app, validate JWT or session)
-		ctx.User = map[string]interface{}{
+		ctx.User = map[string]any{
 			"id":       "user_" + token,
 			"username": "demo_user",
 			"role":     "user",
@@ -789,8 +789,8 @@ func (e *JSONEngine) checkAuthentication(ctx *ExecutionContext, auth *AuthConfig
 }
 
 // Function executors
-func (e *JSONEngine) createHTTPFunction(config FunctionConfig) interface{} {
-	return func(ctx *ExecutionContext, input map[string]interface{}) (map[string]interface{}, error) {
+func (e *JSONEngine) createHTTPFunction(config FunctionConfig) any {
+	return func(ctx *ExecutionContext, input map[string]any) (map[string]any, error) {
 		client := &http.Client{Timeout: getDefaultDuration(e.workflowEngineConfig.ExecutionTimeout, 30*time.Second)}
 
 		method := config.Method
@@ -823,10 +823,10 @@ func (e *JSONEngine) createHTTPFunction(config FunctionConfig) interface{} {
 			return nil, err
 		}
 
-		var result map[string]interface{}
+		var result map[string]any
 		if err := json.Unmarshal(body, &result); err != nil {
 			// If not JSON, return as string
-			result = map[string]interface{}{
+			result = map[string]any{
 				"status": resp.StatusCode,
 				"body":   string(body),
 			}
@@ -836,8 +836,8 @@ func (e *JSONEngine) createHTTPFunction(config FunctionConfig) interface{} {
 	}
 }
 
-func (e *JSONEngine) createExpressionFunction(config FunctionConfig) interface{} {
-	return func(ctx *ExecutionContext, input map[string]interface{}) (map[string]interface{}, error) {
+func (e *JSONEngine) createExpressionFunction(config FunctionConfig) any {
+	return func(ctx *ExecutionContext, input map[string]any) (map[string]any, error) {
 		// Special handling for authentication function
 		if config.ID == "authenticate_user" || strings.Contains(config.Code, "validate user credentials") {
 			return e.handleAuthentication(ctx, input)
@@ -845,7 +845,7 @@ func (e *JSONEngine) createExpressionFunction(config FunctionConfig) interface{}
 
 		// If there's a response configuration, use it directly
 		if config.Response != nil {
-			result := make(map[string]interface{})
+			result := make(map[string]any)
 
 			// Process response template with data substitution
 			for key, value := range config.Response {
@@ -909,7 +909,7 @@ func (e *JSONEngine) createExpressionFunction(config FunctionConfig) interface{}
 
 		// Try to parse as JSON first
 		if strings.HasPrefix(strings.TrimSpace(expression), "{") {
-			var jsonResult map[string]interface{}
+			var jsonResult map[string]any
 			if err := json.Unmarshal([]byte(expression), &jsonResult); err == nil {
 				return jsonResult, nil
 			} else {
@@ -918,14 +918,14 @@ func (e *JSONEngine) createExpressionFunction(config FunctionConfig) interface{}
 		}
 
 		// If not JSON, return as simple result
-		return map[string]interface{}{
+		return map[string]any{
 			"result": expression,
 		}, nil
 	}
 }
 
-func (e *JSONEngine) createTemplateFunction(config FunctionConfig) interface{} {
-	return func(ctx *ExecutionContext, input map[string]interface{}) (map[string]interface{}, error) {
+func (e *JSONEngine) createTemplateFunction(config FunctionConfig) any {
+	return func(ctx *ExecutionContext, input map[string]any) (map[string]any, error) {
 		tmpl, err := htmlTemplate.New("function").Parse(config.Code)
 		if err != nil {
 			return nil, err
@@ -936,16 +936,16 @@ func (e *JSONEngine) createTemplateFunction(config FunctionConfig) interface{} {
 			return nil, err
 		}
 
-		return map[string]interface{}{
+		return map[string]any{
 			"result": buf.String(),
 		}, nil
 	}
 }
 
-func (e *JSONEngine) createJSFunction(config FunctionConfig) interface{} {
-	return func(ctx *ExecutionContext, input map[string]interface{}) (map[string]interface{}, error) {
+func (e *JSONEngine) createJSFunction(config FunctionConfig) any {
+	return func(ctx *ExecutionContext, input map[string]any) (map[string]any, error) {
 		// Placeholder for JavaScript execution (would use goja or similar in production)
-		return map[string]interface{}{
+		return map[string]any{
 			"result": "JavaScript execution not implemented in demo",
 			"code":   config.Code,
 			"input":  input,
@@ -956,7 +956,7 @@ func (e *JSONEngine) createJSFunction(config FunctionConfig) interface{} {
 // Additional generic route handlers for any application type
 func (e *JSONEngine) handleJSON(ctx *ExecutionContext, routeConfig RouteConfig) error {
 	// Handle pure JSON responses
-	response := make(map[string]interface{})
+	response := make(map[string]any)
 
 	// Add handler output if specified
 	if routeConfig.Handler.Output != nil {
@@ -974,7 +974,7 @@ func (e *JSONEngine) handleJSON(ctx *ExecutionContext, routeConfig RouteConfig) 
 
 	// Add request data if available
 	if ctx.Request.Method() == "POST" || ctx.Request.Method() == "PUT" {
-		var body map[string]interface{}
+		var body map[string]any
 		if err := ctx.Request.BodyParser(&body); err == nil {
 			response["request_data"] = body
 		}
@@ -1006,7 +1006,7 @@ func (e *JSONEngine) handleAPI(ctx *ExecutionContext, routeConfig RouteConfig) e
 	}
 
 	// Return configured output or input as fallback
-	response := make(map[string]interface{})
+	response := make(map[string]any)
 	if routeConfig.Handler.Output != nil {
 		response = routeConfig.Handler.Output
 	} else if routeConfig.Handler.Input != nil {
@@ -1024,7 +1024,7 @@ func (e *JSONEngine) handleGeneric(ctx *ExecutionContext, routeConfig RouteConfi
 	// Generic handler for unknown types - maximum flexibility
 	log.Printf("Using generic handler for type: %s", routeConfig.Handler.Type)
 
-	response := map[string]interface{}{
+	response := map[string]any{
 		"handler_type": routeConfig.Handler.Type,
 		"target":       routeConfig.Handler.Target,
 		"method":       ctx.Request.Method(),
@@ -1044,7 +1044,7 @@ func (e *JSONEngine) handleGeneric(ctx *ExecutionContext, routeConfig RouteConfi
 
 	// Add request body for POST/PUT requests
 	if ctx.Request.Method() == "POST" || ctx.Request.Method() == "PUT" {
-		var body map[string]interface{}
+		var body map[string]any
 		if err := ctx.Request.BodyParser(&body); err == nil {
 			response["request_body"] = body
 		}
@@ -1073,7 +1073,7 @@ func (e *JSONEngine) createAuthMiddleware(config MiddlewareConfig) fiber.Handler
 	return func(c *fiber.Ctx) error {
 		// Simple auth middleware
 		if config.Config["skip_paths"] != nil {
-			skipPaths := config.Config["skip_paths"].([]interface{})
+			skipPaths := config.Config["skip_paths"].([]any)
 			for _, path := range skipPaths {
 				if c.Path() == path.(string) {
 					return c.Next()
@@ -1117,11 +1117,11 @@ func (e *JSONEngine) createCustomMiddleware(config MiddlewareConfig) fiber.Handl
 }
 
 // Workflow execution using real workflow engine
-func (e *JSONEngine) executeWorkflow(ctx *ExecutionContext, workflow *Workflow, input map[string]interface{}) (map[string]interface{}, error) {
+func (e *JSONEngine) executeWorkflow(ctx *ExecutionContext, workflow *Workflow, input map[string]any) (map[string]any, error) {
 	log.Printf("Executing workflow: %s", workflow.ID)
 
 	// Initialize workflow context
-	workflowCtx := make(map[string]interface{})
+	workflowCtx := make(map[string]any)
 	for k, v := range input {
 		workflowCtx[k] = v
 	}
@@ -1130,8 +1130,8 @@ func (e *JSONEngine) executeWorkflow(ctx *ExecutionContext, workflow *Workflow, 
 	}
 
 	// Simple sequential execution
-	finalResult := make(map[string]interface{})
-	var lastNodeResult map[string]interface{}
+	finalResult := make(map[string]any)
+	var lastNodeResult map[string]any
 
 	for _, node := range workflow.Nodes {
 		ctx.Node = node
@@ -1167,7 +1167,7 @@ func (e *JSONEngine) executeWorkflow(ctx *ExecutionContext, workflow *Workflow, 
 	// If still no result, return the last meaningful result
 	if len(finalResult) == 0 {
 		// Return only safe, non-circular data
-		finalResult = map[string]interface{}{
+		finalResult = map[string]any{
 			"status":  "completed",
 			"message": workflowCtx["result"],
 		}
@@ -1187,9 +1187,9 @@ func (e *JSONEngine) executeWorkflow(ctx *ExecutionContext, workflow *Workflow, 
 }
 
 // sanitizeResult removes circular references and non-serializable data
-func (e *JSONEngine) sanitizeResult(input map[string]interface{}) map[string]interface{} {
+func (e *JSONEngine) sanitizeResult(input map[string]any) map[string]any {
 	// Create a clean result with only the essential workflow output
-	result := make(map[string]interface{})
+	result := make(map[string]any)
 
 	// Include all safe fields that don't cause circular references
 	for key, value := range input {
@@ -1207,18 +1207,18 @@ func (e *JSONEngine) sanitizeResult(input map[string]interface{}) map[string]int
 
 	return result
 } // cleanValue safely converts values to JSON-serializable types
-func (e *JSONEngine) cleanValue(value interface{}) interface{} {
+func (e *JSONEngine) cleanValue(value any) any {
 	switch v := value.(type) {
 	case string, int, int64, float64, bool, nil:
 		return v
-	case []interface{}:
-		cleanArray := make([]interface{}, 0, len(v))
+	case []any:
+		cleanArray := make([]any, 0, len(v))
 		for _, item := range v {
 			cleanArray = append(cleanArray, e.cleanValue(item))
 		}
 		return cleanArray
-	case map[string]interface{}:
-		cleanMap := make(map[string]interface{})
+	case map[string]any:
+		cleanMap := make(map[string]any)
 		for k, val := range v {
 			// Only include simple fields in nested maps
 			switch val.(type) {
@@ -1236,7 +1236,7 @@ func (e *JSONEngine) cleanValue(value interface{}) interface{} {
 }
 
 // Execute individual nodes - simplified implementation for now
-func (e *JSONEngine) executeNode(ctx *ExecutionContext, node *Node, input map[string]interface{}) (map[string]interface{}, error) {
+func (e *JSONEngine) executeNode(ctx *ExecutionContext, node *Node, input map[string]any) (map[string]any, error) {
 	log.Printf("Executing node: %s (type: %s)", node.ID, node.Config.Type)
 
 	switch node.Config.Type {
@@ -1247,7 +1247,7 @@ func (e *JSONEngine) executeNode(ctx *ExecutionContext, node *Node, input map[st
 			log.Printf("Executing sub-workflow: %s", subWorkflowID)
 
 			// Map inputs if specified
-			subInput := make(map[string]interface{})
+			subInput := make(map[string]any)
 			if node.Config.InputMapping != nil {
 				for sourceKey, targetKey := range node.Config.InputMapping {
 					if value, exists := input[sourceKey]; exists {
@@ -1268,7 +1268,7 @@ func (e *JSONEngine) executeNode(ctx *ExecutionContext, node *Node, input map[st
 
 			// Map outputs if specified
 			if node.Config.OutputMapping != nil {
-				mappedResult := make(map[string]interface{})
+				mappedResult := make(map[string]any)
 				for sourceKey, targetKey := range node.Config.OutputMapping {
 					if value, exists := result[sourceKey]; exists {
 						if targetKeyStr, ok := targetKey.(string); ok {
@@ -1296,15 +1296,15 @@ func (e *JSONEngine) executeNode(ctx *ExecutionContext, node *Node, input map[st
 			conditionStr := fmt.Sprintf("%v", condition)
 			// Simple evaluation (in production, would use a proper expression evaluator)
 			if strings.Contains(conditionStr, "true") {
-				return map[string]interface{}{"result": true}, nil
+				return map[string]any{"result": true}, nil
 			}
 		}
-		return map[string]interface{}{"result": false}, nil
+		return map[string]any{"result": false}, nil
 
 	case "data":
 		// Return configured data
 		if data, exists := node.Config.Config["data"]; exists {
-			return map[string]interface{}{"data": data}, nil
+			return map[string]any{"data": data}, nil
 		}
 		return input, nil
 
@@ -1315,13 +1315,13 @@ func (e *JSONEngine) executeNode(ctx *ExecutionContext, node *Node, input map[st
 }
 
 // Function execution using the compiled function handlers
-func (e *JSONEngine) executeFunction(ctx *ExecutionContext, function *Function, input map[string]interface{}) (map[string]interface{}, error) {
+func (e *JSONEngine) executeFunction(ctx *ExecutionContext, function *Function, input map[string]any) (map[string]any, error) {
 	if function.Handler == nil {
 		return nil, fmt.Errorf("function handler not compiled")
 	}
 
 	switch handler := function.Handler.(type) {
-	case func(*ExecutionContext, map[string]interface{}) (map[string]interface{}, error):
+	case func(*ExecutionContext, map[string]any) (map[string]any, error):
 		return handler(ctx, input)
 	default:
 		return nil, fmt.Errorf("unknown function handler type")
@@ -1329,8 +1329,8 @@ func (e *JSONEngine) executeFunction(ctx *ExecutionContext, function *Function, 
 }
 
 // createBuiltinFunction creates handlers for built-in functions
-func (e *JSONEngine) createBuiltinFunction(config FunctionConfig) interface{} {
-	return func(ctx *ExecutionContext, input map[string]interface{}) (map[string]interface{}, error) {
+func (e *JSONEngine) createBuiltinFunction(config FunctionConfig) any {
+	return func(ctx *ExecutionContext, input map[string]any) (map[string]any, error) {
 		switch config.Handler {
 		case "authenticate":
 			// Handle user authentication
@@ -1338,7 +1338,7 @@ func (e *JSONEngine) createBuiltinFunction(config FunctionConfig) interface{} {
 			password, _ := input["password"].(string)
 
 			if username == "" || password == "" {
-				return map[string]interface{}{
+				return map[string]any{
 					"success": false,
 					"error":   "Username and password required",
 				}, nil
@@ -1346,23 +1346,23 @@ func (e *JSONEngine) createBuiltinFunction(config FunctionConfig) interface{} {
 
 			// Generic authentication using user data from configuration
 			// Look for users in multiple possible data keys for flexibility
-			var users []interface{}
+			var users []any
 
-			if demoUsers, ok := e.data["demo_users"].([]interface{}); ok {
+			if demoUsers, ok := e.data["demo_users"].([]any); ok {
 				users = demoUsers
-			} else if configUsers, ok := e.data["users"].([]interface{}); ok {
+			} else if configUsers, ok := e.data["users"].([]any); ok {
 				users = configUsers
-			} else if authUsers, ok := e.data["auth_users"].([]interface{}); ok {
+			} else if authUsers, ok := e.data["auth_users"].([]any); ok {
 				users = authUsers
 			} else {
-				return map[string]interface{}{
+				return map[string]any{
 					"success": false,
 					"error":   "User authentication data not configured",
 				}, nil
 			}
 
 			for _, userInterface := range users {
-				user, ok := userInterface.(map[string]interface{})
+				user, ok := userInterface.(map[string]any)
 				if !ok {
 					continue
 				}
@@ -1375,10 +1375,10 @@ func (e *JSONEngine) createBuiltinFunction(config FunctionConfig) interface{} {
 					// Generate simple token (in production, use JWT)
 					token := fmt.Sprintf("token_%s_%d", username, time.Now().Unix())
 
-					return map[string]interface{}{
+					return map[string]any{
 						"success": true,
 						"token":   token,
-						"user": map[string]interface{}{
+						"user": map[string]any{
 							"username": username,
 							"role":     role,
 						},
@@ -1386,7 +1386,7 @@ func (e *JSONEngine) createBuiltinFunction(config FunctionConfig) interface{} {
 				}
 			}
 
-			return map[string]interface{}{
+			return map[string]any{
 				"success": false,
 				"error":   "Invalid credentials",
 			}, nil
@@ -1395,14 +1395,14 @@ func (e *JSONEngine) createBuiltinFunction(config FunctionConfig) interface{} {
 			return input, nil
 		case "log":
 			log.Printf("Builtin log: %+v", input)
-			return map[string]interface{}{"logged": true}, nil
+			return map[string]any{"logged": true}, nil
 		case "validate":
 			// Simple validation example
-			return map[string]interface{}{"valid": true}, nil
+			return map[string]any{"valid": true}, nil
 		case "transform":
 			// Simple data transformation
 			if data, exists := input["data"]; exists {
-				return map[string]interface{}{"transformed": data}, nil
+				return map[string]any{"transformed": data}, nil
 			}
 			return input, nil
 		default:
@@ -1412,8 +1412,8 @@ func (e *JSONEngine) createBuiltinFunction(config FunctionConfig) interface{} {
 }
 
 // createCustomFunction creates handlers for custom user-defined functions
-func (e *JSONEngine) createCustomFunction(config FunctionConfig) interface{} {
-	return func(ctx *ExecutionContext, input map[string]interface{}) (map[string]interface{}, error) {
+func (e *JSONEngine) createCustomFunction(config FunctionConfig) any {
+	return func(ctx *ExecutionContext, input map[string]any) (map[string]any, error) {
 		// Execute custom code from config.Code
 		if config.Code != "" {
 			// For now, just return the configured response or echo input
@@ -1446,7 +1446,7 @@ func (e *JSONEngine) createCustomFunction(config FunctionConfig) interface{} {
 		}
 
 		// Simple key-value transformation based on config
-		result := make(map[string]interface{})
+		result := make(map[string]any)
 		for k, v := range input {
 			result[k] = v
 		}
@@ -1463,11 +1463,11 @@ func (e *JSONEngine) createCustomFunction(config FunctionConfig) interface{} {
 }
 
 // CRUD operation handlers
-func (e *JSONEngine) handleCreateEntity(ctx *ExecutionContext, entity string, input map[string]interface{}) (map[string]interface{}, error) {
+func (e *JSONEngine) handleCreateEntity(ctx *ExecutionContext, entity string, input map[string]any) (map[string]any, error) {
 	switch entity {
 	case "employee":
 		// Create new employee
-		return map[string]interface{}{
+		return map[string]any{
 			"success": true,
 			"message": "Employee created successfully",
 			"id":      time.Now().Unix(), // Simple ID generation
@@ -1475,7 +1475,7 @@ func (e *JSONEngine) handleCreateEntity(ctx *ExecutionContext, entity string, in
 		}, nil
 	case "post":
 		// Create new blog post
-		return map[string]interface{}{
+		return map[string]any{
 			"success": true,
 			"message": "Blog post created successfully",
 			"id":      time.Now().Unix(),
@@ -1483,14 +1483,14 @@ func (e *JSONEngine) handleCreateEntity(ctx *ExecutionContext, entity string, in
 		}, nil
 	case "email":
 		// Create email campaign
-		return map[string]interface{}{
+		return map[string]any{
 			"success": true,
 			"message": "Email campaign created successfully",
 			"id":      time.Now().Unix(),
 			"data":    input,
 		}, nil
 	default:
-		return map[string]interface{}{
+		return map[string]any{
 			"success": true,
 			"message": fmt.Sprintf("%s created successfully", entity),
 			"id":      time.Now().Unix(),
@@ -1499,9 +1499,9 @@ func (e *JSONEngine) handleCreateEntity(ctx *ExecutionContext, entity string, in
 	}
 }
 
-func (e *JSONEngine) handleUpdateEntity(ctx *ExecutionContext, entity string, input map[string]interface{}) (map[string]interface{}, error) {
+func (e *JSONEngine) handleUpdateEntity(ctx *ExecutionContext, entity string, input map[string]any) (map[string]any, error) {
 	id, _ := input["id"].(string)
-	return map[string]interface{}{
+	return map[string]any{
 		"success": true,
 		"message": fmt.Sprintf("%s updated successfully", entity),
 		"id":      id,
@@ -1509,16 +1509,16 @@ func (e *JSONEngine) handleUpdateEntity(ctx *ExecutionContext, entity string, in
 	}, nil
 }
 
-func (e *JSONEngine) handleDeleteEntity(ctx *ExecutionContext, entity string, input map[string]interface{}) (map[string]interface{}, error) {
+func (e *JSONEngine) handleDeleteEntity(ctx *ExecutionContext, entity string, input map[string]any) (map[string]any, error) {
 	id, _ := input["id"].(string)
-	return map[string]interface{}{
+	return map[string]any{
 		"success": true,
 		"message": fmt.Sprintf("%s deleted successfully", entity),
 		"id":      id,
 	}, nil
 }
 
-func (e *JSONEngine) handleGetEntity(ctx *ExecutionContext, entity string, input map[string]interface{}) (map[string]interface{}, error) {
+func (e *JSONEngine) handleGetEntity(ctx *ExecutionContext, entity string, input map[string]any) (map[string]any, error) {
 	// Get entity ID from input
 	var entityID string
 	if idVal, ok := input["id"]; ok {
@@ -1526,7 +1526,7 @@ func (e *JSONEngine) handleGetEntity(ctx *ExecutionContext, entity string, input
 	}
 
 	if entityID == "" {
-		return map[string]interface{}{
+		return map[string]any{
 			"success": false,
 			"error":   entity + " ID is required",
 		}, nil
@@ -1535,14 +1535,14 @@ func (e *JSONEngine) handleGetEntity(ctx *ExecutionContext, entity string, input
 	// Look up entity data from configuration
 	entityDataKey := entity + "s" // Assume plural form (employees, posts, etc.)
 	if entityData, ok := e.data[entityDataKey]; ok {
-		if entityList, ok := entityData.([]interface{}); ok {
+		if entityList, ok := entityData.([]any); ok {
 			for _, item := range entityList {
-				if itemMap, ok := item.(map[string]interface{}); ok {
+				if itemMap, ok := item.(map[string]any); ok {
 					if itemIDVal, ok := itemMap["id"]; ok {
 						itemIDStr := fmt.Sprintf("%v", itemIDVal)
 						if itemIDStr == entityID {
 							// Found the entity, return it with all required data
-							result := make(map[string]interface{})
+							result := make(map[string]any)
 
 							// Add the entity with singular name
 							result[entity] = itemMap
@@ -1567,17 +1567,17 @@ func (e *JSONEngine) handleGetEntity(ctx *ExecutionContext, entity string, input
 		}
 	}
 
-	return map[string]interface{}{
+	return map[string]any{
 		"success": false,
 		"error":   entity + " not found",
 	}, nil
 }
 
-func (e *JSONEngine) handleListEntity(ctx *ExecutionContext, entity string, input map[string]interface{}) (map[string]interface{}, error) {
+func (e *JSONEngine) handleListEntity(ctx *ExecutionContext, entity string, input map[string]any) (map[string]any, error) {
 	// Look up entity data from configuration using plural form
 	entityDataKey := entity + "s" // Assume plural form (employees, posts, etc.)
 	if entityData, ok := e.data[entityDataKey]; ok {
-		result := map[string]interface{}{
+		result := map[string]any{
 			"success": true,
 		}
 		result[entityDataKey] = entityData
@@ -1593,14 +1593,14 @@ func (e *JSONEngine) handleListEntity(ctx *ExecutionContext, entity string, inpu
 	}
 
 	// If no data found, return empty result
-	return map[string]interface{}{
+	return map[string]any{
 		"success":    true,
-		entity + "s": []interface{}{},
+		entity + "s": []any{},
 	}, nil
 }
 
-func (e *JSONEngine) handleSendCampaign(ctx *ExecutionContext, input map[string]interface{}) (map[string]interface{}, error) {
-	return map[string]interface{}{
+func (e *JSONEngine) handleSendCampaign(ctx *ExecutionContext, input map[string]any) (map[string]any, error) {
+	return map[string]any{
 		"success":     true,
 		"campaign_id": fmt.Sprintf("campaign_%d", time.Now().Unix()),
 		"emails_sent": 10, // Mock value
@@ -1608,9 +1608,9 @@ func (e *JSONEngine) handleSendCampaign(ctx *ExecutionContext, input map[string]
 	}, nil
 }
 
-func (e *JSONEngine) handlePublishEntity(ctx *ExecutionContext, entity string, input map[string]interface{}) (map[string]interface{}, error) {
+func (e *JSONEngine) handlePublishEntity(ctx *ExecutionContext, entity string, input map[string]any) (map[string]any, error) {
 	id, _ := input["id"].(string)
-	return map[string]interface{}{
+	return map[string]any{
 		"success": true,
 		"message": fmt.Sprintf("%s published successfully", entity),
 		"id":      id,
@@ -1619,8 +1619,8 @@ func (e *JSONEngine) handlePublishEntity(ctx *ExecutionContext, entity string, i
 }
 
 // createGenericFunction creates a generic function handler for unknown types
-func (e *JSONEngine) createGenericFunction(config FunctionConfig) interface{} {
-	return func(ctx *ExecutionContext, input map[string]interface{}) (map[string]interface{}, error) {
+func (e *JSONEngine) createGenericFunction(config FunctionConfig) any {
+	return func(ctx *ExecutionContext, input map[string]any) (map[string]any, error) {
 		log.Printf("Executing generic function: %s with type: %s", config.ID, config.Type)
 
 		// For unknown function types, we create a flexible handler that:
@@ -1630,7 +1630,7 @@ func (e *JSONEngine) createGenericFunction(config FunctionConfig) interface{} {
 		}
 
 		// 2. Applies any transformations from config
-		result := make(map[string]interface{})
+		result := make(map[string]any)
 		for k, v := range input {
 			result[k] = v
 		}
@@ -1651,12 +1651,12 @@ func (e *JSONEngine) createGenericFunction(config FunctionConfig) interface{} {
 }
 
 // handleAuthentication handles user authentication with actual validation
-func (e *JSONEngine) handleAuthentication(ctx *ExecutionContext, input map[string]interface{}) (map[string]interface{}, error) {
+func (e *JSONEngine) handleAuthentication(ctx *ExecutionContext, input map[string]any) (map[string]any, error) {
 	username, _ := input["username"].(string)
 	password, _ := input["password"].(string)
 
 	if username == "" || password == "" {
-		return map[string]interface{}{
+		return map[string]any{
 			"success": false,
 			"error":   "Username and password required",
 		}, nil
@@ -1664,23 +1664,23 @@ func (e *JSONEngine) handleAuthentication(ctx *ExecutionContext, input map[strin
 
 	// Generic authentication using user data from configuration
 	// Look for users in multiple possible data keys for flexibility
-	var users []interface{}
+	var users []any
 
-	if demoUsers, ok := e.data["demo_users"].([]interface{}); ok {
+	if demoUsers, ok := e.data["demo_users"].([]any); ok {
 		users = demoUsers
-	} else if configUsers, ok := e.data["users"].([]interface{}); ok {
+	} else if configUsers, ok := e.data["users"].([]any); ok {
 		users = configUsers
-	} else if authUsers, ok := e.data["auth_users"].([]interface{}); ok {
+	} else if authUsers, ok := e.data["auth_users"].([]any); ok {
 		users = authUsers
 	} else {
-		return map[string]interface{}{
+		return map[string]any{
 			"success": false,
 			"error":   "User authentication data not configured",
 		}, nil
 	}
 
 	for _, userInterface := range users {
-		user, ok := userInterface.(map[string]interface{})
+		user, ok := userInterface.(map[string]any)
 		if !ok {
 			continue
 		}
@@ -1693,10 +1693,10 @@ func (e *JSONEngine) handleAuthentication(ctx *ExecutionContext, input map[strin
 			// Generate simple token (in production, use JWT)
 			token := fmt.Sprintf("token_%s_%d", username, time.Now().Unix())
 
-			return map[string]interface{}{
+			return map[string]any{
 				"success": true,
 				"token":   token,
-				"user": map[string]interface{}{
+				"user": map[string]any{
 					"username": username,
 					"role":     role,
 				},
@@ -1704,7 +1704,7 @@ func (e *JSONEngine) handleAuthentication(ctx *ExecutionContext, input map[strin
 		}
 	}
 
-	return map[string]interface{}{
+	return map[string]any{
 		"success": false,
 		"error":   "Invalid credentials",
 	}, nil

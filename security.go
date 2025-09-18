@@ -26,19 +26,19 @@ type SecurityManager struct {
 // AuthProvider interface for different authentication methods
 type AuthProvider interface {
 	Name() string
-	Authenticate(ctx context.Context, credentials map[string]interface{}) (*User, error)
+	Authenticate(ctx context.Context, credentials map[string]any) (*User, error)
 	ValidateToken(token string) (*User, error)
 }
 
 // User represents an authenticated user
 type User struct {
-	ID          string                 `json:"id"`
-	Username    string                 `json:"username"`
-	Roles       []string               `json:"roles"`
-	Permissions []string               `json:"permissions"`
-	Metadata    map[string]interface{} `json:"metadata,omitempty"`
-	CreatedAt   time.Time              `json:"created_at"`
-	LastLoginAt *time.Time             `json:"last_login_at,omitempty"`
+	ID          string         `json:"id"`
+	Username    string         `json:"username"`
+	Roles       []string       `json:"roles"`
+	Permissions []string       `json:"permissions"`
+	Metadata    map[string]any `json:"metadata,omitempty"`
+	CreatedAt   time.Time      `json:"created_at"`
+	LastLoginAt *time.Time     `json:"last_login_at,omitempty"`
 }
 
 // RoleManager manages user roles and permissions
@@ -88,16 +88,16 @@ type AuditLogger struct {
 
 // AuditEvent represents a security audit event
 type AuditEvent struct {
-	ID        string                 `json:"id"`
-	Timestamp time.Time              `json:"timestamp"`
-	EventType string                 `json:"event_type"`
-	UserID    string                 `json:"user_id,omitempty"`
-	Resource  string                 `json:"resource"`
-	Action    string                 `json:"action"`
-	IPAddress string                 `json:"ip_address,omitempty"`
-	UserAgent string                 `json:"user_agent,omitempty"`
-	Success   bool                   `json:"success"`
-	Details   map[string]interface{} `json:"details,omitempty"`
+	ID        string         `json:"id"`
+	Timestamp time.Time      `json:"timestamp"`
+	EventType string         `json:"event_type"`
+	UserID    string         `json:"user_id,omitempty"`
+	Resource  string         `json:"resource"`
+	Action    string         `json:"action"`
+	IPAddress string         `json:"ip_address,omitempty"`
+	UserAgent string         `json:"user_agent,omitempty"`
+	Success   bool           `json:"success"`
+	Details   map[string]any `json:"details,omitempty"`
 }
 
 // SessionManager manages user sessions
@@ -109,13 +109,13 @@ type SessionManager struct {
 
 // Session represents a user session
 type Session struct {
-	ID        string                 `json:"id"`
-	UserID    string                 `json:"user_id"`
-	CreatedAt time.Time              `json:"created_at"`
-	ExpiresAt time.Time              `json:"expires_at"`
-	IPAddress string                 `json:"ip_address"`
-	UserAgent string                 `json:"user_agent"`
-	Data      map[string]interface{} `json:"data,omitempty"`
+	ID        string         `json:"id"`
+	UserID    string         `json:"user_id"`
+	CreatedAt time.Time      `json:"created_at"`
+	ExpiresAt time.Time      `json:"expires_at"`
+	IPAddress string         `json:"ip_address"`
+	UserAgent string         `json:"user_agent"`
+	Data      map[string]any `json:"data,omitempty"`
 }
 
 // NewSecurityManager creates a new security manager
@@ -369,7 +369,7 @@ func (sm *SessionManager) CreateSession(userID, ipAddress, userAgent string) *Se
 		ExpiresAt: time.Now().Add(sm.maxAge),
 		IPAddress: ipAddress,
 		UserAgent: userAgent,
-		Data:      make(map[string]interface{}),
+		Data:      make(map[string]any),
 	}
 
 	sm.sessions[session.ID] = session
@@ -426,7 +426,7 @@ func (sm *SecurityManager) AddAuthProvider(provider AuthProvider) {
 }
 
 // Authenticate authenticates a user using available providers
-func (sm *SecurityManager) Authenticate(ctx context.Context, credentials map[string]interface{}) (*User, error) {
+func (sm *SecurityManager) Authenticate(ctx context.Context, credentials map[string]any) (*User, error) {
 	sm.mu.RLock()
 	providers := make(map[string]AuthProvider)
 	for name, provider := range sm.authProviders {
@@ -444,7 +444,7 @@ func (sm *SecurityManager) Authenticate(ctx context.Context, credentials map[str
 				UserID:    user.ID,
 				Action:    "login",
 				Success:   true,
-				Details: map[string]interface{}{
+				Details: map[string]any{
 					"provider": provider.Name(),
 				},
 			})
@@ -461,7 +461,7 @@ func (sm *SecurityManager) Authenticate(ctx context.Context, credentials map[str
 		EventType: "authentication",
 		Action:    "login",
 		Success:   false,
-		Details: map[string]interface{}{
+		Details: map[string]any{
 			"error": lastErr.Error(),
 		},
 	})
@@ -524,7 +524,7 @@ func (sm *SecurityManager) CheckRateLimit(key string) error {
 			EventType: "rate_limit",
 			Action:    "exceeded",
 			Success:   false,
-			Details: map[string]interface{}{
+			Details: map[string]any{
 				"key": key,
 			},
 		})
@@ -565,7 +565,7 @@ func (bap *BasicAuthProvider) Name() string {
 	return "basic"
 }
 
-func (bap *BasicAuthProvider) Authenticate(ctx context.Context, credentials map[string]interface{}) (*User, error) {
+func (bap *BasicAuthProvider) Authenticate(ctx context.Context, credentials map[string]any) (*User, error) {
 	username, ok := credentials["username"].(string)
 	if !ok {
 		return nil, fmt.Errorf("username required")
@@ -604,7 +604,7 @@ func (bap *BasicAuthProvider) ValidateToken(token string) (*User, error) {
 	}
 
 	username := parts[0]
-	return bap.Authenticate(context.Background(), map[string]interface{}{
+	return bap.Authenticate(context.Background(), map[string]any{
 		"username": username,
 		"password": "token", // Placeholder
 	})
@@ -641,7 +641,7 @@ func NewSecurityMiddleware(sm *SecurityManager) *SecurityMiddleware {
 }
 
 // AuthenticateRequest authenticates a request with credentials
-func (sm *SecurityMiddleware) AuthenticateRequest(credentials map[string]interface{}, ipAddress string) (*User, error) {
+func (sm *SecurityMiddleware) AuthenticateRequest(credentials map[string]any, ipAddress string) (*User, error) {
 	user, err := sm.securityManager.Authenticate(context.Background(), credentials)
 	if err != nil {
 		// Log failed authentication attempt
@@ -649,7 +649,7 @@ func (sm *SecurityMiddleware) AuthenticateRequest(credentials map[string]interfa
 			EventType: "authentication",
 			Action:    "login",
 			Success:   false,
-			Details: map[string]interface{}{
+			Details: map[string]any{
 				"ip_address": ipAddress,
 				"error":      err.Error(),
 			},

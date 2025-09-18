@@ -406,7 +406,7 @@ func (r *JSONSchemaRenderer) parseGroupsFromSchema() []GroupInfo {
 		return nil
 	}
 
-	groups, ok := groupsData.([]interface{})
+	groups, ok := groupsData.([]any)
 	if !ok {
 		return nil
 	}
@@ -415,13 +415,13 @@ func (r *JSONSchemaRenderer) parseGroupsFromSchema() []GroupInfo {
 	var groupedFields = make(map[string]bool) // Track fields that are already in groups
 
 	for _, group := range groups {
-		groupMap, ok := group.(map[string]interface{})
+		groupMap, ok := group.(map[string]any)
 		if !ok {
 			continue
 		}
 
 		var groupTitle GroupTitle
-		if titleMap, ok := groupMap["title"].(map[string]interface{}); ok {
+		if titleMap, ok := groupMap["title"].(map[string]any); ok {
 			if text, ok := titleMap["text"].(string); ok {
 				groupTitle.Text = text
 			}
@@ -436,7 +436,7 @@ func (r *JSONSchemaRenderer) parseGroupsFromSchema() []GroupInfo {
 		}
 
 		var fields []FieldInfo
-		if fieldsData, ok := groupMap["fields"].([]interface{}); ok {
+		if fieldsData, ok := groupMap["fields"].([]any); ok {
 			for _, fieldName := range fieldsData {
 				if fieldNameStr, ok := fieldName.(string); ok {
 					// Handle nested field paths
@@ -948,9 +948,9 @@ func generateOptionsFromSchema(schema *jsonschema.Schema) string {
 
 	// Check UI options first
 	if schema.UI != nil {
-		if options, ok := schema.UI["options"].([]interface{}); ok {
+		if options, ok := schema.UI["options"].([]any); ok {
 			for _, option := range options {
-				if optionMap, ok := option.(map[string]interface{}); ok {
+				if optionMap, ok := option.(map[string]any); ok {
 					value := getMapValue(optionMap, "value", "")
 					text := getMapValue(optionMap, "text", value)
 					selected := ""
@@ -1044,7 +1044,7 @@ func getFieldContentHTML(field FieldInfo) string {
 		}
 
 		// Check for children elements
-		if children, ok := field.Schema.UI["children"].([]interface{}); ok {
+		if children, ok := field.Schema.UI["children"].([]any); ok {
 			return renderChildren(children)
 		}
 	}
@@ -1052,10 +1052,10 @@ func getFieldContentHTML(field FieldInfo) string {
 	return ""
 }
 
-func renderChildren(children []interface{}) string {
+func renderChildren(children []any) string {
 	var result strings.Builder
 	for _, child := range children {
-		if childMap, ok := child.(map[string]interface{}); ok {
+		if childMap, ok := child.(map[string]any); ok {
 			// Create a temporary field info for the child
 			childSchema := &jsonschema.Schema{
 				UI: childMap,
@@ -1104,7 +1104,7 @@ func generateLabel(field FieldInfo) string {
 	return fmt.Sprintf(`<label for="%s">%s%s</label>`, fieldName, title, requiredSpan)
 }
 
-func getMapValue(m map[string]interface{}, key, defaultValue string) string {
+func getMapValue(m map[string]any, key, defaultValue string) string {
 	if value, ok := m[key].(string); ok {
 		return value
 	}
@@ -1128,20 +1128,20 @@ func (r *JSONSchemaRenderer) renderButtons() string {
 
 	var buttonsHTML bytes.Buffer
 
-	if submitConfig, ok := r.Schema.Form["submit"].(map[string]interface{}); ok {
+	if submitConfig, ok := r.Schema.Form["submit"].(map[string]any); ok {
 		buttonHTML := renderButtonFromConfig(submitConfig, "submit")
 		buttonsHTML.WriteString(buttonHTML)
 	}
 
-	if resetConfig, ok := r.Schema.Form["reset"].(map[string]interface{}); ok {
+	if resetConfig, ok := r.Schema.Form["reset"].(map[string]any); ok {
 		buttonHTML := renderButtonFromConfig(resetConfig, "reset")
 		buttonsHTML.WriteString(buttonHTML)
 	}
 
 	// Support for additional custom buttons
-	if buttons, ok := r.Schema.Form["buttons"].([]interface{}); ok {
+	if buttons, ok := r.Schema.Form["buttons"].([]any); ok {
 		for _, button := range buttons {
-			if buttonMap, ok := button.(map[string]interface{}); ok {
+			if buttonMap, ok := button.(map[string]any); ok {
 				buttonType := getMapValue(buttonMap, "type", "button")
 				buttonHTML := renderButtonFromConfig(buttonMap, buttonType)
 				buttonsHTML.WriteString(buttonHTML)
@@ -1152,7 +1152,7 @@ func (r *JSONSchemaRenderer) renderButtons() string {
 	return buttonsHTML.String()
 }
 
-func renderButtonFromConfig(config map[string]interface{}, defaultType string) string {
+func renderButtonFromConfig(config map[string]any, defaultType string) string {
 	var attributes []string
 
 	buttonType := getMapValue(config, "type", defaultType)

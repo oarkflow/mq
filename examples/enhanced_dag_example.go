@@ -108,7 +108,7 @@ func createExampleWorkflows(ctx context.Context, enhancedDAG *dag.EnhancedDAG) e
 				Description: "Validates incoming data",
 				Position:    dag.Position{X: 100, Y: 100},
 				Config: dag.WorkflowNodeConfig{
-					Custom: map[string]interface{}{
+					Custom: map[string]any{
 						"validation_type": "json",
 						"required_fields": []string{"data"},
 					},
@@ -132,7 +132,7 @@ func createExampleWorkflows(ctx context.Context, enhancedDAG *dag.EnhancedDAG) e
 				Description: "Stores processed data",
 				Position:    dag.Position{X: 500, Y: 100},
 				Config: dag.WorkflowNodeConfig{
-					Custom: map[string]interface{}{
+					Custom: map[string]any{
 						"storage_type":      "memory",
 						"storage_operation": "save",
 						"storage_key":       "processed_data",
@@ -146,7 +146,7 @@ func createExampleWorkflows(ctx context.Context, enhancedDAG *dag.EnhancedDAG) e
 				Description: "Sends completion notification",
 				Position:    dag.Position{X: 700, Y: 100},
 				Config: dag.WorkflowNodeConfig{
-					Custom: map[string]interface{}{
+					Custom: map[string]any{
 						"notify_type":             "email",
 						"notification_recipients": []string{"admin@example.com"},
 						"notification_message":    "Data processing completed",
@@ -193,7 +193,7 @@ func createExampleWorkflows(ctx context.Context, enhancedDAG *dag.EnhancedDAG) e
 			EnableAudit:   true,
 			EnableMetrics: true,
 		},
-		Metadata: map[string]interface{}{
+		Metadata: map[string]any{
 			"example": true,
 			"type":    "data-processing",
 		},
@@ -332,7 +332,7 @@ func createExampleWorkflows(ctx context.Context, enhancedDAG *dag.EnhancedDAG) e
 			EnableAudit:   true,
 			EnableMetrics: true,
 		},
-		Metadata: map[string]interface{}{
+		Metadata: map[string]any{
 			"example": true,
 			"type":    "api-integration",
 		},
@@ -358,14 +358,14 @@ func demonstrateWorkflowExecution(ctx context.Context, enhancedDAG *dag.Enhanced
 	log.Println("Starting workflow execution demonstration...")
 
 	// Execute the data processing workflow
-	input1 := map[string]interface{}{
-		"data": map[string]interface{}{
+	input1 := map[string]any{
+		"data": map[string]any{
 			"id":    "12345",
 			"name":  "Sample Data",
 			"value": 100,
 			"type":  "example",
 		},
-		"metadata": map[string]interface{}{
+		"metadata": map[string]any{
 			"source": "demo",
 		},
 	}
@@ -379,7 +379,7 @@ func demonstrateWorkflowExecution(ctx context.Context, enhancedDAG *dag.Enhanced
 	log.Printf("Started data processing workflow execution: %s", execution1.ID)
 
 	// Execute the API integration workflow
-	input2 := map[string]interface{}{
+	input2 := map[string]any{
 		"api_endpoint": "https://jsonplaceholder.typicode.com/posts/1",
 		"timeout":      30,
 	}

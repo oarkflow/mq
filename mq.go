@@ -444,15 +444,15 @@ type MessageStore interface {
 
 // StoredMessage represents a message stored in the message store
 type StoredMessage struct {
-	ID        string                 `json:"id"`
-	Queue     string                 `json:"queue"`
-	Payload   []byte                 `json:"payload"`
-	Headers   map[string]string      `json:"headers,omitempty"`
-	Metadata  map[string]interface{} `json:"metadata,omitempty"`
-	Priority  int                    `json:"priority"`
-	CreatedAt time.Time              `json:"created_at"`
-	ExpiresAt *time.Time             `json:"expires_at,omitempty"`
-	Attempts  int                    `json:"attempts"`
+	ID        string            `json:"id"`
+	Queue     string            `json:"queue"`
+	Payload   []byte            `json:"payload"`
+	Headers   map[string]string `json:"headers,omitempty"`
+	Metadata  map[string]any    `json:"metadata,omitempty"`
+	Priority  int               `json:"priority"`
+	CreatedAt time.Time         `json:"created_at"`
+	ExpiresAt *time.Time        `json:"expires_at,omitempty"`
+	Attempts  int               `json:"attempts"`
 }
 
 type Broker struct {

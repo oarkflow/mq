@@ -66,7 +66,7 @@ func (p *BaseProcessor) Close() error {
 
 // Helper methods for workflow processors
 
-func (p *BaseProcessor) processTemplate(template string, data map[string]interface{}) string {
+func (p *BaseProcessor) processTemplate(template string, data map[string]any) string {
 	result := template
 	for key, value := range data {
 		placeholder := fmt.Sprintf("{{%s}}", key)
@@ -79,7 +79,7 @@ func (p *BaseProcessor) generateToken() string {
 	return fmt.Sprintf("token_%d_%s", time.Now().UnixNano(), generateRandomString(16))
 }
 
-func (p *BaseProcessor) validateRule(rule WorkflowValidationRule, data map[string]interface{}) error {
+func (p *BaseProcessor) validateRule(rule WorkflowValidationRule, data map[string]any) error {
 	value, exists := data[rule.Field]
 
 	if rule.Required && !exists {
@@ -146,7 +146,7 @@ func (p *BaseProcessor) validateRule(rule WorkflowValidationRule, data map[strin
 	return nil
 }
 
-func (p *BaseProcessor) evaluateCondition(condition string, data map[string]interface{}) bool {
+func (p *BaseProcessor) evaluateCondition(condition string, data map[string]any) bool {
 	// Simple condition evaluation (in real implementation, use proper expression parser)
 	// For now, support basic equality checks like "field == value"
 	parts := strings.Split(condition, "==")
@@ -179,8 +179,8 @@ func (p *BaseProcessor) validateWebhookSignature(payload []byte, secret, signatu
 	return hmac.Equal([]byte(signature), []byte(expectedSignature))
 }
 
-func (p *BaseProcessor) applyTransforms(data map[string]interface{}, transforms map[string]interface{}) map[string]interface{} {
-	result := make(map[string]interface{})
+func (p *BaseProcessor) applyTransforms(data map[string]any, transforms map[string]any) map[string]any {
+	result := make(map[string]any)
 
 	// Copy original data
 	for key, value := range data {
@@ -189,7 +189,7 @@ func (p *BaseProcessor) applyTransforms(data map[string]interface{}, transforms 
 
 	// Apply transforms (simplified implementation)
 	for key, transform := range transforms {
-		if transformMap, ok := transform.(map[string]interface{}); ok {
+		if transformMap, ok := transform.(map[string]any); ok {
 			if transformType, exists := transformMap["type"]; exists {
 				switch transformType {
 				case "rename":
@@ -245,9 +245,9 @@ func (p *HTMLProcessor) ProcessTask(ctx context.Context, task *mq.Task) mq.Resul
 	}
 
 	// Prepare template data
-	var inputData map[string]interface{}
+	var inputData map[string]any
 	if err := json.Unmarshal(task.Payload, &inputData); err != nil {
-		inputData = make(map[string]interface{})
+		inputData = make(map[string]any)
 	}
 
 	// Add template-specific data from config
@@ -266,7 +266,7 @@ func (p *HTMLProcessor) ProcessTask(ctx context.Context, task *mq.Task) mq.Resul
 	}
 
 	// Prepare result
-	result := map[string]interface{}{
+	result := map[string]any{
 		"html_content": htmlOutput.String(),
 		"template":     templateStr,
 		"data":         inputData,
@@ -311,16 +311,16 @@ func (p *SMSProcessor) ProcessTask(ctx context.Context, task *mq.Task) mq.Result
 	}
 
 	// Parse input data for dynamic content
-	var inputData map[string]interface{}
+	var inputData map[string]any
 	if err := json.Unmarshal(task.Payload, &inputData); err != nil {
-		inputData = make(map[string]interface{})
+		inputData = make(map[string]any)
 	}
 
 	// Process message template
 	message := p.processTemplate(config.Message, inputData)
 
 	// Simulate SMS sending (in real implementation, integrate with SMS provider)
-	result := map[string]interface{}{
+	result := map[string]any{
 		"sms_sent":     true,
 		"provider":     config.Provider,
 		"from":         config.From,
@@ -354,7 +354,7 @@ func (p *AuthProcessor) ProcessTask(ctx context.Context, task *mq.Task) mq.Resul
 	config := p.GetConfig()
 
 	// Parse input data
-	var inputData map[string]interface{}
+	var inputData map[string]any
 	if err := json.Unmarshal(task.Payload, &inputData); err != nil {
 		return mq.Result{
 			TaskID: task.ID,
@@ -364,7 +364,7 @@ func (p *AuthProcessor) ProcessTask(ctx context.Context, task *mq.Task) mq.Resul
 	}
 
 	// Simulate authentication based on type
-	result := map[string]interface{}{
+	result := map[string]any{
 		"auth_type":     config.AuthType,
 		"authenticated": true,
 		"auth_time":     time.Now(),
@@ -413,7 +413,7 @@ func (p *ValidatorProcessor) ProcessTask(ctx context.Context, task *mq.Task) mq.
 	config := p.GetConfig()
 
 	// Parse input data
-	var inputData map[string]interface{}
+	var inputData map[string]any
 	if err := json.Unmarshal(task.Payload, &inputData); err != nil {
 		return mq.Result{
 			TaskID: task.ID,
@@ -432,7 +432,7 @@ func (p *ValidatorProcessor) ProcessTask(ctx context.Context, task *mq.Task) mq.
 	}
 
 	// Prepare result
-	result := map[string]interface{}{
+	result := map[string]any{
 		"validation_passed": len(validationErrors) == 0,
 		"validation_type":   config.ValidationType,
 		"validated_at":      time.Now(),
@@ -474,7 +474,7 @@ func (p *RouterProcessor) ProcessTask(ctx context.Context, task *mq.Task) mq.Res
 	config := p.GetConfig()
 
 	// Parse input data
-	var inputData map[string]interface{}
+	var inputData map[string]any
 	if err := json.Unmarshal(task.Payload, &inputData); err != nil {
 		return mq.Result{
 			TaskID: task.ID,
@@ -494,7 +494,7 @@ func (p *RouterProcessor) ProcessTask(ctx context.Context, task *mq.Task) mq.Res
 	}
 
 	// Prepare result
-	result := map[string]interface{}{
+	result := map[string]any{
 		"route_selected": selectedRoute,
 		"routed_at":      time.Now(),
 		"routing_rules":  len(config.RoutingRules),
@@ -523,7 +523,7 @@ func (p *StorageProcessor) ProcessTask(ctx context.Context, task *mq.Task) mq.Re
 	config := p.GetConfig()
 
 	// Parse input data
-	var inputData map[string]interface{}
+	var inputData map[string]any
 	if err := json.Unmarshal(task.Payload, &inputData); err != nil {
 		return mq.Result{
 			TaskID: task.ID,
@@ -533,7 +533,7 @@ func (p *StorageProcessor) ProcessTask(ctx context.Context, task *mq.Task) mq.Re
 	}
 
 	// Simulate storage operation
-	result := map[string]interface{}{
+	result := map[string]any{
 		"storage_type":      config.StorageType,
 		"storage_operation": config.StorageOperation,
 		"storage_key":       config.StorageKey,
@@ -577,16 +577,16 @@ func (p *NotifyProcessor) ProcessTask(ctx context.Context, task *mq.Task) mq.Res
 	config := p.GetConfig()
 
 	// Parse input data
-	var inputData map[string]interface{}
+	var inputData map[string]any
 	if err := json.Unmarshal(task.Payload, &inputData); err != nil {
-		inputData = make(map[string]interface{})
+		inputData = make(map[string]any)
 	}
 
 	// Process notification message template
 	message := p.processTemplate(config.NotificationMessage, inputData)
 
 	// Prepare result
-	result := map[string]interface{}{
+	result := map[string]any{
 		"notified":             true,
 		"notify_type":          config.NotifyType,
 		"notification_type":    config.NotificationType,
@@ -620,7 +620,7 @@ func (p *WebhookReceiverProcessor) ProcessTask(ctx context.Context, task *mq.Tas
 	config := p.GetConfig()
 
 	// Parse input data
-	var inputData map[string]interface{}
+	var inputData map[string]any
 	if err := json.Unmarshal(task.Payload, &inputData); err != nil {
 		return mq.Result{
 			TaskID: task.ID,
@@ -647,7 +647,7 @@ func (p *WebhookReceiverProcessor) ProcessTask(ctx context.Context, task *mq.Tas
 	}
 
 	// Prepare result
-	result := map[string]interface{}{
+	result := map[string]any{
 		"webhook_received":     true,
 		"webhook_path":         config.ListenPath,
 		"webhook_processed_at": time.Now(),

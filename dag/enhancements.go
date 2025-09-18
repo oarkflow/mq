@@ -118,7 +118,7 @@ type Transaction struct {
 	EndTime    time.Time              `json:"end_time,omitempty"`
 	Operations []TransactionOperation `json:"operations"`
 	SavePoints []SavePoint            `json:"save_points"`
-	Metadata   map[string]interface{} `json:"metadata,omitempty"`
+	Metadata   map[string]any         `json:"metadata,omitempty"`
 }
 
 // TransactionStatus represents the status of a transaction
@@ -133,20 +133,20 @@ const (
 
 // TransactionOperation represents an operation within a transaction
 type TransactionOperation struct {
-	ID              string                 `json:"id"`
-	Type            string                 `json:"type"`
-	NodeID          string                 `json:"node_id"`
-	Data            map[string]interface{} `json:"data"`
-	Timestamp       time.Time              `json:"timestamp"`
-	RollbackHandler RollbackHandler        `json:"-"`
+	ID              string          `json:"id"`
+	Type            string          `json:"type"`
+	NodeID          string          `json:"node_id"`
+	Data            map[string]any  `json:"data"`
+	Timestamp       time.Time       `json:"timestamp"`
+	RollbackHandler RollbackHandler `json:"-"`
 }
 
 // SavePoint represents a save point in a transaction
 type SavePoint struct {
-	ID        string                 `json:"id"`
-	Name      string                 `json:"name"`
-	Timestamp time.Time              `json:"timestamp"`
-	State     map[string]interface{} `json:"state"`
+	ID        string         `json:"id"`
+	Name      string         `json:"name"`
+	Timestamp time.Time      `json:"timestamp"`
+	State     map[string]any `json:"state"`
 }
 
 // RollbackHandler defines how to rollback operations
@@ -176,7 +176,7 @@ func (tm *TransactionManager) BeginTransaction(taskID string) *Transaction {
 		StartTime:  time.Now(),
 		Operations: make([]TransactionOperation, 0),
 		SavePoints: make([]SavePoint, 0),
-		Metadata:   make(map[string]interface{}),
+		Metadata:   make(map[string]any),
 	}
 
 	tm.transactions[tx.ID] = tx
@@ -211,7 +211,7 @@ func (tm *TransactionManager) AddOperation(txID string, operation TransactionOpe
 }
 
 // AddSavePoint adds a save point to the transaction
-func (tm *TransactionManager) AddSavePoint(txID, name string, state map[string]interface{}) error {
+func (tm *TransactionManager) AddSavePoint(txID, name string, state map[string]any) error {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 
@@ -457,11 +457,11 @@ type HTTPClient interface {
 
 // WebhookEvent represents an event to send via webhook
 type WebhookEvent struct {
-	Type      string                 `json:"type"`
-	TaskID    string                 `json:"task_id"`
-	NodeID    string                 `json:"node_id,omitempty"`
-	Timestamp time.Time              `json:"timestamp"`
-	Data      map[string]interface{} `json:"data"`
+	Type      string         `json:"type"`
+	TaskID    string         `json:"task_id"`
+	NodeID    string         `json:"node_id,omitempty"`
+	Timestamp time.Time      `json:"timestamp"`
+	Data      map[string]any `json:"data"`
 }
 
 // NewWebhookManager creates a new webhook manager

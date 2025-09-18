@@ -109,7 +109,7 @@ func (eds *enhancedDAGService) CreateWorkflowFromHandler(handler EnhancedHandler
 }
 
 // ExecuteWorkflow executes a workflow
-func (eds *enhancedDAGService) ExecuteWorkflow(ctx context.Context, workflowID string, input map[string]interface{}) (*dag.ExecutionResult, error) {
+func (eds *enhancedDAGService) ExecuteWorkflow(ctx context.Context, workflowID string, input map[string]any) (*dag.ExecutionResult, error) {
 	enhancedDAG := eds.GetEnhancedDAG(workflowID)
 	if enhancedDAG != nil {
 		// Execute enhanced DAG workflow
@@ -139,7 +139,7 @@ func (eds *enhancedDAGService) StoreDAG(key string, traditionalDAG *dag.DAG) err
 
 // Helper methods
 
-func (eds *enhancedDAGService) executeEnhancedDAGWorkflow(ctx context.Context, enhancedDAG *dag.EnhancedDAG, input map[string]interface{}) (*dag.ExecutionResult, error) {
+func (eds *enhancedDAGService) executeEnhancedDAGWorkflow(ctx context.Context, enhancedDAG *dag.EnhancedDAG, input map[string]any) (*dag.ExecutionResult, error) {
 	// This would need to be implemented based on the actual EnhancedDAG API
 	// For now, create a mock result
 	result := &dag.ExecutionResult{
@@ -151,7 +151,7 @@ func (eds *enhancedDAGService) executeEnhancedDAGWorkflow(ctx context.Context, e
 	return result, nil
 }
 
-func (eds *enhancedDAGService) executeTraditionalDAGWorkflow(ctx context.Context, traditionalDAG *dag.DAG, input map[string]interface{}) (*dag.ExecutionResult, error) {
+func (eds *enhancedDAGService) executeTraditionalDAGWorkflow(ctx context.Context, traditionalDAG *dag.DAG, input map[string]any) (*dag.ExecutionResult, error) {
 	// Convert input to bytes
 	inputBytes, err := json.Marshal(input)
 	if err != nil {
@@ -162,10 +162,10 @@ func (eds *enhancedDAGService) executeTraditionalDAGWorkflow(ctx context.Context
 	result := traditionalDAG.Process(ctx, inputBytes)
 
 	// Convert result to ExecutionResult format
-	var output map[string]interface{}
+	var output map[string]any
 	if err := json.Unmarshal(result.Payload, &output); err != nil {
 		// If unmarshal fails, use the raw payload
-		output = map[string]interface{}{
+		output = map[string]any{
 			"raw_payload": string(result.Payload),
 		}
 	}

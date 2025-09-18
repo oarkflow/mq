@@ -30,9 +30,9 @@ type AdminServer struct {
 
 // AdminMessage represents a message sent via WebSocket
 type AdminMessage struct {
-	Type      string      `json:"type"`
-	Data      interface{} `json:"data"`
-	Timestamp time.Time   `json:"timestamp"`
+	Type      string    `json:"type"`
+	Data      any       `json:"data"`
+	Timestamp time.Time `json:"timestamp"`
 }
 
 // TaskUpdate represents a real-time task update
@@ -97,11 +97,11 @@ type AdminSystemMetrics struct {
 
 // AdminBrokerInfo contains broker status information
 type AdminBrokerInfo struct {
-	Status      string                 `json:"status"`
-	Address     string                 `json:"address"`
-	Uptime      int64                  `json:"uptime"` // milliseconds
-	Connections int                    `json:"connections"`
-	Config      map[string]interface{} `json:"config"`
+	Status      string         `json:"status"`
+	Address     string         `json:"address"`
+	Uptime      int64          `json:"uptime"` // milliseconds
+	Connections int            `json:"connections"`
+	Config      map[string]any `json:"config"`
 }
 
 // AdminHealthCheck represents a health check result
@@ -686,7 +686,7 @@ func (a *AdminServer) handleFlushQueues(w http.ResponseWriter, r *http.Request) 
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.WriteHeader(http.StatusOK)
-	response := map[string]interface{}{
+	response := map[string]any{
 		"status":        "queues_flushed",
 		"flushed_count": flushedCount,
 		"message":       fmt.Sprintf("Flushed %d tasks from all queues", flushedCount),
@@ -733,7 +733,7 @@ func (a *AdminServer) handlePurgeQueue(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.WriteHeader(http.StatusOK)
-	response := map[string]interface{}{
+	response := map[string]any{
 		"status":       "queue_purged",
 		"queue_name":   queueName,
 		"purged_count": purgedCount,
@@ -772,7 +772,7 @@ func (a *AdminServer) handlePauseConsumer(w http.ResponseWriter, r *http.Request
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.WriteHeader(http.StatusOK)
-	response := map[string]interface{}{
+	response := map[string]any{
 		"status":      "paused",
 		"consumer_id": consumerID,
 		"message":     fmt.Sprintf("Consumer %s has been paused", consumerID),
@@ -806,7 +806,7 @@ func (a *AdminServer) handleResumeConsumer(w http.ResponseWriter, r *http.Reques
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.WriteHeader(http.StatusOK)
-	response := map[string]interface{}{
+	response := map[string]any{
 		"status":      "active",
 		"consumer_id": consumerID,
 		"message":     fmt.Sprintf("Consumer %s has been resumed", consumerID),
@@ -840,7 +840,7 @@ func (a *AdminServer) handleStopConsumer(w http.ResponseWriter, r *http.Request)
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.WriteHeader(http.StatusOK)
-	response := map[string]interface{}{
+	response := map[string]any{
 		"status":      "stopped",
 		"consumer_id": consumerID,
 		"message":     fmt.Sprintf("Consumer %s has been stopped", consumerID),
@@ -873,7 +873,7 @@ func (a *AdminServer) handlePausePool(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.WriteHeader(http.StatusOK)
-	response := map[string]interface{}{
+	response := map[string]any{
 		"status":  "paused",
 		"pool_id": poolID,
 		"message": fmt.Sprintf("Pool %s has been paused", poolID),
@@ -905,7 +905,7 @@ func (a *AdminServer) handleResumePool(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.WriteHeader(http.StatusOK)
-	response := map[string]interface{}{
+	response := map[string]any{
 		"status":  "running",
 		"pool_id": poolID,
 		"message": fmt.Sprintf("Pool %s has been resumed", poolID),
@@ -937,7 +937,7 @@ func (a *AdminServer) handleStopPool(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.WriteHeader(http.StatusOK)
-	response := map[string]interface{}{
+	response := map[string]any{
 		"status":  "stopped",
 		"pool_id": poolID,
 		"message": fmt.Sprintf("Pool %s has been stopped", poolID),
@@ -958,7 +958,7 @@ func (a *AdminServer) handleGetTasks(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
 	tasks := a.getCurrentTasks()
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	json.NewEncoder(w).Encode(map[string]any{
 		"tasks": tasks,
 		"count": len(tasks),
 	})
@@ -1045,7 +1045,7 @@ func (a *AdminServer) getBrokerInfo() *AdminBrokerInfo {
 		Address:     a.broker.opts.brokerAddr,
 		Uptime:      uptime,
 		Connections: 0, // Would need to implement connection tracking
-		Config: map[string]interface{}{
+		Config: map[string]any{
 			"max_connections": 1000,
 			"read_timeout":    "30s",
 			"write_timeout":   "30s",
@@ -1127,12 +1127,12 @@ func (a *AdminServer) collectMetrics() {
 }
 
 // getCurrentTasks returns current tasks across all queues
-func (a *AdminServer) getCurrentTasks() []map[string]interface{} {
+func (a *AdminServer) getCurrentTasks() []map[string]any {
 	if a.broker == nil {
-		return []map[string]interface{}{}
+		return []map[string]any{}
 	}
 
-	var tasks []map[string]interface{}
+	var tasks []map[string]any
 	queueNames := a.broker.queues.Keys()
 
 	for _, queueName := range queueNames {
@@ -1143,7 +1143,7 @@ func (a *AdminServer) getCurrentTasks() []map[string]interface{} {
 			for i := 0; i < queueLen && i < 100; i++ { // Limit to 100 tasks for performance
 				select {
 				case task := <-queue.tasks:
-					taskInfo := map[string]interface{}{
+					taskInfo := map[string]any{
 						"id":          fmt.Sprintf("task-%d", i),
 						"queue":       queueName,
 						"retry_count": task.RetryCount,

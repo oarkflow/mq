@@ -243,7 +243,7 @@ func (h *FormatHandler) formatTrim(data map[string]any) map[string]any {
 }
 
 func (h *FormatHandler) getTargetFields(data map[string]any) []string {
-	if fields, ok := h.Payload.Data["fields"].([]interface{}); ok {
+	if fields, ok := h.Payload.Data["fields"].([]any); ok {
 		var result []string
 		for _, field := range fields {
 			if str, ok := field.(string); ok {

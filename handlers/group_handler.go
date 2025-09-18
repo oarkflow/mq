@@ -22,7 +22,7 @@ func (h *GroupHandler) ProcessTask(ctx context.Context, task *mq.Task) mq.Result
 	}
 
 	// Extract the data array
-	dataArray, ok := data["data"].([]interface{})
+	dataArray, ok := data["data"].([]any)
 	if !ok {
 		return mq.Result{Error: fmt.Errorf("expected 'data' field to be an array"), Ctx: ctx}
 	}
@@ -48,7 +48,7 @@ func (h *GroupHandler) ProcessTask(ctx context.Context, task *mq.Task) mq.Result
 	return mq.Result{Payload: resultPayload, Ctx: ctx}
 }
 
-func (h *GroupHandler) groupData(dataArray []interface{}, groupByFields []string, aggregations map[string]string) []map[string]any {
+func (h *GroupHandler) groupData(dataArray []any, groupByFields []string, aggregations map[string]string) []map[string]any {
 	groups := make(map[string][]map[string]any)
 
 	// Group data by specified fields
@@ -152,12 +152,12 @@ func (h *GroupHandler) sumField(records []map[string]any, field string) float64 
 	return sum
 }
 
-func (h *GroupHandler) minField(records []map[string]any, field string) interface{} {
+func (h *GroupHandler) minField(records []map[string]any, field string) any {
 	if len(records) == 0 {
 		return nil
 	}
 
-	var min interface{}
+	var min any
 	for _, record := range records {
 		if val, ok := record[field]; ok {
 			if min == nil {
@@ -172,12 +172,12 @@ func (h *GroupHandler) minField(records []map[string]any, field string) interfac
 	return min
 }
 
-func (h *GroupHandler) maxField(records []map[string]any, field string) interface{} {
+func (h *GroupHandler) maxField(records []map[string]any, field string) any {
 	if len(records) == 0 {
 		return nil
 	}
 
-	var max interface{}
+	var max any
 	for _, record := range records {
 		if val, ok := record[field]; ok {
 			if max == nil {
@@ -212,9 +212,9 @@ func (h *GroupHandler) concatField(records []map[string]any, field string) strin
 	return result
 }
 
-func (h *GroupHandler) uniqueField(records []map[string]any, field string) []interface{} {
+func (h *GroupHandler) uniqueField(records []map[string]any, field string) []any {
 	seen := make(map[string]bool)
-	var unique []interface{}
+	var unique []any
 
 	for _, record := range records {
 		if val, ok := record[field]; ok && val != nil {
@@ -229,7 +229,7 @@ func (h *GroupHandler) uniqueField(records []map[string]any, field string) []int
 	return unique
 }
 
-func (h *GroupHandler) compareValues(a, b interface{}) int {
+func (h *GroupHandler) compareValues(a, b any) int {
 	aStr := fmt.Sprintf("%v", a)
 	bStr := fmt.Sprintf("%v", b)
 	if aStr < bStr {
@@ -244,7 +244,7 @@ func (h *GroupHandler) getGroupByFields() []string {
 	if fields, ok := h.Payload.Data["group_by"].([]string); ok {
 		return fields
 	}
-	if fields, ok := h.Payload.Data["group_by"].([]interface{}); ok {
+	if fields, ok := h.Payload.Data["group_by"].([]any); ok {
 		var result []string
 		for _, field := range fields {
 			if str, ok := field.(string); ok {
@@ -258,7 +258,7 @@ func (h *GroupHandler) getGroupByFields() []string {
 
 func (h *GroupHandler) getAggregations() map[string]string {
 	result := make(map[string]string)
-	if aggs, ok := h.Payload.Data["aggregations"].(map[string]interface{}); ok {
+	if aggs, ok := h.Payload.Data["aggregations"].(map[string]any); ok {
 		for field, aggType := range aggs {
 			if str, ok := aggType.(string); ok {
 				result[field] = str

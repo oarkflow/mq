@@ -17,7 +17,7 @@ type ValidationInfo struct {
 	Maximum       *jsonschema.Rat
 	Pattern       string
 	Format        string
-	Enum          []interface{}
+	Enum          []any
 	MultipleOf    *jsonschema.Rat
 	ExclusiveMin  *jsonschema.Rat
 	ExclusiveMax  *jsonschema.Rat
@@ -26,7 +26,7 @@ type ValidationInfo struct {
 	UniqueItems   bool
 	MinProperties *float64
 	MaxProperties *float64
-	Const         interface{}
+	Const         any
 
 	// Advanced JSON Schema 2020-12 validations
 	AllOf                 []*jsonschema.Schema
@@ -57,8 +57,8 @@ type ValidationInfo struct {
 	// Metadata
 	Title       *string
 	Description *string
-	Default     interface{}
-	Examples    []interface{}
+	Default     any
+	Examples    []any
 	Deprecated  *bool
 	ReadOnly    *bool
 	WriteOnly   *bool

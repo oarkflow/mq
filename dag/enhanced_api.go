@@ -105,7 +105,7 @@ func (h *EnhancedAPIHandler) getHealth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	health := map[string]interface{}{
+	health := map[string]any{
 		"status":    "healthy",
 		"timestamp": time.Now(),
 		"uptime":    time.Since(h.dag.monitor.metrics.StartTime),
@@ -128,7 +128,7 @@ func (h *EnhancedAPIHandler) getHealth(w http.ResponseWriter, r *http.Request) {
 			health["reason"] = fmt.Sprintf("High task load: %d tasks in progress", metrics.TasksInProgress)
 		}
 
-		health["metrics"] = map[string]interface{}{
+		health["metrics"] = map[string]any{
 			"total_tasks":       metrics.TasksTotal,
 			"completed_tasks":   metrics.TasksCompleted,
 			"failed_tasks":      metrics.TasksFailed,
@@ -147,7 +147,7 @@ func (h *EnhancedAPIHandler) validateDAG(w http.ResponseWriter, r *http.Request)
 	}
 
 	err := h.dag.ValidateDAG()
-	response := map[string]interface{}{
+	response := map[string]any{
 		"valid":     err == nil,
 		"timestamp": time.Now(),
 	}
@@ -173,7 +173,7 @@ func (h *EnhancedAPIHandler) getTopology(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	h.respondJSON(w, map[string]interface{}{
+	h.respondJSON(w, map[string]any{
 		"topology": topology,
 		"count":    len(topology),
 	})
@@ -192,7 +192,7 @@ func (h *EnhancedAPIHandler) getCriticalPath(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	h.respondJSON(w, map[string]interface{}{
+	h.respondJSON(w, map[string]any{
 		"critical_path": path,
 		"length":        len(path),
 	})
@@ -295,7 +295,7 @@ func (h *EnhancedAPIHandler) handleTransaction(w http.ResponseWriter, r *http.Re
 			return
 		}
 
-		h.respondJSON(w, map[string]interface{}{
+		h.respondJSON(w, map[string]any{
 			"transaction_id": tx.ID,
 			"task_id":        tx.TaskID,
 			"status":         "started",
@@ -349,7 +349,7 @@ func (h *EnhancedAPIHandler) optimizePerformance(w http.ResponseWriter, r *http.
 		return
 	}
 
-	h.respondJSON(w, map[string]interface{}{
+	h.respondJSON(w, map[string]any{
 		"status":    "optimization completed",
 		"timestamp": time.Now(),
 	})
@@ -374,7 +374,7 @@ func (h *EnhancedAPIHandler) getCircuitBreakerStatus(w http.ResponseWriter, r *h
 			return
 		}
 
-		status := map[string]interface{}{
+		status := map[string]any{
 			"node_id": nodeID,
 			"state":   h.getCircuitBreakerStateName(cb.GetState()),
 		}
@@ -383,7 +383,7 @@ func (h *EnhancedAPIHandler) getCircuitBreakerStatus(w http.ResponseWriter, r *h
 	} else {
 		// Return status for all circuit breakers
 		h.dag.circuitBreakersMu.RLock()
-		allStatus := make(map[string]interface{})
+		allStatus := make(map[string]any)
 		for nodeID, cb := range h.dag.circuitBreakers {
 			allStatus[nodeID] = h.getCircuitBreakerStateName(cb.GetState())
 		}
@@ -404,7 +404,7 @@ func (h *EnhancedAPIHandler) clearCache(w http.ResponseWriter, r *http.Request) 
 	h.dag.nextNodesCache = nil
 	h.dag.prevNodesCache = nil
 
-	h.respondJSON(w, map[string]interface{}{
+	h.respondJSON(w, map[string]any{
 		"status":    "cache cleared",
 		"timestamp": time.Now(),
 	})
@@ -417,7 +417,7 @@ func (h *EnhancedAPIHandler) getCacheStats(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	stats := map[string]interface{}{
+	stats := map[string]any{
 		"next_nodes_cache_size": len(h.dag.nextNodesCache),
 		"prev_nodes_cache_size": len(h.dag.prevNodesCache),
 		"timestamp":             time.Now(),
@@ -428,7 +428,7 @@ func (h *EnhancedAPIHandler) getCacheStats(w http.ResponseWriter, r *http.Reques
 
 // Helper methods
 
-func (h *EnhancedAPIHandler) respondJSON(w http.ResponseWriter, data interface{}) {
+func (h *EnhancedAPIHandler) respondJSON(w http.ResponseWriter, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(data)
 }

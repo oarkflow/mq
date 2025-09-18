@@ -94,7 +94,7 @@ func (h *SplitHandler) splitToArrayOperation(data map[string]any) map[string]any
 		if val, ok := data[field]; ok {
 			if str, ok := val.(string); ok {
 				parts := strings.Split(str, separator)
-				var cleanParts []interface{}
+				var cleanParts []any
 				for _, part := range parts {
 					cleanParts = append(cleanParts, strings.TrimSpace(part))
 				}
@@ -110,7 +110,7 @@ func (h *SplitHandler) getTargetFields() []string {
 	if fields, ok := h.Payload.Data["fields"].([]string); ok {
 		return fields
 	}
-	if fields, ok := h.Payload.Data["fields"].([]interface{}); ok {
+	if fields, ok := h.Payload.Data["fields"].([]any); ok {
 		var result []string
 		for _, field := range fields {
 			if str, ok := field.(string); ok {
@@ -217,7 +217,7 @@ func (h *JoinHandler) joinFromArrayOperation(data map[string]any) map[string]any
 	}
 
 	if val, ok := data[sourceField]; ok {
-		if arr, ok := val.([]interface{}); ok {
+		if arr, ok := val.([]any); ok {
 			var parts []string
 			for _, item := range arr {
 				if item != nil {
@@ -249,7 +249,7 @@ func (h *JoinHandler) getSourceFields() []string {
 	if fields, ok := h.Payload.Data["source_fields"].([]string); ok {
 		return fields
 	}
-	if fields, ok := h.Payload.Data["source_fields"].([]interface{}); ok {
+	if fields, ok := h.Payload.Data["source_fields"].([]any); ok {
 		var result []string
 		for _, field := range fields {
 			if str, ok := field.(string); ok {

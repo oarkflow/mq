@@ -50,7 +50,7 @@ func (l *DefaultLogger) Error(msg string, fields ...Field) {
 	l.logger.Error().Map(flattenFields(fields)).Msg(msg)
 }
 
-// flattenFields converts a slice of Field into a slice of interface{} key/value pairs.
+// flattenFields converts a slice of Field into a slice of any key/value pairs.
 func flattenFields(fields []Field) map[string]any {
 	kv := make(map[string]any)
 	for _, field := range fields {

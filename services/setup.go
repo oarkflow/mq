@@ -328,7 +328,7 @@ func prepareNode(flow *dag.DAG, node Node) error {
 	return nil
 }
 
-func mapProviders(dataProviders interface{}) []dag.Provider {
+func mapProviders(dataProviders any) []dag.Provider {
 	var providers []dag.Provider
 	err := Map(&providers, dataProviders)
 	if err != nil {
@@ -956,7 +956,7 @@ func SetupEnhancedAPI(prefix string, router fiber.Router, brokerAddr string) err
 // Helper functions for enhanced features (simplified implementation)
 
 // addEnhancedNode is a placeholder for future enhanced node functionality
-func addEnhancedNode(enhancedDAG interface{}, node EnhancedNode) error {
+func addEnhancedNode(enhancedDAG any, node EnhancedNode) error {
 	// For now, this is a placeholder implementation
 	// In the future, this would add enhanced nodes with workflow capabilities
 	return nil

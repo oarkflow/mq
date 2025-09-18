@@ -60,7 +60,7 @@ type Param struct {
 
 // Pre-allocated param slices to avoid any allocations
 var paramPool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		return make([]Param, 0, 16)
 	},
 }
@@ -85,7 +85,7 @@ type Ctx struct {
 }
 
 var ctxPool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		return &Ctx{}
 	},
 }

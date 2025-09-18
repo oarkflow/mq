@@ -88,8 +88,8 @@ func (sm *enhancedServiceManager) Stop(ctx context.Context) error {
 }
 
 // Health returns the health status of all services
-func (sm *enhancedServiceManager) Health() map[string]interface{} {
-	health := make(map[string]interface{})
+func (sm *enhancedServiceManager) Health() map[string]any {
+	health := make(map[string]any)
 
 	health["running"] = sm.running
 	health["workflow_engine"] = sm.workflowEngine != nil
@@ -174,7 +174,7 @@ func (sm *enhancedServiceManager) GetWorkflowEngine() *dag.WorkflowEngineManager
 }
 
 // ExecuteEnhancedWorkflow executes a workflow with enhanced features
-func (sm *enhancedServiceManager) ExecuteEnhancedWorkflow(ctx context.Context, key string, input map[string]interface{}) (*dag.ExecutionResult, error) {
+func (sm *enhancedServiceManager) ExecuteEnhancedWorkflow(ctx context.Context, key string, input map[string]any) (*dag.ExecutionResult, error) {
 	handler, err := sm.GetEnhancedHandler(key)
 	if err != nil {
 		return nil, err
@@ -199,9 +199,9 @@ func (sm *enhancedServiceManager) ExecuteEnhancedWorkflow(ctx context.Context, k
 		result := traditionalDAG.Process(ctx, inputBytes)
 
 		// Convert output
-		var output map[string]interface{}
+		var output map[string]any
 		if err := json.Unmarshal(result.Payload, &output); err != nil {
-			output = map[string]interface{}{"raw": string(result.Payload)}
+			output = map[string]any{"raw": string(result.Payload)}
 		}
 
 		// Convert result to ExecutionResult format
@@ -244,7 +244,7 @@ func (sm *enhancedServiceManager) RegisterHTTPRoutes(app *fiber.App) error {
 	api.Post("/execute/:key", func(c *fiber.Ctx) error {
 		key := c.Params("key")
 
-		var input map[string]interface{}
+		var input map[string]any
 		if err := c.BodyParser(&input); err != nil {
 			return c.Status(400).JSON(fiber.Map{
 				"error": "Invalid input format",
@@ -434,7 +434,7 @@ func (sm *enhancedServiceManager) registerWorkflowEngineRoutes(api fiber.Router)
 	workflows.Post("/:id/execute", func(c *fiber.Ctx) error {
 		id := c.Params("id")
 
-		var input map[string]interface{}
+		var input map[string]any
 		if err := c.BodyParser(&input); err != nil {
 			return c.Status(400).JSON(fiber.Map{"error": "Invalid input"})
 		}

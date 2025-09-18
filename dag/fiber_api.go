@@ -263,7 +263,7 @@ func (tm *DAG) SVGViewerHTML(svgContent string) string {
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             margin: 0;
-            background: linear-gradient(135deg, #667eea 0%%%%, #764ba2 100%%%%);
+            background: linear-gradient(135deg, #667eea 0%%, #764ba2 100%%);
             min-height: 100vh;
             display: flex;
             flex-direction: column;
@@ -339,12 +339,12 @@ func (tm *DAG) SVGViewerHTML(svgContent string) string {
         }
 
         .svg-container {
-            width: 100%%%%;
-            height: 100%%%%;
+            width: 100%%;
+            height: 100%%;
             cursor: grab;
             position: relative;
             overflow: hidden;
-            display: flex;
+            display: block;
             align-items: center;
             justify-content: center;
         }
@@ -357,8 +357,8 @@ func (tm *DAG) SVGViewerHTML(svgContent string) string {
 			user-select: none;
             transform-origin: center center;
             transition: transform 0.2s ease-out;
-            max-width: 100%%%%;
-            max-height: 100%%%%;
+            max-width: 100%%;
+            max-height: 100%%;
         }
 
         .svg-wrapper svg {
@@ -523,7 +523,7 @@ func (tm *DAG) SVGViewerHTML(svgContent string) string {
 
             const scaleX = availableWidth / svgWidth;
             const scaleY = availableHeight / svgHeight;
-            initialScale = Math.min(scaleX, scaleY, 1); // Don't scale up beyond 100%%%%
+            initialScale = Math.min(scaleX, scaleY, 1); // Don't scale up beyond 100%%
 
             // Reset position
             currentX = 0;

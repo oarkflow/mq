@@ -189,7 +189,7 @@ func (ws *WALStorageImpl) SaveWALSegment(ctx context.Context, segment *WALSegmen
 			status = EXCLUDED.status,
 			flushed_at = EXCLUDED.flushed_at`, ws.walSegmentsTable)
 
-	var flushedAt interface{}
+	var flushedAt any
 	if segment.FlushedAt != nil {
 		flushedAt = *segment.FlushedAt
 	} else {
@@ -404,7 +404,7 @@ func (wes *WALEnabledStorage) SaveTask(ctx context.Context, task *storage.Persis
 	}
 
 	// Write to WAL first
-	if err := wes.walManager.WriteEntry(ctx, WALEntryTypeTaskUpdate, taskData, map[string]interface{}{
+	if err := wes.walManager.WriteEntry(ctx, WALEntryTypeTaskUpdate, taskData, map[string]any{
 		"task_id": task.ID,
 		"dag_id":  task.DAGID,
 	}); err != nil {
@@ -424,7 +424,7 @@ func (wes *WALEnabledStorage) LogActivity(ctx context.Context, log *storage.Task
 	}
 
 	// Write to WAL first
-	if err := wes.walManager.WriteEntry(ctx, WALEntryTypeActivityLog, logData, map[string]interface{}{
+	if err := wes.walManager.WriteEntry(ctx, WALEntryTypeActivityLog, logData, map[string]any{
 		"task_id": log.TaskID,
 		"dag_id":  log.DAGID,
 		"action":  log.Action,

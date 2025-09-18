@@ -103,7 +103,7 @@ engine.RegisterWorkflow(ctx, workflow)
 
 ### 4. Execute Workflow
 ```go
-execution, err := engine.ExecuteWorkflow(ctx, "sample-workflow", map[string]interface{}{
+execution, err := engine.ExecuteWorkflow(ctx, "sample-workflow", map[string]any{
     "input_data": "test_value",
 }, &workflow.ExecutionOptions{
     Priority: workflow.PriorityMedium,
@@ -187,7 +187,7 @@ Wait for human intervention
 {
     Type: workflow.NodeTypeHumanTask,
     Config: workflow.NodeConfig{
-        Custom: map[string]interface{}{
+        Custom: map[string]any{
             "assignee":    "manager@company.com",
             "due_date":    "3 days",
             "description": "Please review and approve",

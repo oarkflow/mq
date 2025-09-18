@@ -96,13 +96,13 @@ func (pq PriorityQueue) Swap(i, j int) {
 	pq[i].index = i
 	pq[j].index = j
 }
-func (pq *PriorityQueue) Push(x interface{}) {
+func (pq *PriorityQueue) Push(x any) {
 	n := len(*pq)
 	task := x.(*QueueTask)
 	task.index = n
 	*pq = append(*pq, task)
 }
-func (pq *PriorityQueue) Pop() interface{} {
+func (pq *PriorityQueue) Pop() any {
 	old := *pq
 	n := len(old)
 	task := old[n-1]

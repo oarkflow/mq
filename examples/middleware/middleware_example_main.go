@@ -82,7 +82,7 @@ func RoleCheckMiddleware(requiredRoles ...string) mq.Handler {
 		log.Printf("RoleCheckMiddleware: Checking roles %v for node %s", requiredRoles, task.Topic)
 
 		// Extract user from payload
-		var payload map[string]interface{}
+		var payload map[string]any
 		if err := json.Unmarshal(task.Payload, &payload); err != nil {
 			return mq.Result{
 				Status: mq.Failed,
@@ -161,7 +161,7 @@ func (p *ExampleProcessor) ProcessTask(ctx context.Context, task *mq.Task) mq.Re
 	time.Sleep(100 * time.Millisecond)
 
 	// Parse the payload as JSON
-	var payload map[string]interface{}
+	var payload map[string]any
 	if err := json.Unmarshal(task.Payload, &payload); err != nil {
 		return mq.Result{
 			Status: mq.Failed,
@@ -202,7 +202,7 @@ func (p *AdminProcessor) ProcessTask(ctx context.Context, task *mq.Task) mq.Resu
 	time.Sleep(200 * time.Millisecond)
 
 	// Parse the payload as JSON
-	var payload map[string]interface{}
+	var payload map[string]any
 	if err := json.Unmarshal(task.Payload, &payload); err != nil {
 		return mq.Result{
 			Status: mq.Failed,
@@ -244,7 +244,7 @@ func (p *UserProcessor) ProcessTask(ctx context.Context, task *mq.Task) mq.Resul
 	time.Sleep(150 * time.Millisecond)
 
 	// Parse the payload as JSON
-	var payload map[string]interface{}
+	var payload map[string]any
 	if err := json.Unmarshal(task.Payload, &payload); err != nil {
 		return mq.Result{
 			Status: mq.Failed,
@@ -286,7 +286,7 @@ func (p *GuestProcessor) ProcessTask(ctx context.Context, task *mq.Task) mq.Resu
 	time.Sleep(100 * time.Millisecond)
 
 	// Parse the payload as JSON
-	var payload map[string]interface{}
+	var payload map[string]any
 	if err := json.Unmarshal(task.Payload, &payload); err != nil {
 		return mq.Result{
 			Status: mq.Failed,
@@ -418,7 +418,7 @@ func main() {
 		log.Printf("\n=== Testing user: %s (Roles: %v) ===", user.Name, user.Roles)
 
 		// Create payload with user information
-		payload := map[string]interface{}{
+		payload := map[string]any{
 			"user":    user,
 			"message": fmt.Sprintf("Request from %s", user.Name),
 			"data":    "test data",

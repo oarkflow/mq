@@ -16,7 +16,7 @@ type WorkflowEngine interface {
 	Start(ctx context.Context) error
 	Stop(ctx context.Context)
 	RegisterWorkflow(ctx context.Context, definition *WorkflowDefinition) error
-	ExecuteWorkflow(ctx context.Context, workflowID string, input map[string]interface{}) (*ExecutionResult, error)
+	ExecuteWorkflow(ctx context.Context, workflowID string, input map[string]any) (*ExecutionResult, error)
 	GetExecution(ctx context.Context, executionID string) (*ExecutionResult, error)
 }
 
@@ -74,36 +74,36 @@ const (
 
 // WorkflowDefinition represents a complete workflow
 type WorkflowDefinition struct {
-	ID          string                 `json:"id"`
-	Name        string                 `json:"name"`
-	Description string                 `json:"description"`
-	Version     string                 `json:"version"`
-	Status      WorkflowStatus         `json:"status"`
-	Tags        []string               `json:"tags"`
-	Category    string                 `json:"category"`
-	Owner       string                 `json:"owner"`
-	Nodes       []WorkflowNode         `json:"nodes"`
-	Edges       []WorkflowEdge         `json:"edges"`
-	Variables   map[string]Variable    `json:"variables"`
-	Config      WorkflowConfig         `json:"config"`
-	Metadata    map[string]interface{} `json:"metadata"`
-	CreatedAt   time.Time              `json:"created_at"`
-	UpdatedAt   time.Time              `json:"updated_at"`
-	CreatedBy   string                 `json:"created_by"`
-	UpdatedBy   string                 `json:"updated_by"`
+	ID          string              `json:"id"`
+	Name        string              `json:"name"`
+	Description string              `json:"description"`
+	Version     string              `json:"version"`
+	Status      WorkflowStatus      `json:"status"`
+	Tags        []string            `json:"tags"`
+	Category    string              `json:"category"`
+	Owner       string              `json:"owner"`
+	Nodes       []WorkflowNode      `json:"nodes"`
+	Edges       []WorkflowEdge      `json:"edges"`
+	Variables   map[string]Variable `json:"variables"`
+	Config      WorkflowConfig      `json:"config"`
+	Metadata    map[string]any      `json:"metadata"`
+	CreatedAt   time.Time           `json:"created_at"`
+	UpdatedAt   time.Time           `json:"updated_at"`
+	CreatedBy   string              `json:"created_by"`
+	UpdatedBy   string              `json:"updated_by"`
 }
 
 // WorkflowNode represents a single node in the workflow
 type WorkflowNode struct {
-	ID          string                 `json:"id"`
-	Name        string                 `json:"name"`
-	Type        WorkflowNodeType       `json:"type"`
-	Description string                 `json:"description"`
-	Config      WorkflowNodeConfig     `json:"config"`
-	Position    Position               `json:"position"`
-	Timeout     *time.Duration         `json:"timeout,omitempty"`
-	RetryPolicy *RetryPolicy           `json:"retry_policy,omitempty"`
-	Metadata    map[string]interface{} `json:"metadata,omitempty"`
+	ID          string             `json:"id"`
+	Name        string             `json:"name"`
+	Type        WorkflowNodeType   `json:"type"`
+	Description string             `json:"description"`
+	Config      WorkflowNodeConfig `json:"config"`
+	Position    Position           `json:"position"`
+	Timeout     *time.Duration     `json:"timeout,omitempty"`
+	RetryPolicy *RetryPolicy       `json:"retry_policy,omitempty"`
+	Metadata    map[string]any     `json:"metadata,omitempty"`
 }
 
 // WorkflowNodeConfig holds configuration for different node types
@@ -185,15 +185,15 @@ type WorkflowNodeConfig struct {
 	Channel                string   `json:"channel,omitempty"`
 
 	// Webhook receiver fields
-	ListenPath        string                 `json:"listen_path,omitempty"`
-	Secret            string                 `json:"secret,omitempty"`
-	WebhookSecret     string                 `json:"webhook_secret,omitempty"`
-	WebhookSignature  string                 `json:"webhook_signature,omitempty"`
-	WebhookTransforms map[string]interface{} `json:"webhook_transforms,omitempty"`
-	Timeout           time.Duration          `json:"timeout,omitempty"`
+	ListenPath        string         `json:"listen_path,omitempty"`
+	Secret            string         `json:"secret,omitempty"`
+	WebhookSecret     string         `json:"webhook_secret,omitempty"`
+	WebhookSignature  string         `json:"webhook_signature,omitempty"`
+	WebhookTransforms map[string]any `json:"webhook_transforms,omitempty"`
+	Timeout           time.Duration  `json:"timeout,omitempty"`
 
 	// Custom configuration
-	Custom map[string]interface{} `json:"custom,omitempty"`
+	Custom map[string]any `json:"custom,omitempty"`
 }
 
 // WorkflowDecisionRule for decision nodes
@@ -204,16 +204,16 @@ type WorkflowDecisionRule struct {
 
 // WorkflowValidationRule for validator nodes
 type WorkflowValidationRule struct {
-	Field     string      `json:"field"`
-	Type      string      `json:"type"` // "string", "number", "email", "regex", "required"
-	Required  bool        `json:"required"`
-	MinLength int         `json:"min_length,omitempty"`
-	MaxLength int         `json:"max_length,omitempty"`
-	Min       *float64    `json:"min,omitempty"`
-	Max       *float64    `json:"max,omitempty"`
-	Pattern   string      `json:"pattern,omitempty"`
-	Value     interface{} `json:"value,omitempty"`
-	Message   string      `json:"message,omitempty"`
+	Field     string   `json:"field"`
+	Type      string   `json:"type"` // "string", "number", "email", "regex", "required"
+	Required  bool     `json:"required"`
+	MinLength int      `json:"min_length,omitempty"`
+	MaxLength int      `json:"max_length,omitempty"`
+	Min       *float64 `json:"min,omitempty"`
+	Max       *float64 `json:"max,omitempty"`
+	Pattern   string   `json:"pattern,omitempty"`
+	Value     any      `json:"value,omitempty"`
+	Message   string   `json:"message,omitempty"`
 }
 
 // WorkflowRoutingRule for router nodes
@@ -224,22 +224,22 @@ type WorkflowRoutingRule struct {
 
 // WorkflowEdge represents a connection between nodes
 type WorkflowEdge struct {
-	ID        string                 `json:"id"`
-	FromNode  string                 `json:"from_node"`
-	ToNode    string                 `json:"to_node"`
-	Condition string                 `json:"condition,omitempty"`
-	Priority  int                    `json:"priority"`
-	Label     string                 `json:"label,omitempty"`
-	Metadata  map[string]interface{} `json:"metadata,omitempty"`
+	ID        string         `json:"id"`
+	FromNode  string         `json:"from_node"`
+	ToNode    string         `json:"to_node"`
+	Condition string         `json:"condition,omitempty"`
+	Priority  int            `json:"priority"`
+	Label     string         `json:"label,omitempty"`
+	Metadata  map[string]any `json:"metadata,omitempty"`
 }
 
 // Variable definition for workflow
 type Variable struct {
-	Name         string      `json:"name"`
-	Type         string      `json:"type"`
-	DefaultValue interface{} `json:"default_value"`
-	Required     bool        `json:"required"`
-	Description  string      `json:"description"`
+	Name         string `json:"name"`
+	Type         string `json:"type"`
+	DefaultValue any    `json:"default_value"`
+	Required     bool   `json:"required"`
+	Description  string `json:"description"`
 }
 
 // WorkflowConfig holds configuration for the entire workflow
@@ -268,15 +268,15 @@ type RetryPolicy struct {
 
 // ExecutionResult represents the result of workflow execution
 type ExecutionResult struct {
-	ID             string                 `json:"id"`
-	WorkflowID     string                 `json:"workflow_id"`
-	Status         ExecutionStatus        `json:"status"`
-	StartTime      time.Time              `json:"start_time"`
-	EndTime        *time.Time             `json:"end_time,omitempty"`
-	Input          map[string]interface{} `json:"input"`
-	Output         map[string]interface{} `json:"output"`
-	Error          string                 `json:"error,omitempty"`
-	NodeExecutions map[string]interface{} `json:"node_executions,omitempty"`
+	ID             string          `json:"id"`
+	WorkflowID     string          `json:"workflow_id"`
+	Status         ExecutionStatus `json:"status"`
+	StartTime      time.Time       `json:"start_time"`
+	EndTime        *time.Time      `json:"end_time,omitempty"`
+	Input          map[string]any  `json:"input"`
+	Output         map[string]any  `json:"output"`
+	Error          string          `json:"error,omitempty"`
+	NodeExecutions map[string]any  `json:"node_executions,omitempty"`
 }
 
 // EnhancedDAG represents a DAG that integrates with workflow engine concepts
@@ -338,8 +338,8 @@ type WorkflowExecution struct {
 	StartTime       time.Time
 	EndTime         *time.Time
 	Context         context.Context
-	Input           map[string]interface{}
-	Output          map[string]interface{}
+	Input           map[string]any
+	Output          map[string]any
 	Error           error
 
 	// Node execution tracking
@@ -352,8 +352,8 @@ type NodeExecution struct {
 	Status     ExecutionStatus
 	StartTime  time.Time
 	EndTime    *time.Time
-	Input      map[string]interface{}
-	Output     map[string]interface{}
+	Input      map[string]any
+	Output     map[string]any
 	Error      error
 	RetryCount int
 	Duration   time.Duration
@@ -361,7 +361,7 @@ type NodeExecution struct {
 
 // WorkflowStateManager manages workflow state and persistence
 type WorkflowStateManager struct {
-	stateStore map[string]interface{}
+	stateStore map[string]any
 	mu         sync.RWMutex
 }
 
@@ -391,7 +391,7 @@ func NewEnhancedDAG(name, key string, config *EnhancedDAGConfig, opts ...mq.Opti
 			executionHistory: make(map[string]*WorkflowExecution),
 		},
 		stateManager: &WorkflowStateManager{
-			stateStore: make(map[string]interface{}),
+			stateStore: make(map[string]any),
 		},
 	}
 
@@ -586,7 +586,7 @@ func (p *workflowNodeProcessor) processAPINode(ctx context.Context, task *mq.Tas
 
 func (p *workflowNodeProcessor) processTransformNode(ctx context.Context, task *mq.Task) mq.Result {
 	// Data transformation processing (simplified implementation)
-	var payload map[string]interface{}
+	var payload map[string]any
 	if err := json.Unmarshal(task.Payload, &payload); err != nil {
 		return mq.Result{
 			TaskID: task.ID,
@@ -650,7 +650,7 @@ func (p *workflowNodeProcessor) processTimerNode(ctx context.Context, task *mq.T
 }
 
 // ExecuteWorkflow executes a registered workflow
-func (e *EnhancedDAG) ExecuteWorkflow(ctx context.Context, workflowID string, input map[string]interface{}) (*WorkflowExecution, error) {
+func (e *EnhancedDAG) ExecuteWorkflow(ctx context.Context, workflowID string, input map[string]any) (*WorkflowExecution, error) {
 	e.mu.RLock()
 	definition, exists := e.workflowRegistry[workflowID]
 	e.mu.RUnlock()
@@ -761,10 +761,10 @@ func (e *EnhancedDAG) executeWithDAG(execution *WorkflowExecution, definition *W
 	}
 
 	// Convert result back to output
-	var output map[string]interface{}
+	var output map[string]any
 	if err := json.Unmarshal(result.Payload, &output); err != nil {
 		// If unmarshal fails, create a simple output
-		output = map[string]interface{}{"result": string(result.Payload)}
+		output = map[string]any{"result": string(result.Payload)}
 	}
 
 	execution.Status = ExecutionStatusCompleted

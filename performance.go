@@ -329,7 +329,7 @@ func NewMemoryPool(size int) *MemoryPool {
 	return &MemoryPool{
 		size: size,
 		pool: sync.Pool{
-			New: func() interface{} {
+			New: func() any {
 				return make([]byte, size)
 			},
 		},
@@ -407,13 +407,13 @@ func (pm *PerformanceMonitor) GetMetricsChannel() <-chan PerformanceMetrics {
 
 // PerformanceAlert represents a performance alert
 type PerformanceAlert struct {
-	Type      string                 `json:"type"`
-	Severity  string                 `json:"severity"`
-	Message   string                 `json:"message"`
-	Metrics   PerformanceMetrics     `json:"metrics"`
-	Threshold interface{}            `json:"threshold"`
-	Timestamp time.Time              `json:"timestamp"`
-	Details   map[string]interface{} `json:"details,omitempty"`
+	Type      string             `json:"type"`
+	Severity  string             `json:"severity"`
+	Message   string             `json:"message"`
+	Metrics   PerformanceMetrics `json:"metrics"`
+	Threshold any                `json:"threshold"`
+	Timestamp time.Time          `json:"timestamp"`
+	Details   map[string]any     `json:"details,omitempty"`
 }
 
 // PerformanceAlerter manages performance alerts
@@ -490,11 +490,11 @@ func NewPerformanceDashboard(optimizer *PerformanceOptimizer, alerter *Performan
 }
 
 // GetDashboardData returns data for the performance dashboard
-func (pd *PerformanceDashboard) GetDashboardData() map[string]interface{} {
+func (pd *PerformanceDashboard) GetDashboardData() map[string]any {
 	metrics, hasMetrics := pd.monitor.GetMetrics()
 	alerts := pd.alerter.GetAlerts("", 10)
 
-	data := map[string]interface{}{
+	data := map[string]any{
 		"current_metrics": metrics,
 		"has_metrics":     hasMetrics,
 		"recent_alerts":   alerts,

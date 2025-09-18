@@ -77,7 +77,7 @@ type DAGCache struct {
 
 // CacheEntry represents a cached item
 type CacheEntry struct {
-	Value       interface{}
+	Value       any
 	ExpiresAt   time.Time
 	AccessCount int64
 	LastAccess  time.Time
@@ -100,7 +100,7 @@ func NewDAGCache(ttl time.Duration, maxSize int, logger logger.Logger) *DAGCache
 }
 
 // GetNodeResult retrieves a cached node result
-func (dc *DAGCache) GetNodeResult(key string) (interface{}, bool) {
+func (dc *DAGCache) GetNodeResult(key string) (any, bool) {
 	dc.mu.RLock()
 	defer dc.mu.RUnlock()
 
@@ -116,7 +116,7 @@ func (dc *DAGCache) GetNodeResult(key string) (interface{}, bool) {
 }
 
 // SetNodeResult caches a node result
-func (dc *DAGCache) SetNodeResult(key string, value interface{}) {
+func (dc *DAGCache) SetNodeResult(key string, value any) {
 	dc.mu.Lock()
 	defer dc.mu.Unlock()
 

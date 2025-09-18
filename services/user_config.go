@@ -547,8 +547,8 @@ func (c *UserConfig) IsEnhancedHandler(handlerName string) bool {
 }
 
 // GetAllHandlers returns both traditional and enhanced handlers
-func (c *UserConfig) GetAllHandlers() map[string]interface{} {
-	handlers := make(map[string]interface{})
+func (c *UserConfig) GetAllHandlers() map[string]any {
+	handlers := make(map[string]any)
 
 	// Add traditional handlers
 	for _, handler := range c.Policy.Handlers {
@@ -564,7 +564,7 @@ func (c *UserConfig) GetAllHandlers() map[string]interface{} {
 }
 
 // GetHandlerByKey returns either traditional or enhanced handler by key
-func (c *UserConfig) GetHandlerByKey(key string) interface{} {
+func (c *UserConfig) GetHandlerByKey(key string) any {
 	// Check traditional handlers first
 	if handler := c.GetHandler(key); handler != nil {
 		return *handler
