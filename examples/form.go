@@ -676,8 +676,12 @@ type SMSResultNode struct {
 
 func (r *SMSResultNode) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 	var inputData map[string]any
-	if err := json.Unmarshal(task.Payload, &inputData); err != nil {
-		return mq.Result{Error: err, Ctx: ctx}
+	if len(task.Payload) > 0 {
+		if err := json.Unmarshal(task.Payload, &inputData); err != nil {
+			return mq.Result{Error: err, Ctx: ctx}
+		}
+	} else {
+		inputData = make(map[string]any)
 	}
 
 	htmlTemplate := `

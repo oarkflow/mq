@@ -544,6 +544,15 @@ func (tm *DAG) processTaskInternal(ctx context.Context, task *mq.Task) mq.Result
 			)
 		}
 	} else {
+		if manager.result != nil && manager.result.Status == mq.Completed {
+			currentKey := tm.getCurrentNode(manager)
+			currentNode := strings.Split(currentKey, Delimiter)[0]
+			isLast, err := tm.IsLastNode(currentNode)
+			if err == nil && isLast {
+				return *manager.result
+			}
+		}
+
 		// Replace the manager's result channel so waiting here is wired to this call.
 		manager.resultCh = resultCh
 		tm.Logger().Info("Resuming task",
