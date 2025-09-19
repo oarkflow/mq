@@ -1180,3 +1180,43 @@ func (tm *DAG) StopEnhanced(ctx context.Context) error {
 	// Stop underlying components
 	return tm.Stop(ctx)
 }
+
+// GetPreviousPageNode returns the last page node that was executed before the current node
+func (tm *DAG) GetPreviousPageNode(nodeID string) (*Node, error) {
+	currentNode := strings.Split(nodeID, Delimiter)[0]
+	// Check if current node exists
+	_, exists := tm.nodes.Get(currentNode)
+	if !exists {
+		fmt.Println(tm.nodes.Keys())
+		return nil, fmt.Errorf("current node %s not found", currentNode)
+	}
+
+	// Get topological order to determine execution sequence
+	topologicalOrder, err := tm.GetTopologicalOrder()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get topological order: %w", err)
+	}
+
+	// Find the index of the current node in topological order
+	currentIndex := -1
+	for i, nodeIDInOrder := range topologicalOrder {
+		if nodeIDInOrder == currentNode {
+			currentIndex = i
+			break
+		}
+	}
+
+	if currentIndex == -1 {
+		return nil, fmt.Errorf("current node %s not found in topological order", currentNode)
+	}
+
+	// Iterate backwards from current node to find the last page node
+	for i := currentIndex - 1; i >= 0; i-- {
+		nodeIDInOrder := topologicalOrder[i]
+		if node, ok := tm.nodes.Get(nodeIDInOrder); ok && node.NodeType == Page {
+			return node, nil
+		}
+	}
+
+	return nil, fmt.Errorf("no previous page node found")
+}
