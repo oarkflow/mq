@@ -11,7 +11,7 @@ import (
 )
 
 // Enhanced DAG Example demonstrates how to use the enhanced DAG system with workflow capabilities
-func main() {
+func mai1n() {
 	fmt.Println("🚀 Starting Enhanced DAG with Workflow Engine Demo...")
 
 	// Create enhanced DAG configuration

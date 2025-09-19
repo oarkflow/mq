@@ -26,17 +26,17 @@ func main() {
 	// Add SMS workflow nodes
 	// Note: Page nodes have no timeout by default, allowing users unlimited time for form input
 
-	flow.AddDAGNode(dag.Page, "Login", "login", loginSubDAG(), true)
-	flow.AddNode(dag.Page, "SMS Form", "SMSForm", &SMSFormNode{})
+	// flow.AddDAGNode(dag.Page, "Login", "login", loginSubDAG(), true)
+	flow.AddNode(dag.Page, "SMS Form", "SMSForm", &SMSFormNode{}, true)
 	flow.AddNode(dag.Function, "Validate Input", "ValidateInput", &ValidateInputNode{})
 	flow.AddNode(dag.Function, "Send SMS", "SendSMS", &SendSMSNode{})
 	flow.AddNode(dag.Page, "SMS Result", "SMSResult", &SMSResultNode{})
 	flow.AddNode(dag.Page, "Error Page", "ErrorPage", &ErrorPageNode{})
 
 	// Define edges for SMS workflow
-	flow.AddEdge(dag.Simple, "Login to Form", "login", "SMSForm")
+	// flow.AddEdge(dag.Simple, "Login to Form", "login", "SMSForm")
 	flow.AddEdge(dag.Simple, "Form to Validation", "SMSForm", "ValidateInput")
-	flow.AddCondition("ValidateInput", map[string]string{"valid": "SendSMS", "invalid": "ErrorPage"})
+	flow.AddCondition("ValidateInput", map[string]string{"valid": "SendSMS"}) // Removed invalid -> ErrorPage since we use ResetTo
 	flow.AddCondition("SendSMS", map[string]string{"sent": "SMSResult", "failed": "ErrorPage"})
 
 	// Start the flow
@@ -303,12 +303,17 @@ func (s *SMSFormNode) ProcessTask(ctx context.Context, task *mq.Task) mq.Result 
 	var inputData map[string]any
 	if task.Payload != nil && len(task.Payload) > 0 {
 		if err := json.Unmarshal(task.Payload, &inputData); err == nil {
-			// If we have valid input data, pass it through for validation
-			return mq.Result{Payload: task.Payload, Ctx: ctx}
+			// Check if this is validation error data (contains validation_error)
+			if _, hasValidationError := inputData["validation_error"]; hasValidationError {
+				// This is validation error data, show the form with errors
+			} else {
+				// If we have valid input data, pass it through for validation
+				return mq.Result{Payload: task.Payload, Ctx: ctx}
+			}
 		}
 	}
 
-	// Otherwise, show the form
+	// Show the form (either initial load or with validation errors)
 	htmlTemplate := `
 <!DOCTYPE html>
 <html>
@@ -399,12 +404,21 @@ func (s *SMSFormNode) ProcessTask(ctx context.Context, task *mq.Task) mq.Result 
         <div class="info">
             <p>Send SMS messages through our secure DAG workflow</p>
         </div>
+
+        {{if validation_error}}
+        <div class="error-message" style="background: rgba(255, 100, 100, 0.2); border: 1px solid #ff6b6b; padding: 15px; border-radius: 8px; margin-bottom: 20px; color: #ffcccc;">
+            <strong>⚠️ Validation Error:</strong> {{validation_error}}
+        </div>
+        {{end}}
+
         <form method="post" action="/process?task_id={{task_id}}&next=true">
             <div class="form-group">
                 <label for="phone">📞 Phone Number:</label>
                 <input type="tel" id="phone" name="phone"
                        placeholder="+1234567890 or 1234567890"
-                       required>
+                       value="{{phone}}"
+                       required
+                       {{if error_field_phone}}style="border: 2px solid #ff6b6b; background: rgba(255, 100, 100, 0.1);"{{end}}>
                 <div class="info" style="margin-top: 5px; font-size: 12px;">
                     Supports US format: +1234567890 or 1234567890
                 </div>
@@ -416,14 +430,16 @@ func (s *SMSFormNode) ProcessTask(ctx context.Context, task *mq.Task) mq.Result 
                          placeholder="Enter your message here..."
                          maxlength="160"
                          required
-                         oninput="updateCharCount()"></textarea>
-                <div class="char-count" id="charCount">0/160 characters</div>
+                         oninput="updateCharCount()"
+                         {{if error_field_message}}style="border: 2px solid #ff6b6b; background: rgba(255, 100, 100, 0.1);"{{end}}>{{message}}</textarea>
+                <div class="char-count" id="charCount">{{message_length}}/160 characters</div>
             </div>
 
             <div class="form-group">
                 <label for="sender_name">👤 Sender Name (Optional):</label>
                 <input type="text" id="sender_name" name="sender_name"
                        placeholder="Your name or organization"
+                       value="{{sender_name}}"
                        maxlength="50">
             </div>
 
@@ -460,9 +476,20 @@ func (s *SMSFormNode) ProcessTask(ctx context.Context, task *mq.Task) mq.Result 
 </body>
 </html>`
 
+	messageStr, _ := inputData["message"].(string)
+	messageLength := len(messageStr)
+
 	parser := jet.NewWithMemory(jet.WithDelims("{{", "}}"))
 	rs, err := parser.ParseTemplate(htmlTemplate, map[string]any{
-		"task_id": ctx.Value("task_id"),
+		"task_id":             ctx.Value("task_id"),
+		"validation_error":    inputData["validation_error"],
+		"error_field":         inputData["error_field"],
+		"error_field_phone":   inputData["error_field"] == "phone",
+		"error_field_message": inputData["error_field"] == "message",
+		"phone":               inputData["phone"],
+		"message":             inputData["message"],
+		"message_length":      messageLength,
+		"sender_name":         inputData["sender_name"],
 	})
 	if err != nil {
 		return mq.Result{Error: err, Ctx: ctx}
@@ -501,7 +528,11 @@ func (v *ValidateInputNode) ProcessTask(ctx context.Context, task *mq.Task) mq.R
 		inputData["validation_error"] = "Phone number is required"
 		inputData["error_field"] = "phone"
 		bt, _ := json.Marshal(inputData)
-		return mq.Result{Payload: bt, Ctx: ctx, ConditionStatus: "invalid"}
+		return mq.Result{
+			Payload: bt,
+			Ctx:     ctx,
+			ResetTo: "SMSForm", // Reset to form instead of going to error page
+		}
 	}
 
 	// Clean and validate phone number format
@@ -514,7 +545,11 @@ func (v *ValidateInputNode) ProcessTask(ctx context.Context, task *mq.Task) mq.R
 		inputData["validation_error"] = "Invalid phone number format. Please use US format: +1234567890 or 1234567890"
 		inputData["error_field"] = "phone"
 		bt, _ := json.Marshal(inputData)
-		return mq.Result{Payload: bt, Ctx: ctx, ConditionStatus: "invalid"}
+		return mq.Result{
+			Payload: bt,
+			Ctx:     ctx,
+			ResetTo: "SMSForm", // Reset to form instead of going to error page
+		}
 	}
 
 	// Validate message
@@ -522,14 +557,22 @@ func (v *ValidateInputNode) ProcessTask(ctx context.Context, task *mq.Task) mq.R
 		inputData["validation_error"] = "Message is required"
 		inputData["error_field"] = "message"
 		bt, _ := json.Marshal(inputData)
-		return mq.Result{Payload: bt, Ctx: ctx, ConditionStatus: "invalid"}
+		return mq.Result{
+			Payload: bt,
+			Ctx:     ctx,
+			ResetTo: "SMSForm", // Reset to form instead of going to error page
+		}
 	}
 
 	if len(message) > 160 {
 		inputData["validation_error"] = "Message too long. Maximum 160 characters allowed"
 		inputData["error_field"] = "message"
 		bt, _ := json.Marshal(inputData)
-		return mq.Result{Payload: bt, Ctx: ctx, ConditionStatus: "invalid"}
+		return mq.Result{
+			Payload: bt,
+			Ctx:     ctx,
+			ResetTo: "SMSForm", // Reset to form instead of going to error page
+		}
 	}
 
 	// Check for potentially harmful content
@@ -540,7 +583,11 @@ func (v *ValidateInputNode) ProcessTask(ctx context.Context, task *mq.Task) mq.R
 			inputData["validation_error"] = "Message contains prohibited content"
 			inputData["error_field"] = "message"
 			bt, _ := json.Marshal(inputData)
-			return mq.Result{Payload: bt, Ctx: ctx, ConditionStatus: "invalid"}
+			return mq.Result{
+				Payload: bt,
+				Ctx:     ctx,
+				ResetTo: "SMSForm", // Reset to form instead of going to error page
+			}
 		}
 	}
 

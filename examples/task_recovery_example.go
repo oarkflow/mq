@@ -116,7 +116,7 @@ func demonstrateTaskRecovery() {
 	log.Println("💡 In a real scenario, the recovered task would continue processing from the 'process' node")
 }
 
-func main() {
+func mai5n() {
 	fmt.Println("=== DAG Task Recovery Example ===")
 	demonstrateTaskRecovery()
 }

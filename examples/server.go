@@ -551,7 +551,7 @@ func Logger() HandlerFunc {
 // Example
 // ----------------------------
 
-func main() {
+func mai3n() {
 	app := New()
 	app.Use(Recover())
 

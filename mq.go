@@ -45,6 +45,7 @@ type Result struct {
 	ConditionStatus string          `json:"condition_status"`
 	Ctx             context.Context `json:"-"`
 	Payload         json.RawMessage `json:"payload"`
+	ResetTo         string          `json:"reset_to,omitempty"` // Node ID to reset to, or "back" for previous page node
 	Last            bool
 }
 

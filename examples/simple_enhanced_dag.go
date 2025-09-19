@@ -24,7 +24,7 @@ func enhancedSubDAG() *dag.DAG {
 	return f
 }
 
-func main() {
+func mai4n() {
 	fmt.Println("🚀 Starting Simple Enhanced DAG Demo...")
 
 	// Create enhanced DAG - simple configuration, just like regular DAG but with enhanced features

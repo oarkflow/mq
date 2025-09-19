@@ -311,7 +311,8 @@ func (tm *TaskManager) areDependenciesMet(nodeID string) bool {
 				logger.Field{Key: "nodeID", Value: nodeID},
 				logger.Field{Key: "dependency", Value: prevNode.ID},
 				logger.Field{Key: "stateExists", Value: exists},
-				logger.Field{Key: "stateStatus", Value: string(state.Status)})
+				logger.Field{Key: "stateStatus", Value: string(state.Status)},
+				logger.Field{Key: "taskID", Value: tm.taskID})
 			return false
 		}
 	}
@@ -706,6 +707,13 @@ func (tm *TaskManager) onNodeCompleted(nr nodeResult) {
 	if !ok {
 		return
 	}
+
+	// Handle ResetTo functionality
+	if nr.result.ResetTo != "" {
+		tm.handleResetTo(nr)
+		return
+	}
+
 	if nr.result.Error != nil || nr.status == mq.Failed {
 		if state, exists := tm.taskStates.Get(nr.nodeID); exists {
 			tm.processFinalResult(state)
@@ -1085,4 +1093,394 @@ func (tm *TaskManager) updateTaskPosition(ctx context.Context, taskID, currentNo
 
 	// Save the updated task
 	return tm.storage.SaveTask(ctx, task)
+}
+
+// handleResetTo handles the ResetTo functionality for resetting a task to a specific node
+func (tm *TaskManager) handleResetTo(nr nodeResult) {
+	resetTo := nr.result.ResetTo
+	nodeID := strings.Split(nr.nodeID, Delimiter)[0]
+
+	var targetNodeID string
+	var err error
+
+	if resetTo == "back" {
+		// Use GetPreviousPageNode to find the previous page node
+		var prevNode *Node
+		prevNode, err = tm.dag.GetPreviousPageNode(nodeID)
+		if err != nil {
+			tm.dag.Logger().Error("Failed to get previous page node",
+				logger.Field{Key: "currentNodeID", Value: nodeID},
+				logger.Field{Key: "error", Value: err.Error()})
+			// Send error result
+			tm.resultCh <- mq.Result{
+				Error:   fmt.Errorf("failed to reset to previous page node: %w", err),
+				Ctx:     nr.ctx,
+				TaskID:  nr.result.TaskID,
+				Topic:   nr.result.Topic,
+				Status:  mq.Failed,
+				Payload: nr.result.Payload,
+			}
+			return
+		}
+		if prevNode == nil {
+			tm.dag.Logger().Error("No previous page node found",
+				logger.Field{Key: "currentNodeID", Value: nodeID})
+			// Send error result
+			tm.resultCh <- mq.Result{
+				Error:   fmt.Errorf("no previous page node found"),
+				Ctx:     nr.ctx,
+				TaskID:  nr.result.TaskID,
+				Topic:   nr.result.Topic,
+				Status:  mq.Failed,
+				Payload: nr.result.Payload,
+			}
+			return
+		}
+		targetNodeID = prevNode.ID
+	} else {
+		// Use the specified node ID
+		targetNodeID = resetTo
+		// Validate that the target node exists
+		if _, exists := tm.dag.nodes.Get(targetNodeID); !exists {
+			tm.dag.Logger().Error("Reset target node does not exist",
+				logger.Field{Key: "targetNodeID", Value: targetNodeID})
+			// Send error result
+			tm.resultCh <- mq.Result{
+				Error:   fmt.Errorf("reset target node %s does not exist", targetNodeID),
+				Ctx:     nr.ctx,
+				TaskID:  nr.result.TaskID,
+				Topic:   nr.result.Topic,
+				Status:  mq.Failed,
+				Payload: nr.result.Payload,
+			}
+			return
+		}
+	}
+
+	if tm.dag.debug {
+		tm.dag.Logger().Info("Resetting task to node",
+			logger.Field{Key: "taskID", Value: nr.result.TaskID},
+			logger.Field{Key: "fromNode", Value: nodeID},
+			logger.Field{Key: "toNode", Value: targetNodeID},
+			logger.Field{Key: "resetTo", Value: resetTo})
+	}
+
+	// Clear task states of all nodes between current node and target node
+	// This ensures that when we reset, the workflow can proceed correctly
+	tm.clearTaskStatesInPath(nodeID, targetNodeID)
+
+	// Also clear any deferred tasks for the target node itself
+	tm.deferredTasks.ForEach(func(taskID string, tsk *task) bool {
+		if strings.Split(tsk.nodeID, Delimiter)[0] == targetNodeID {
+			tm.deferredTasks.Del(taskID)
+			if tm.dag.debug {
+				tm.dag.Logger().Debug("Cleared deferred task for target node",
+					logger.Field{Key: "nodeID", Value: targetNodeID},
+					logger.Field{Key: "taskID", Value: taskID})
+			}
+		}
+		return true
+	})
+
+	// Handle dependencies of the target node - if they exist and are not completed,
+	// we need to mark them as completed to allow the workflow to proceed
+	tm.handleTargetNodeDependencies(targetNodeID, nr)
+
+	// Get previously received data for the target node
+	var previousPayload json.RawMessage
+	if prevResult, hasResult := tm.currentNodeResult.Get(targetNodeID); hasResult {
+		previousPayload = prevResult.Payload
+		if tm.dag.debug {
+			tm.dag.Logger().Info("Using previous payload for reset",
+				logger.Field{Key: "targetNodeID", Value: targetNodeID},
+				logger.Field{Key: "payloadSize", Value: len(previousPayload)})
+		}
+	} else {
+		// If no previous data, use the current result's payload
+		previousPayload = nr.result.Payload
+		if tm.dag.debug {
+			tm.dag.Logger().Info("No previous payload found, using current payload",
+				logger.Field{Key: "targetNodeID", Value: targetNodeID})
+		}
+	}
+
+	// Reset task state for the target node
+	if state, exists := tm.taskStates.Get(targetNodeID); exists {
+		state.Status = mq.Completed // Mark as completed to satisfy dependencies
+		state.UpdatedAt = time.Now()
+		state.Result = mq.Result{
+			Status: mq.Completed,
+			Ctx:    nr.ctx,
+		}
+	} else {
+		// Create new state if it doesn't exist and mark as completed
+		newState := newTaskState(targetNodeID)
+		newState.Status = mq.Completed
+		newState.Result = mq.Result{
+			Status: mq.Completed,
+			Ctx:    nr.ctx,
+		}
+		tm.taskStates.Set(targetNodeID, newState)
+	}
+
+	// Update current node result with the reset result (clear ResetTo to avoid loops)
+	resetResult := mq.Result{
+		TaskID:  nr.result.TaskID,
+		Topic:   targetNodeID,
+		Status:  mq.Completed, // Mark as completed
+		Payload: previousPayload,
+		Ctx:     nr.ctx,
+		// ResetTo is intentionally not set to avoid infinite loops
+	}
+	tm.currentNodeResult.Set(targetNodeID, resetResult)
+
+	// Re-enqueue the task for the target node
+	tm.enqueueTask(nr.ctx, targetNodeID, nr.result.TaskID, previousPayload)
+
+	// Log the reset activity
+	tm.logActivity(nr.ctx, nr.result.TaskID, targetNodeID, "task_reset",
+		fmt.Sprintf("Task reset from %s to %s", nodeID, targetNodeID), nil)
+}
+
+// clearTaskStatesInPath clears all task states in the path from current node to target node
+// This is necessary when resetting to ensure the workflow can proceed without dependency issues
+func (tm *TaskManager) clearTaskStatesInPath(currentNodeID, targetNodeID string) {
+	// Get all nodes in the path from current to target
+	pathNodes := tm.getNodesInPath(currentNodeID, targetNodeID)
+
+	if tm.dag.debug {
+		tm.dag.Logger().Info("Clearing task states in path",
+			logger.Field{Key: "fromNode", Value: currentNodeID},
+			logger.Field{Key: "toNode", Value: targetNodeID},
+			logger.Field{Key: "pathNodeCount", Value: len(pathNodes)})
+	}
+
+	// Also clear the current node itself (ValidateInput in the example)
+	if state, exists := tm.taskStates.Get(currentNodeID); exists {
+		state.Status = mq.Pending
+		state.UpdatedAt = time.Now()
+		state.Result = mq.Result{} // Clear previous result
+		if tm.dag.debug {
+			tm.dag.Logger().Debug("Cleared task state for current node",
+				logger.Field{Key: "nodeID", Value: currentNodeID})
+		}
+	}
+	// Also clear any cached results for the current node
+	tm.currentNodeResult.Del(currentNodeID)
+	// Clear any deferred tasks for the current node
+	tm.deferredTasks.ForEach(func(taskID string, tsk *task) bool {
+		if strings.Split(tsk.nodeID, Delimiter)[0] == currentNodeID {
+			tm.deferredTasks.Del(taskID)
+			if tm.dag.debug {
+				tm.dag.Logger().Debug("Cleared deferred task for current node",
+					logger.Field{Key: "nodeID", Value: currentNodeID},
+					logger.Field{Key: "taskID", Value: taskID})
+			}
+		}
+		return true
+	})
+
+	// Clear task states for all nodes in the path
+	for _, pathNodeID := range pathNodes {
+		if state, exists := tm.taskStates.Get(pathNodeID); exists {
+			state.Status = mq.Pending
+			state.UpdatedAt = time.Now()
+			state.Result = mq.Result{} // Clear previous result
+			if tm.dag.debug {
+				tm.dag.Logger().Debug("Cleared task state for path node",
+					logger.Field{Key: "nodeID", Value: pathNodeID})
+			}
+		}
+		// Also clear any cached results for this node
+		tm.currentNodeResult.Del(pathNodeID)
+		// Clear any deferred tasks for this node
+		tm.deferredTasks.ForEach(func(taskID string, tsk *task) bool {
+			if strings.Split(tsk.nodeID, Delimiter)[0] == pathNodeID {
+				tm.deferredTasks.Del(taskID)
+				if tm.dag.debug {
+					tm.dag.Logger().Debug("Cleared deferred task for path node",
+						logger.Field{Key: "nodeID", Value: pathNodeID},
+						logger.Field{Key: "taskID", Value: taskID})
+				}
+			}
+			return true
+		})
+	}
+}
+
+// getNodesInPath returns all nodes in the path from start node to end node
+func (tm *TaskManager) getNodesInPath(startNodeID, endNodeID string) []string {
+	visited := make(map[string]bool)
+	var result []string
+
+	// Use BFS to find the path from start to end
+	queue := []string{startNodeID}
+	visited[startNodeID] = true
+	parent := make(map[string]string)
+
+	found := false
+	for len(queue) > 0 && !found {
+		currentNodeID := queue[0]
+		queue = queue[1:]
+
+		// Get all nodes that this node points to
+		if node, exists := tm.dag.nodes.Get(currentNodeID); exists {
+			for _, edge := range node.Edges {
+				if edge.Type == Simple || edge.Type == Iterator {
+					targetNodeID := edge.To.ID
+					if !visited[targetNodeID] {
+						visited[targetNodeID] = true
+						parent[targetNodeID] = currentNodeID
+						queue = append(queue, targetNodeID)
+
+						if targetNodeID == endNodeID {
+							found = true
+							break
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// If we found the end node, reconstruct the path
+	if found {
+		current := endNodeID
+		for current != startNodeID {
+			result = append([]string{current}, result...)
+			if parentNode, exists := parent[current]; exists {
+				current = parentNode
+			} else {
+				break
+			}
+		}
+		result = append([]string{startNodeID}, result...)
+	}
+
+	return result
+}
+
+// getAllDownstreamNodes returns all nodes that come after the given node in the workflow
+func (tm *TaskManager) getAllDownstreamNodes(nodeID string) []string {
+	visited := make(map[string]bool)
+	var result []string
+
+	// Use BFS to find all downstream nodes
+	queue := []string{nodeID}
+	visited[nodeID] = true
+
+	for len(queue) > 0 {
+		currentNodeID := queue[0]
+		queue = queue[1:]
+
+		// Get all nodes that this node points to
+		if node, exists := tm.dag.nodes.Get(currentNodeID); exists {
+			for _, edge := range node.Edges {
+				if edge.Type == Simple || edge.Type == Iterator {
+					targetNodeID := edge.To.ID
+					if !visited[targetNodeID] {
+						visited[targetNodeID] = true
+						result = append(result, targetNodeID)
+						queue = append(queue, targetNodeID)
+					}
+				}
+			}
+		}
+	}
+
+	return result
+}
+
+// handleTargetNodeDependencies handles the dependencies of the target node during reset
+// If the target node has unmet dependencies, we mark them as completed to allow the workflow to proceed
+func (tm *TaskManager) handleTargetNodeDependencies(targetNodeID string, nr nodeResult) {
+	// Get the dependencies of the target node
+	prevNodes, err := tm.dag.GetPreviousNodes(targetNodeID)
+	if err != nil {
+		tm.dag.Logger().Error("Error getting previous nodes for target",
+			logger.Field{Key: "targetNodeID", Value: targetNodeID},
+			logger.Field{Key: "error", Value: err.Error()})
+		return
+	}
+
+	if tm.dag.debug {
+		tm.dag.Logger().Info("Checking dependencies for target node",
+			logger.Field{Key: "targetNodeID", Value: targetNodeID},
+			logger.Field{Key: "dependencyCount", Value: len(prevNodes)})
+	}
+
+	// Check each dependency and ensure it's marked as completed for reset
+	for _, prevNode := range prevNodes {
+		// Check both the pure node ID and the indexed node ID for state
+		state, exists := tm.taskStates.Get(prevNode.ID)
+		if !exists {
+			// Also check if there's a state with an index suffix
+			tm.taskStates.ForEach(func(key string, s *TaskState) bool {
+				if strings.Split(key, Delimiter)[0] == prevNode.ID {
+					state = s
+					exists = true
+					return false // Stop iteration
+				}
+				return true
+			})
+		}
+
+		if !exists {
+			// Create new state and mark as completed for reset
+			newState := newTaskState(prevNode.ID)
+			newState.Status = mq.Completed
+			newState.UpdatedAt = time.Now()
+			newState.Result = mq.Result{
+				Status: mq.Completed,
+				Ctx:    nr.ctx,
+			}
+			tm.taskStates.Set(prevNode.ID, newState)
+			if tm.dag.debug {
+				tm.dag.Logger().Debug("Created completed state for dependency node during reset",
+					logger.Field{Key: "dependencyNodeID", Value: prevNode.ID})
+			}
+		} else if state.Status != mq.Completed {
+			// Mark existing state as completed for reset
+			state.Status = mq.Completed
+			state.UpdatedAt = time.Now()
+			if state.Result.Status == "" {
+				state.Result = mq.Result{
+					Status: mq.Completed,
+					Ctx:    nr.ctx,
+				}
+			}
+			if tm.dag.debug {
+				tm.dag.Logger().Debug("Marked dependency node as completed during reset",
+					logger.Field{Key: "dependencyNodeID", Value: prevNode.ID},
+					logger.Field{Key: "previousStatus", Value: string(state.Status)})
+			}
+		} else {
+			if tm.dag.debug {
+				tm.dag.Logger().Debug("Dependency already satisfied",
+					logger.Field{Key: "dependencyNodeID", Value: prevNode.ID},
+					logger.Field{Key: "status", Value: string(state.Status)})
+			}
+		}
+
+		// Ensure cached result exists for this dependency
+		if _, hasResult := tm.currentNodeResult.Get(prevNode.ID); !hasResult {
+			tm.currentNodeResult.Set(prevNode.ID, mq.Result{
+				Status: mq.Completed,
+				Ctx:    nr.ctx,
+			})
+		}
+
+		// Clear any deferred tasks for this dependency since it's now satisfied
+		tm.deferredTasks.ForEach(func(taskID string, tsk *task) bool {
+			if strings.Split(tsk.nodeID, Delimiter)[0] == prevNode.ID {
+				tm.deferredTasks.Del(taskID)
+				if tm.dag.debug {
+					tm.dag.Logger().Debug("Cleared deferred task for satisfied dependency",
+						logger.Field{Key: "dependencyNodeID", Value: prevNode.ID},
+						logger.Field{Key: "taskID", Value: taskID})
+				}
+			}
+			return true
+		})
+	}
 }
