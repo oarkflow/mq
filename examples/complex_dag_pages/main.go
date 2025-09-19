@@ -369,7 +369,7 @@ func (p *LoginPage) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
             <h1>📱 Phone Processing System</h1>
             <p>Please login to continue</p>
         </div>
-        <form method="post" action="/process" id="loginForm">
+        <form method="post" action="/process?task_id={{task_id}}" id="loginForm">
             <div class="form-group">
                 <label for="username">Username</label>
                 <input type="text" id="username" name="username" required placeholder="Enter your username">

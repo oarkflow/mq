@@ -25,6 +25,8 @@ func main() {
 
 	// Add SMS workflow nodes
 	// Note: Page nodes have no timeout by default, allowing users unlimited time for form input
+
+	flow.AddDAGNode(dag.Page, "Login", "login", loginSubDAG(), true)
 	flow.AddNode(dag.Page, "SMS Form", "SMSForm", &SMSFormNode{})
 	flow.AddNode(dag.Function, "Validate Input", "ValidateInput", &ValidateInputNode{})
 	flow.AddNode(dag.Function, "Send SMS", "SendSMS", &SendSMSNode{})
@@ -32,6 +34,7 @@ func main() {
 	flow.AddNode(dag.Page, "Error Page", "ErrorPage", &ErrorPageNode{})
 
 	// Define edges for SMS workflow
+	flow.AddEdge(dag.Simple, "Login to Form", "login", "SMSForm")
 	flow.AddEdge(dag.Simple, "Form to Validation", "SMSForm", "ValidateInput")
 	flow.AddCondition("ValidateInput", map[string]string{"valid": "SendSMS", "invalid": "ErrorPage"})
 	flow.AddCondition("SendSMS", map[string]string{"sent": "SMSResult", "failed": "ErrorPage"})
@@ -44,6 +47,250 @@ func main() {
 	fmt.Println("Starting SMS DAG server on http://0.0.0.0:8083")
 	fmt.Println("Navigate to the URL to access the SMS form")
 	flow.Start(context.Background(), "0.0.0.0:8083")
+}
+
+// loginSubDAG creates a login sub-DAG with page for authentication
+func loginSubDAG() *dag.DAG {
+	login := dag.NewDAG("Login Sub DAG", "login-sub-dag", func(taskID string, result mq.Result) {
+		fmt.Printf("Login Sub DAG Final result for task %s: %s\n", taskID, string(result.Payload))
+	}, mq.WithSyncMode(true))
+
+	login.
+		AddNode(dag.Page, "Login Page", "login-page", &LoginPage{}).
+		AddNode(dag.Function, "Verify Credentials", "verify-credentials", &VerifyCredentials{}).
+		AddNode(dag.Function, "Generate Token", "generate-token", &GenerateToken{}).
+		AddEdge(dag.Simple, "Login to Verify", "login-page", "verify-credentials").
+		AddEdge(dag.Simple, "Verify to Token", "verify-credentials", "generate-token")
+
+	return login
+}
+
+type LoginPage struct {
+	dag.Operation
+}
+
+func (p *LoginPage) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
+	// Check if this is a form submission
+	var inputData map[string]interface{}
+	if len(task.Payload) > 0 {
+		if err := json.Unmarshal(task.Payload, &inputData); err == nil {
+			// Check if we have form data (username/password)
+			if formData, ok := inputData["form"].(map[string]interface{}); ok {
+				// This is a form submission, pass it through for verification
+				credentials := map[string]interface{}{
+					"username": formData["username"],
+					"password": formData["password"],
+				}
+				inputData["credentials"] = credentials
+				updatedPayload, _ := json.Marshal(inputData)
+				return mq.Result{Payload: updatedPayload, Ctx: ctx}
+			}
+		}
+	}
+
+	// Otherwise, show the form
+	var data map[string]interface{}
+	if err := json.Unmarshal(task.Payload, &data); err != nil {
+		data = make(map[string]interface{})
+	}
+
+	// HTML content for login page
+	htmlContent := `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Phone Processing System - Login</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            margin: 0;
+            padding: 0;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .login-container {
+            background: white;
+            padding: 2rem;
+            border-radius: 10px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+            width: 100%;
+            max-width: 400px;
+        }
+        .login-header {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+        .login-header h1 {
+            color: #333;
+            margin: 0;
+            font-size: 1.8rem;
+        }
+        .login-header p {
+            color: #666;
+            margin: 0.5rem 0 0 0;
+        }
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 0.5rem;
+            color: #333;
+            font-weight: 500;
+        }
+        .form-group input {
+            width: 100%;
+            padding: 0.75rem;
+            border: 2px solid #e1e5e9;
+            border-radius: 5px;
+            font-size: 1rem;
+            transition: border-color 0.3s;
+            box-sizing: border-box;
+        }
+        .form-group input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        .login-btn {
+            width: 100%;
+            padding: 0.75rem;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 5px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        .login-btn:hover {
+            transform: translateY(-2px);
+        }
+        .login-btn:active {
+            transform: scale(0.98);
+        }
+        .status-message {
+            margin-top: 1rem;
+            padding: 0.5rem;
+            border-radius: 5px;
+            text-align: center;
+            font-weight: 500;
+        }
+        .status-success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .status-error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <div class="login-header">
+            <h1>📱 Phone Processing System</h1>
+            <p>Please login to continue</p>
+        </div>
+        <form method="post" action="/process?task_id={{task_id}}&next=true" id="loginForm">
+            <div class="form-group">
+                <label for="username">Username</label>
+                <input type="text" id="username" name="username" required placeholder="Enter your username">
+            </div>
+            <div class="form-group">
+                <label for="password">Password</label>
+                <input type="password" id="password" name="password" required placeholder="Enter your password">
+            </div>
+            <button type="submit" class="login-btn">Login</button>
+        </form>
+        <div id="statusMessage"></div>
+    </div>
+
+    <script>
+        // Form will submit naturally to the action URL
+        document.getElementById('loginForm').addEventListener('submit', function(e) {
+            // Optional: Add loading state
+            const btn = e.target.querySelector('.login-btn');
+            btn.textContent = 'Logging in...';
+            btn.disabled = true;
+        });
+    </script>
+</body>
+</html>`
+
+	parser := jet.NewWithMemory(jet.WithDelims("{{", "}}"))
+	rs, err := parser.ParseTemplate(htmlContent, map[string]any{
+		"task_id": ctx.Value("task_id"),
+	})
+	if err != nil {
+		return mq.Result{Error: err, Ctx: ctx}
+	}
+
+	ctx = context.WithValue(ctx, consts.ContentType, consts.TypeHtml)
+	resultData := map[string]any{
+		"html_content": rs,
+		"step":         "login",
+		"data":         data,
+	}
+
+	resultPayload, _ := json.Marshal(resultData)
+	return mq.Result{
+		Payload: resultPayload,
+		Ctx:     ctx,
+	}
+}
+
+type VerifyCredentials struct {
+	dag.Operation
+}
+
+func (p *VerifyCredentials) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
+	var data map[string]interface{}
+	if err := json.Unmarshal(task.Payload, &data); err != nil {
+		return mq.Result{Error: fmt.Errorf("VerifyCredentials Error: %s", err.Error()), Ctx: ctx}
+	}
+
+	username, _ := data["username"].(string)
+	password, _ := data["password"].(string)
+
+	// Simple verification logic
+	if username == "admin" && password == "password123" {
+		data["authenticated"] = true
+		data["user_role"] = "administrator"
+	} else {
+		data["authenticated"] = false
+		data["error"] = "Invalid credentials"
+	}
+	delete(data, "html_content")
+	updatedPayload, _ := json.Marshal(data)
+	return mq.Result{Payload: updatedPayload, Ctx: ctx}
+}
+
+type GenerateToken struct {
+	dag.Operation
+}
+
+func (p *GenerateToken) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
+	var data map[string]interface{}
+	if err := json.Unmarshal(task.Payload, &data); err != nil {
+		return mq.Result{Error: fmt.Errorf("GenerateToken Error: %s", err.Error()), Ctx: ctx}
+	}
+
+	if authenticated, ok := data["authenticated"].(bool); ok && authenticated {
+		data["auth_token"] = "jwt_token_123456789"
+		data["token_expires"] = "2025-09-19T13:00:00Z"
+	}
+
+	delete(data, "html_content")
+	updatedPayload, _ := json.Marshal(data)
+	return mq.Result{Payload: updatedPayload, Ctx: ctx}
 }
 
 // SMSFormNode - Initial form to collect SMS data
