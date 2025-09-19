@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/oarkflow/json"
+	"github.com/oarkflow/json/jsonparser"
 
 	"github.com/oarkflow/mq"
 	dagstorage "github.com/oarkflow/mq/dag/storage" // Import dag storage package with alias
@@ -136,6 +137,144 @@ func NewTaskManager(dag *DAG, taskID string, resultCh chan mq.Result, iteratorNo
 
 func (tm *TaskManager) ProcessTask(ctx context.Context, startNode string, payload json.RawMessage) {
 	tm.enqueueTask(ctx, startNode, tm.taskID, payload)
+}
+
+// ResetToNode resets the task to a specific node, clearing states for all subsequent nodes
+func (tm *TaskManager) ResetToNode(ctx context.Context, targetNodeID string, payload json.RawMessage, errorMessage string) error {
+	if tm.dag.debug {
+		tm.dag.Logger().Info("ResetToNode called",
+			logger.Field{Key: "targetNodeID", Value: targetNodeID},
+			logger.Field{Key: "taskID", Value: tm.taskID},
+			logger.Field{Key: "errorMessage", Value: errorMessage})
+	}
+
+	// Check if target node exists
+	targetNode, exists := tm.dag.nodes.Get(targetNodeID)
+	if !exists {
+		return fmt.Errorf("target node %s not found", targetNodeID)
+	}
+
+	// Only allow reset to Page nodes for safety
+	if targetNode.NodeType != Page {
+		return fmt.Errorf("can only reset to Page nodes, %s is type %s", targetNodeID, targetNode.NodeType)
+	}
+
+	// Clear states for all nodes that come after the target node
+	if err := tm.clearSubsequentNodes(targetNodeID); err != nil {
+		return fmt.Errorf("failed to clear subsequent nodes: %w", err)
+	}
+
+	// Add error message to payload if provided
+	var updatedPayload json.RawMessage
+	if errorMessage != "" {
+		var payloadData map[string]interface{}
+		if len(payload) > 0 {
+			if err := json.Unmarshal(payload, &payloadData); err != nil {
+				payloadData = make(map[string]interface{})
+			}
+		} else {
+			payloadData = make(map[string]interface{})
+		}
+
+		payloadData["reset_error"] = errorMessage
+		payloadData["reset_from"] = true
+		payloadData["reset_timestamp"] = time.Now().Format(time.RFC3339)
+
+		var err error
+		updatedPayload, err = json.Marshal(payloadData)
+		if err != nil {
+			return fmt.Errorf("failed to marshal updated payload: %w", err)
+		}
+	} else {
+		updatedPayload = payload
+	}
+
+	// Reset the target node state
+	tm.taskStates.Set(targetNodeID, newTaskState(targetNodeID))
+
+	// Log the reset activity
+	tm.logActivity(ctx, tm.taskID, targetNodeID, "task_reset", fmt.Sprintf("Task reset to node %s: %s", targetNodeID, errorMessage), nil)
+
+	// Re-enqueue the task at the target node
+	tm.enqueueTask(ctx, targetNodeID, tm.taskID, updatedPayload)
+
+	return nil
+}
+
+// clearSubsequentNodes clears the states of all nodes that come after the target node
+func (tm *TaskManager) clearSubsequentNodes(targetNodeID string) error {
+	// Get all nodes that come after the target node
+	subsequentNodes, err := tm.getSubsequentNodes(targetNodeID)
+	if err != nil {
+		return err
+	}
+
+	// Clear states for all subsequent nodes
+	for _, nodeID := range subsequentNodes {
+		// Clear task state
+		tm.taskStates.Del(nodeID)
+
+		// Clear current node results
+		tm.currentNodeResult.Del(nodeID)
+		tm.currentNodePayload.Del(nodeID)
+
+		// Clear parent/child relationships for iterator patterns
+		tm.parentNodes.Del(nodeID)
+		tm.childNodes.Del(nodeID)
+
+		// Clear deferred tasks
+		tm.deferredTasks.Del(nodeID)
+
+		if tm.dag.debug {
+			tm.dag.Logger().Info("Cleared state for subsequent node",
+				logger.Field{Key: "nodeID", Value: nodeID},
+				logger.Field{Key: "taskID", Value: tm.taskID})
+		}
+	}
+
+	return nil
+}
+
+// getSubsequentNodes returns all nodes that come after the target node in the DAG
+func (tm *TaskManager) getSubsequentNodes(targetNodeID string) ([]string, error) {
+	visited := make(map[string]bool)
+	var subsequentNodes []string
+
+	// Use BFS to find all reachable nodes from the target
+	queue := []string{targetNodeID}
+	visited[targetNodeID] = true
+
+	for len(queue) > 0 {
+		currentNodeID := queue[0]
+		queue = queue[1:]
+
+		// Get next nodes
+		nextNodes, err := tm.dag.GetNextNodes(currentNodeID)
+		if err != nil {
+			continue // Skip if error getting next nodes
+		}
+
+		for _, nextNode := range nextNodes {
+			if !visited[nextNode.ID] {
+				visited[nextNode.ID] = true
+				subsequentNodes = append(subsequentNodes, nextNode.ID)
+				queue = append(queue, nextNode.ID)
+			}
+		}
+
+		// Also check conditional targets
+		if conditions, exists := tm.dag.conditions[currentNodeID]; exists {
+			for _, conditionTarget := range conditions {
+				if !visited[conditionTarget] {
+					visited[conditionTarget] = true
+					subsequentNodes = append(subsequentNodes, conditionTarget)
+					queue = append(queue, conditionTarget)
+				}
+			}
+		}
+	}
+
+	return subsequentNodes, nil
 }
 
 func (tm *TaskManager) enqueueTask(ctx context.Context, startNode, taskID string, payload json.RawMessage) {
@@ -398,6 +537,50 @@ func (tm *TaskManager) processNode(exec *task) {
 		result = tm.dag.executeMiddlewares(exec.ctx, mq.NewTask(exec.taskID, exec.payload, exec.nodeID, mq.WithDAG(tm.dag)), middlewares, func(ctx context.Context, task *mq.Task) mq.Result {
 			return node.processor.ProcessTask(ctx, task)
 		})
+		if result.ResetToNode != "" {
+			if result.ResetToNode == "back" {
+				previousNode, err := tm.dag.GetPreviousPageNode(pureNodeID)
+				if err == nil {
+					val, _, _, _ := jsonparser.Get(result.Payload, "reset_reason")
+					if len(val) == 0 {
+						val = []byte("Error on node: " + pureNodeID)
+					}
+					err = tm.dag.ResetTaskToNode(exec.taskID, previousNode.ID, string(val))
+					result.Topic = previousNode.ID
+
+					if err == nil {
+						// For page nodes, don't return immediately - let the page be processed
+						if previousNode.NodeType == Page {
+							// Reset the result to allow page processing to continue
+							result.ResetToNode = ""
+							result.Status = mq.Completed
+							result.Error = nil
+							// Continue with normal processing flow
+						} else {
+							tm.result = &result
+							tm.resultCh <- result
+							return
+						}
+					}
+				}
+			} else {
+				err := tm.dag.ResetTaskToNode(exec.taskID, result.ResetToNode, "Manual reset to node: "+result.ResetToNode)
+				if err == nil {
+					// Check if the target node is a page node
+					if targetNode, exists := tm.dag.nodes.Get(result.ResetToNode); exists && targetNode.NodeType == Page {
+						// For page nodes, don't return immediately - let the page be processed
+						result.ResetToNode = ""
+						result.Status = mq.Completed
+						result.Error = nil
+						// Continue with normal processing flow
+					} else {
+						tm.result = &result
+						tm.resultCh <- result
+						return
+					}
+				}
+			}
+		}
 		if result.Error != nil {
 			if te, ok := result.Error.(TaskError); ok && te.Recoverable {
 				if attempts < tm.maxRetries {

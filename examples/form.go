@@ -94,6 +94,14 @@ func (p *LoginPage) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 		data = make(map[string]interface{})
 	}
 
+	// Check for reset error to display
+	resetError := ""
+	if resetErrorVal, exists := data["reset_error"]; exists {
+		if resetErrorStr, ok := resetErrorVal.(string); ok {
+			resetError = resetErrorStr
+		}
+	}
+
 	// HTML content for login page
 	htmlContent := `
 <!DOCTYPE html>
@@ -175,8 +183,8 @@ func (p *LoginPage) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
             transform: scale(0.98);
         }
         .status-message {
-            margin-top: 1rem;
-            padding: 0.5rem;
+            margin-bottom: 1rem;
+            padding: 0.75rem;
             border-radius: 5px;
             text-align: center;
             font-weight: 500;
@@ -191,6 +199,16 @@ func (p *LoginPage) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
             color: #721c24;
             border: 1px solid #f5c6cb;
         }
+        .reset-info {
+            background-color: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+            margin-bottom: 1rem;
+            padding: 0.75rem;
+            border-radius: 5px;
+            text-align: center;
+            font-size: 0.9rem;
+        }
     </style>
 </head>
 <body>
@@ -199,14 +217,30 @@ func (p *LoginPage) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
             <h1>📱 Phone Processing System</h1>
             <p>Please login to continue</p>
         </div>
+
+        {{if reset_error}}
+        <div class="status-message status-error">
+            🚫 {{reset_error}}
+        </div>
+        {{end}}
+
+        {{if reset_from}}
+        <div class="reset-info">
+            ↻ You have been redirected back to login. Please enter valid credentials.
+        </div>
+        {{end}}
+
         <form method="post" action="/process?task_id={{task_id}}&next=true" id="loginForm">
             <div class="form-group">
                 <label for="username">Username</label>
-                <input type="text" id="username" name="username" required placeholder="Enter your username">
+                <input type="text" id="username" name="username" required placeholder="Enter your username"
+                       value="{{username}}">
+                <small style="color: #666; font-size: 0.8rem;">Default: admin</small>
             </div>
             <div class="form-group">
                 <label for="password">Password</label>
                 <input type="password" id="password" name="password" required placeholder="Enter your password">
+                <small style="color: #666; font-size: 0.8rem;">Default: password123</small>
             </div>
             <button type="submit" class="login-btn">Login</button>
         </form>
@@ -221,14 +255,27 @@ func (p *LoginPage) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
             btn.textContent = 'Logging in...';
             btn.disabled = true;
         });
+
+        // Auto-focus on username field if it's empty
+        window.addEventListener('load', function() {
+            const usernameField = document.getElementById('username');
+            if (!usernameField.value) {
+                usernameField.focus();
+            }
+        });
     </script>
 </body>
 </html>`
 
 	parser := jet.NewWithMemory(jet.WithDelims("{{", "}}"))
-	rs, err := parser.ParseTemplate(htmlContent, map[string]any{
-		"task_id": ctx.Value("task_id"),
-	})
+	templateData := map[string]any{
+		"task_id":     ctx.Value("task_id"),
+		"reset_error": resetError,
+		"reset_from":  data["reset_from"],
+		"username":    data["username"], // Preserve username if available
+	}
+
+	rs, err := parser.ParseTemplate(htmlContent, templateData)
 	if err != nil {
 		return mq.Result{Error: err, Ctx: ctx}
 	}
@@ -264,13 +311,26 @@ func (p *VerifyCredentials) ProcessTask(ctx context.Context, task *mq.Task) mq.R
 	if username == "admin" && password == "password123" {
 		data["authenticated"] = true
 		data["user_role"] = "administrator"
+		delete(data, "html_content")
+		delete(data, "reset_error") // Clear any previous error
+		updatedPayload, _ := json.Marshal(data)
+		return mq.Result{Payload: updatedPayload, Ctx: ctx}
 	} else {
-		data["authenticated"] = false
-		data["error"] = "Invalid credentials"
+		errorMessage := "Invalid username or password. Please try again."
+		// Return a special result indicating reset occurred
+		resetData := map[string]interface{}{
+			"reset_occurred": true,
+			"reset_reason":   errorMessage,
+		}
+		ctx = context.WithValue(ctx, "task_id", task.ID)
+		resetPayload, _ := json.Marshal(resetData)
+		return mq.Result{
+			Payload:     resetPayload,
+			Ctx:         ctx,
+			ResetToNode: "back",
+			Status:      mq.Completed, // Mark as completed to prevent further processing
+		}
 	}
-	delete(data, "html_content")
-	updatedPayload, _ := json.Marshal(data)
-	return mq.Result{Payload: updatedPayload, Ctx: ctx}
 }
 
 type GenerateToken struct {
@@ -303,12 +363,50 @@ func (s *SMSFormNode) ProcessTask(ctx context.Context, task *mq.Task) mq.Result 
 	var inputData map[string]any
 	if task.Payload != nil && len(task.Payload) > 0 {
 		if err := json.Unmarshal(task.Payload, &inputData); err == nil {
-			// If we have valid input data, pass it through for validation
-			return mq.Result{Payload: task.Payload, Ctx: ctx}
+			// Check if this is a reset with form data or a regular form submission
+			_, hasResetError := inputData["reset_error"]
+			_, hasValidationError := inputData["validation_error"]
+			if !hasResetError && !hasValidationError {
+				// Regular form submission, pass it through for validation
+				return mq.Result{Payload: task.Payload, Ctx: ctx}
+			}
 		}
 	}
 
-	// Otherwise, show the form
+	// Otherwise, show the form (including when reset with errors)
+	var data map[string]interface{}
+	if err := json.Unmarshal(task.Payload, &data); err != nil {
+		data = make(map[string]interface{})
+	}
+
+	// Extract error information
+	validationError := ""
+	errorField := ""
+	resetError := ""
+
+	if valErr, exists := data["validation_error"]; exists {
+		if valErrStr, ok := valErr.(string); ok {
+			validationError = valErrStr
+		}
+	}
+
+	if errField, exists := data["error_field"]; exists {
+		if errFieldStr, ok := errField.(string); ok {
+			errorField = errFieldStr
+		}
+	}
+
+	if resetErr, exists := data["reset_error"]; exists {
+		if resetErrStr, ok := resetErr.(string); ok {
+			resetError = resetErrStr
+		}
+	}
+
+	// Preserve form values if available
+	formPhone, _ := data["phone"].(string)
+	formMessage, _ := data["message"].(string)
+	formSenderName, _ := data["sender_name"].(string)
+
 	htmlTemplate := `
 <!DOCTYPE html>
 <html>
@@ -353,9 +451,14 @@ func (s *SMSFormNode) ProcessTask(ctx context.Context, task *mq.Task) mq.Result 
             background: rgba(255, 255, 255, 0.2);
             color: white;
             backdrop-filter: blur(5px);
+            box-sizing: border-box;
         }
         input::placeholder, textarea::placeholder {
             color: rgba(255, 255, 255, 0.7);
+        }
+        input.error, textarea.error {
+            border: 2px solid #ff6b6b;
+            background: rgba(255, 107, 107, 0.2);
         }
         textarea {
             height: 100px;
@@ -391,11 +494,42 @@ func (s *SMSFormNode) ProcessTask(ctx context.Context, task *mq.Task) mq.Result 
             margin-bottom: 20px;
             text-align: center;
         }
+        .error-message {
+            background: rgba(255, 107, 107, 0.3);
+            color: #ffcccc;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            text-align: center;
+            border: 1px solid rgba(255, 107, 107, 0.5);
+        }
+        .reset-info {
+            background: rgba(255, 193, 7, 0.3);
+            color: #fff3cd;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            text-align: center;
+            border: 1px solid rgba(255, 193, 7, 0.5);
+        }
     </style>
 </head>
 <body>
     <div class="form-container">
         <h1>📱 SMS Sender</h1>
+
+        {{if reset_error}}
+        <div class="reset-info">
+            ↻ {{reset_error}}
+        </div>
+        {{end}}
+
+        {{if validation_error}}
+        <div class="error-message">
+            ❌ {{validation_error}}
+        </div>
+        {{end}}
+
         <div class="info">
             <p>Send SMS messages through our secure DAG workflow</p>
         </div>
@@ -404,6 +538,8 @@ func (s *SMSFormNode) ProcessTask(ctx context.Context, task *mq.Task) mq.Result 
                 <label for="phone">📞 Phone Number:</label>
                 <input type="tel" id="phone" name="phone"
                        placeholder="+1234567890 or 1234567890"
+                       value="{{phone}}"
+                       class="{{if error_field_phone}}error{{end}}"
                        required>
                 <div class="info" style="margin-top: 5px; font-size: 12px;">
                     Supports US format: +1234567890 or 1234567890
@@ -415,15 +551,17 @@ func (s *SMSFormNode) ProcessTask(ctx context.Context, task *mq.Task) mq.Result 
                 <textarea id="message" name="message"
                          placeholder="Enter your message here..."
                          maxlength="160"
+                         class="{{if error_field_message}}error{{end}}"
                          required
-                         oninput="updateCharCount()"></textarea>
-                <div class="char-count" id="charCount">0/160 characters</div>
+                         oninput="updateCharCount()">{{message}}</textarea>
+                <div class="char-count" id="charCount">{{char_count}}/160 characters</div>
             </div>
 
             <div class="form-group">
                 <label for="sender_name">👤 Sender Name (Optional):</label>
                 <input type="text" id="sender_name" name="sender_name"
                        placeholder="Your name or organization"
+                       value="{{sender_name}}"
                        maxlength="50">
             </div>
 
@@ -456,20 +594,35 @@ func (s *SMSFormNode) ProcessTask(ctx context.Context, task *mq.Task) mq.Result 
             }
             e.target.value = value;
         });
+
+        // Initialize character count on page load
+        window.addEventListener('load', function() {
+            updateCharCount();
+        });
     </script>
 </body>
 </html>`
 
 	parser := jet.NewWithMemory(jet.WithDelims("{{", "}}"))
-	rs, err := parser.ParseTemplate(htmlTemplate, map[string]any{
-		"task_id": ctx.Value("task_id"),
-	})
+	templateData := map[string]any{
+		"task_id":             ctx.Value("task_id"),
+		"validation_error":    validationError,
+		"reset_error":         resetError,
+		"error_field_phone":   errorField == "phone",
+		"error_field_message": errorField == "message",
+		"phone":               formPhone,
+		"message":             formMessage,
+		"sender_name":         formSenderName,
+		"char_count":          len(formMessage),
+	}
+
+	rs, err := parser.ParseTemplate(htmlTemplate, templateData)
 	if err != nil {
 		return mq.Result{Error: err, Ctx: ctx}
 	}
 
 	ctx = context.WithValue(ctx, consts.ContentType, consts.TypeHtml)
-	data := map[string]any{
+	data = map[string]any{
 		"html_content": rs,
 		"step":         "form",
 	}
@@ -496,12 +649,37 @@ func (v *ValidateInputNode) ProcessTask(ctx context.Context, task *mq.Task) mq.R
 	message, _ := inputData["message"].(string)
 	senderName, _ := inputData["sender_name"].(string)
 
-	// Validate phone number
-	if phone == "" {
-		inputData["validation_error"] = "Phone number is required"
-		inputData["error_field"] = "phone"
+	// Helper function to reset to SMS form with error
+	resetToForm := func(errorMessage, errorField string) mq.Result {
+		if dagInstance := task.GetFlow(); dagInstance != nil {
+			if d, ok := dagInstance.(*dag.DAG); ok {
+				if err := d.ResetTaskToNode(task.ID, "SMSForm", errorMessage); err == nil {
+					// Return a special result indicating reset occurred
+					resetData := map[string]interface{}{
+						"reset_occurred": true,
+						"reset_reason":   errorMessage,
+					}
+					ctx = context.WithValue(ctx, consts.ContentType, consts.TypeHtml)
+					resetPayload, _ := json.Marshal(resetData)
+					return mq.Result{
+						Payload: resetPayload,
+						Ctx:     ctx,
+						Status:  mq.Completed, // Mark as completed to prevent further processing
+					}
+				}
+			}
+		}
+
+		// Fallback if DAG reset is not available
+		inputData["validation_error"] = errorMessage
+		inputData["error_field"] = errorField
 		bt, _ := json.Marshal(inputData)
 		return mq.Result{Payload: bt, Ctx: ctx, ConditionStatus: "invalid"}
+	}
+
+	// Validate phone number
+	if phone == "" {
+		return resetToForm("Phone number is required", "phone")
 	}
 
 	// Clean and validate phone number format
@@ -511,25 +689,16 @@ func (v *ValidateInputNode) ProcessTask(ctx context.Context, task *mq.Task) mq.R
 	if len(cleanPhone) == 10 {
 		cleanPhone = "1" + cleanPhone // Add country code
 	} else if len(cleanPhone) != 11 || !strings.HasPrefix(cleanPhone, "1") {
-		inputData["validation_error"] = "Invalid phone number format. Please use US format: +1234567890 or 1234567890"
-		inputData["error_field"] = "phone"
-		bt, _ := json.Marshal(inputData)
-		return mq.Result{Payload: bt, Ctx: ctx, ConditionStatus: "invalid"}
+		return resetToForm("Invalid phone number format. Please use US format: +1234567890 or 1234567890", "phone")
 	}
 
 	// Validate message
 	if message == "" {
-		inputData["validation_error"] = "Message is required"
-		inputData["error_field"] = "message"
-		bt, _ := json.Marshal(inputData)
-		return mq.Result{Payload: bt, Ctx: ctx, ConditionStatus: "invalid"}
+		return resetToForm("Message is required", "message")
 	}
 
 	if len(message) > 160 {
-		inputData["validation_error"] = "Message too long. Maximum 160 characters allowed"
-		inputData["error_field"] = "message"
-		bt, _ := json.Marshal(inputData)
-		return mq.Result{Payload: bt, Ctx: ctx, ConditionStatus: "invalid"}
+		return resetToForm("Message too long. Maximum 160 characters allowed", "message")
 	}
 
 	// Check for potentially harmful content
@@ -537,10 +706,7 @@ func (v *ValidateInputNode) ProcessTask(ctx context.Context, task *mq.Task) mq.R
 	messageLower := strings.ToLower(message)
 	for _, word := range forbiddenWords {
 		if strings.Contains(messageLower, word) {
-			inputData["validation_error"] = "Message contains prohibited content"
-			inputData["error_field"] = "message"
-			bt, _ := json.Marshal(inputData)
-			return mq.Result{Payload: bt, Ctx: ctx, ConditionStatus: "invalid"}
+			return resetToForm("Message contains prohibited content", "message")
 		}
 	}
 

@@ -873,6 +873,139 @@ func (tm *DAG) CancelTask(taskID string) error {
 	return nil
 }
 
+// ResetTaskToNode resets a running task to a specific node, useful for error recovery
+func (tm *DAG) ResetTaskToNode(taskID, targetNodeID string, errorMessage string) error {
+	manager, ok := tm.taskManager.Get(taskID)
+	if !ok {
+		return fmt.Errorf("task %s not found", taskID)
+	}
+
+	// Get the current task payload to preserve data
+	var payload json.RawMessage
+	manager.currentNodePayload.ForEach(func(nodeID string, nodePayload json.RawMessage) bool {
+		payload = nodePayload
+		return false // Take the first payload found
+	})
+
+	// If no payload found, try to get from task states
+	if len(payload) == 0 {
+		manager.taskStates.ForEach(func(nodeID string, state *TaskState) bool {
+			if len(state.Result.Payload) > 0 {
+				payload = state.Result.Payload
+				return false // Take the first payload found
+			}
+			return true
+		})
+	}
+
+	// If still no payload, create an empty one
+	if len(payload) == 0 {
+		payload = json.RawMessage("{}")
+	}
+
+	// Use context with task ID
+	ctx := context.WithValue(context.Background(), "task_id", taskID)
+
+	// Reset the task manager to the target node
+	return manager.ResetToNode(ctx, targetNodeID, payload, errorMessage)
+}
+
+// GetTaskCurrentNode returns the current node being processed for a task
+func (tm *DAG) GetTaskCurrentNode(taskID string) (string, error) {
+	manager, ok := tm.taskManager.Get(taskID)
+	if !ok {
+		return "", fmt.Errorf("task %s not found", taskID)
+	}
+
+	// Find the node that's currently being processed or was last processed
+	var currentNode string
+	var latestTime time.Time
+
+	manager.taskStates.ForEach(func(nodeID string, state *TaskState) bool {
+		if state.Status == mq.Processing {
+			currentNode = nodeID
+			return false // Found processing node, stop
+		}
+
+		// If no processing node, find the most recent one
+		if state.UpdatedAt.After(latestTime) {
+			latestTime = state.UpdatedAt
+			currentNode = nodeID
+		}
+		return true
+	})
+
+	if currentNode == "" {
+		return "", fmt.Errorf("no current node found for task %s", taskID)
+	}
+
+	return currentNode, nil
+}
+
+// GetTaskStates returns all task states for a given task
+func (tm *DAG) GetTaskStates(taskID string) (map[string]*TaskState, error) {
+	manager, ok := tm.taskManager.Get(taskID)
+	if !ok {
+		return nil, fmt.Errorf("task %s not found", taskID)
+	}
+
+	states := make(map[string]*TaskState)
+	manager.taskStates.ForEach(func(nodeID string, state *TaskState) bool {
+		// Create a copy to avoid exposing internal state
+		stateCopy := &TaskState{
+			UpdatedAt:     state.UpdatedAt,
+			NodeID:        state.NodeID,
+			Status:        state.Status,
+			Result:        state.Result,
+			targetResults: nil, // Don't expose internal target results
+		}
+		states[nodeID] = stateCopy
+		return true
+	})
+
+	return states, nil
+}
+
+// GetPreviousPageNode returns the last page node that was executed before the current node
+func (tm *DAG) GetPreviousPageNode(nodeID string) (*Node, error) {
+	currentNode := strings.Split(nodeID, Delimiter)[0]
+	// Check if current node exists
+	_, exists := tm.nodes.Get(currentNode)
+	if !exists {
+		fmt.Println(tm.nodes.Keys())
+		return nil, fmt.Errorf("current node %s not found", currentNode)
+	}
+
+	// Get topological order to determine execution sequence
+	topologicalOrder, err := tm.GetTopologicalOrder()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get topological order: %w", err)
+	}
+
+	// Find the index of the current node in topological order
+	currentIndex := -1
+	for i, nodeIDInOrder := range topologicalOrder {
+		if nodeIDInOrder == currentNode {
+			currentIndex = i
+			break
+		}
+	}
+
+	if currentIndex == -1 {
+		return nil, fmt.Errorf("current node %s not found in topological order", currentNode)
+	}
+
+	// Iterate backwards from current node to find the last page node
+	for i := currentIndex - 1; i >= 0; i-- {
+		nodeIDInOrder := topologicalOrder[i]
+		if node, ok := tm.nodes.Get(nodeIDInOrder); ok && node.NodeType == Page {
+			return node, nil
+		}
+	}
+
+	return nil, fmt.Errorf("no previous page node found")
+}
+
 // CleanupCompletedTasks removes completed task managers to prevent memory leaks
 func (tm *DAG) CleanupCompletedTasks() {
 	completedTasks := make([]string, 0)

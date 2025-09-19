@@ -24,7 +24,7 @@ func subDAG() *dag.DAG {
 	return f
 }
 
-func main() {
+func mai1n() {
 	flow := dag.NewDAG("Sample DAG", "sample-dag", func(taskID string, result mq.Result) {
 		fmt.Printf("DAG Final result for task %s: %s\n", taskID, string(result.Payload))
 	})

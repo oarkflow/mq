@@ -43,6 +43,7 @@ type Result struct {
 	TaskID          string          `json:"task_id"`
 	Status          Status          `json:"status"`
 	ConditionStatus string          `json:"condition_status"`
+	ResetToNode     string          `json:"reset_to_node,omitempty"`
 	Ctx             context.Context `json:"-"`
 	Payload         json.RawMessage `json:"payload"`
 	Last            bool
