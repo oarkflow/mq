@@ -21,7 +21,7 @@ import (
 func main() {
 	flow := dag.NewDAG("SMS Sender", "sms-sender", func(taskID string, result mq.Result) {
 		fmt.Printf("SMS workflow completed for task %s: %s\n", taskID, string(utils.RemoveRecursiveFromJSON(result.Payload, "html_content")))
-	})
+	}, mq.WithSyncMode(true))
 
 	// Add SMS workflow nodes
 	// Note: Page nodes have no timeout by default, allowing users unlimited time for form input
