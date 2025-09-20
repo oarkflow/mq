@@ -1169,6 +1169,12 @@ func (tm *TaskManager) handleResetTo(nr nodeResult) {
 	// This ensures that when we reset, the workflow can proceed correctly
 	tm.clearTaskStatesInPath(nodeID, targetNodeID)
 
+	// Special handling for subDAG reset: if we're resetting to the same node (subDAG resetting to itself),
+	// we need to clear all downstream nodes that depend on this subDAG
+	if nodeID == targetNodeID {
+		tm.clearDownstreamNodes(targetNodeID)
+	}
+
 	// Also clear any deferred tasks for the target node itself
 	tm.deferredTasks.ForEach(func(taskID string, tsk *task) bool {
 		if strings.Split(tsk.nodeID, Delimiter)[0] == targetNodeID {
@@ -1389,6 +1395,45 @@ func (tm *TaskManager) getAllDownstreamNodes(nodeID string) []string {
 	}
 
 	return result
+}
+
+// clearDownstreamNodes clears all task states for nodes that come after the given node
+// This is used when resetting a subDAG to ensure downstream dependencies are cleared
+func (tm *TaskManager) clearDownstreamNodes(nodeID string) {
+	downstreamNodes := tm.getAllDownstreamNodes(nodeID)
+
+	if tm.dag.debug {
+		tm.dag.Logger().Info("Clearing downstream nodes for subDAG reset",
+			logger.Field{Key: "subDAGNodeID", Value: nodeID},
+			logger.Field{Key: "downstreamCount", Value: len(downstreamNodes)})
+	}
+
+	// Clear task states for all downstream nodes
+	for _, downstreamNodeID := range downstreamNodes {
+		if state, exists := tm.taskStates.Get(downstreamNodeID); exists {
+			state.Status = mq.Pending
+			state.UpdatedAt = time.Now()
+			state.Result = mq.Result{} // Clear previous result
+			if tm.dag.debug {
+				tm.dag.Logger().Debug("Cleared task state for downstream node",
+					logger.Field{Key: "nodeID", Value: downstreamNodeID})
+			}
+		}
+		// Also clear any cached results for this node
+		tm.currentNodeResult.Del(downstreamNodeID)
+		// Clear any deferred tasks for this node
+		tm.deferredTasks.ForEach(func(taskID string, tsk *task) bool {
+			if strings.Split(tsk.nodeID, Delimiter)[0] == downstreamNodeID {
+				tm.deferredTasks.Del(taskID)
+				if tm.dag.debug {
+					tm.dag.Logger().Debug("Cleared deferred task for downstream node",
+						logger.Field{Key: "nodeID", Value: downstreamNodeID},
+						logger.Field{Key: "taskID", Value: taskID})
+				}
+			}
+			return true
+		})
+	}
 }
 
 // handleTargetNodeDependencies handles the dependencies of the target node during reset

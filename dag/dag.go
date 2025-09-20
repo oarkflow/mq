@@ -579,9 +579,54 @@ func (tm *DAG) processTaskInternal(ctx context.Context, task *mq.Task) mq.Result
 			if result.Error != nil {
 				return result
 			}
-			node, exists = tm.nodes.Get(result.Topic)
-			if exists && node.NodeType == Page {
-				return result
+
+			// Handle ResetTo from subDAG - if subDAG resets, parent should reset to subDAG node
+			if result.ResetTo != "" {
+				tm.Logger().Info("SubDAG requested reset",
+					logger.Field{Key: "subDAG", Value: subDag.name},
+					logger.Field{Key: "resetTo", Value: result.ResetTo},
+					logger.Field{Key: "taskID", Value: task.ID},
+				)
+
+				// Notify parent task manager to handle the reset properly
+				if manager, ok := tm.taskManager.Get(task.ID); ok {
+					// For subDAG reset, we need to handle it differently
+					// The subDAG has already processed the reset internally, but we need to ensure
+					// the parent DAG shows the subDAG page again
+
+					// Clear downstream nodes that depend on the subDAG
+					tm.clearDownstreamNodesForSubDAGReset(manager, currentNode)
+
+					// Reset the subDAG node state to allow re-execution
+					if state, exists := manager.taskStates.Get(currentNode); exists {
+						state.Status = mq.Pending
+						state.UpdatedAt = time.Now()
+						state.Result = mq.Result{}
+					}
+
+					// Clear current node result to force re-execution
+					manager.currentNodeResult.Del(currentNode)
+
+					// Re-enqueue the task for the subDAG node with the error payload
+					manager.enqueueTask(ctx, currentNode, task.ID, result.Payload)
+
+					// Return the result from subDAG (which may contain error messages)
+					// but ensure ResetTo is not propagated to avoid infinite loops
+					result.ResetTo = ""
+					return result
+				}
+			}
+
+			// Check if subDAG returned a page result (indicated by Topic being set)
+			if result.Topic != "" {
+				// Check if the topic corresponds to a page node in the subDAG
+				if subDagNode, exists := subDag.nodes.Get(result.Topic); exists && subDagNode.NodeType == Page {
+					return result
+				}
+				// Also check if the topic corresponds to a page node in the parent DAG
+				if parentNode, exists := tm.nodes.Get(result.Topic); exists && parentNode.NodeType == Page {
+					return result
+				}
 			}
 			if m, ok := subDag.taskManager.Get(task.ID); !subDag.hasPageNode || (ok && m != nil && m.result != nil) {
 				task.Payload = result.Payload
@@ -1230,4 +1275,75 @@ func (tm *DAG) GetPreviousPageNode(nodeID string) (*Node, error) {
 	}
 
 	return nil, fmt.Errorf("no previous page node found")
+}
+
+// clearDownstreamNodesForSubDAGReset clears all downstream nodes when a subDAG resets
+// This ensures that when a subDAG resets, the workflow doesn't continue with stale data
+func (tm *DAG) clearDownstreamNodesForSubDAGReset(manager *TaskManager, subDAGNodeID string) {
+	// Get all nodes that come after the subDAG node
+	downstreamNodes := tm.getAllDownstreamNodes(subDAGNodeID)
+
+	if tm.debug {
+		tm.Logger().Info("Clearing downstream nodes for subDAG reset",
+			logger.Field{Key: "subDAGNodeID", Value: subDAGNodeID},
+			logger.Field{Key: "downstreamCount", Value: len(downstreamNodes)})
+	}
+
+	// Clear task states for all downstream nodes
+	for _, downstreamNodeID := range downstreamNodes {
+		if state, exists := manager.taskStates.Get(downstreamNodeID); exists {
+			state.Status = mq.Pending
+			state.UpdatedAt = time.Now()
+			state.Result = mq.Result{} // Clear previous result
+			if tm.debug {
+				tm.Logger().Debug("Cleared task state for downstream node",
+					logger.Field{Key: "nodeID", Value: downstreamNodeID})
+			}
+		}
+		// Also clear any cached results for this node
+		manager.currentNodeResult.Del(downstreamNodeID)
+		// Clear any deferred tasks for this node
+		manager.deferredTasks.ForEach(func(taskID string, tsk *task) bool {
+			if strings.Split(tsk.nodeID, Delimiter)[0] == downstreamNodeID {
+				manager.deferredTasks.Del(taskID)
+				if tm.debug {
+					tm.Logger().Debug("Cleared deferred task for downstream node",
+						logger.Field{Key: "nodeID", Value: downstreamNodeID},
+						logger.Field{Key: "taskID", Value: taskID})
+				}
+			}
+			return true
+		})
+	}
+}
+
+// getAllDownstreamNodes returns all nodes that come after the given node in the workflow
+func (tm *DAG) getAllDownstreamNodes(nodeID string) []string {
+	visited := make(map[string]bool)
+	var result []string
+
+	// Use BFS to find all downstream nodes
+	queue := []string{nodeID}
+	visited[nodeID] = true
+
+	for len(queue) > 0 {
+		currentNodeID := queue[0]
+		queue = queue[1:]
+
+		// Get all nodes that this node points to
+		if node, exists := tm.nodes.Get(currentNodeID); exists {
+			for _, edge := range node.Edges {
+				if edge.Type == Simple || edge.Type == Iterator {
+					targetNodeID := edge.To.ID
+					if !visited[targetNodeID] {
+						visited[targetNodeID] = true
+						result = append(result, targetNodeID)
+						queue = append(queue, targetNodeID)
+					}
+				}
+			}
+		}
+	}
+
+	return result
 }

@@ -199,10 +199,15 @@ func (p *LoginPage) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
             <h1>📱 Phone Processing System</h1>
             <p>Please login to continue</p>
         </div>
+        {{if error}}
+        <div class="status-message status-error">
+            <strong>❌ Login Failed:</strong> {{error}}
+        </div>
+        {{end}}
         <form method="post" action="/process?task_id={{task_id}}&next=true" id="loginForm">
             <div class="form-group">
                 <label for="username">Username</label>
-                <input type="text" id="username" name="username" required placeholder="Enter your username">
+                <input type="text" id="username" name="username" required placeholder="Enter your username" value="{{username}}">
             </div>
             <div class="form-group">
                 <label for="password">Password</label>
@@ -227,7 +232,9 @@ func (p *LoginPage) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 
 	parser := jet.NewWithMemory(jet.WithDelims("{{", "}}"))
 	rs, err := parser.ParseTemplate(htmlContent, map[string]any{
-		"task_id": ctx.Value("task_id"),
+		"task_id":  ctx.Value("task_id"),
+		"error":    data["error"],
+		"username": data["username"],
 	})
 	if err != nil {
 		return mq.Result{Error: err, Ctx: ctx}
@@ -294,11 +301,16 @@ func (p *GenerateToken) ProcessTask(ctx context.Context, task *mq.Task) mq.Resul
 	if authenticated, ok := data["authenticated"].(bool); ok && authenticated {
 		data["auth_token"] = "jwt_token_123456789"
 		data["token_expires"] = "2025-09-19T13:00:00Z"
+		data["login_success"] = true
 	}
 
 	delete(data, "html_content")
 	updatedPayload, _ := json.Marshal(data)
-	return mq.Result{Payload: updatedPayload, Ctx: ctx}
+	return mq.Result{
+		Payload: updatedPayload,
+		Ctx:     ctx,
+		Status:  mq.Completed,
+	}
 }
 
 // SMSFormNode - Initial form to collect SMS data
