@@ -3,6 +3,7 @@ package dag
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 	"time"
@@ -206,13 +207,77 @@ func (e *Operation) RemoveFields(payload []byte, keys ...string) []byte {
 	return payload
 }
 
-func UnmarshalPayload[T any](c context.Context, payload []byte) (T, error) {
+// UnmarshalPayload tries to unmarshal payload into T.
+// Ensures that maps, slices, and pointers are initialized (non-nil).
+func UnmarshalPayload[T any](ctx context.Context, payload []byte) (T, error) {
 	var data T
-	if len(payload) > 0 {
-		if err := json.Unmarshal(payload, &data); err != nil {
-			return data, err
-		}
+
+	// Always start with a safe initialized value
+	initDefault(&data)
+
+	if len(payload) == 0 {
+		return data, nil
 	}
+
+	if err := json.Unmarshal(payload, &data); err != nil {
+		// Return a fresh initialized value on error
+		var zero T
+		initDefault(&zero)
+		return zero, err
+	}
+
+	return data, nil
+}
+
+// initDefault initializes maps, slices, and pointers so they're not nil.
+func initDefault[T any](target *T) {
+	v := reflect.ValueOf(target).Elem()
+
+	switch v.Kind() {
+	case reflect.Map:
+		v.Set(reflect.MakeMap(v.Type()))
+
+	case reflect.Slice:
+		v.Set(reflect.MakeSlice(v.Type(), 0, 0))
+
+	case reflect.Ptr:
+		// Create new value of the element type and assign pointer
+		elem := reflect.New(v.Type().Elem())
+		initInner(elem) // ensure inner value is also initialized
+		v.Set(elem)
+	}
+}
+
+// initInner recursively initializes the inside of a pointer if needed.
+func initInner(v reflect.Value) {
+	switch v.Kind() {
+	case reflect.Map:
+		v.Set(reflect.MakeMap(v.Type()))
+
+	case reflect.Slice:
+		v.Set(reflect.MakeSlice(v.Type(), 0, 0))
+
+	case reflect.Pointer:
+		elem := reflect.New(v.Type().Elem())
+		initInner(elem)
+		v.Set(elem)
+	}
+}
+
+// UnmarshalWithDefault tries to unmarshal payload into T.
+// If it fails or payload is empty, it returns the default value from def().
+func UnmarshalWithDefault[T any](ctx context.Context, payload []byte, def func() T) (T, error) {
+	data := def()
+
+	if len(payload) == 0 {
+		return data, nil
+	}
+
+	if err := json.Unmarshal(payload, &data); err != nil {
+		// return a fresh initialized default and the error
+		return def(), err
+	}
+
 	return data, nil
 }
 
