@@ -180,6 +180,8 @@ func (tm *DAG) AddDAGNode(nodeType NodeType, name string, key string, dag *DAG, 
 		isReady:   true,
 		IsLast:    true, // Assume it's last until edges are added
 	})
+	dag.parentDAG = tm
+	dag.nodeIDInParentDAG = key
 	if len(firstNode) > 0 && firstNode[0] {
 		// If there was a previous start node, unset its IsFirst
 		if tm.startNode != "" {

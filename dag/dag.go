@@ -82,6 +82,8 @@ type DAG struct {
 	iteratorNodes            storage.IMap[string, []Edge]
 	conditions               map[string]map[string]string
 	Error                    error
+	parentDAG                *DAG
+	nodeIDInParentDAG        string
 	consumer                 *mq.Consumer
 	finalResult              func(taskID string, result mq.Result)
 	pool                     *mq.Pool

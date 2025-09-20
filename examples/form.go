@@ -26,15 +26,15 @@ func main() {
 	// Add SMS workflow nodes
 	// Note: Page nodes have no timeout by default, allowing users unlimited time for form input
 
-	flow.AddDAGNode(dag.Page, "Login", "login", loginSubDAG(), true)
-	flow.AddNode(dag.Page, "SMS Form", "SMSForm", &SMSFormNode{})
+	// flow.AddDAGNode(dag.Page, "Login", "login", loginSubDAG().Clone(), true)
+	flow.AddNode(dag.Page, "SMS Form", "SMSForm", &SMSFormNode{}, true)
 	flow.AddNode(dag.Function, "Validate Input", "ValidateInput", &ValidateInputNode{})
 	flow.AddNode(dag.Function, "Send SMS", "SendSMS", &SendSMSNode{})
 	flow.AddNode(dag.Page, "SMS Result", "SMSResult", &SMSResultNode{})
 	flow.AddNode(dag.Page, "Error Page", "ErrorPage", &ErrorPageNode{})
 
 	// Define edges for SMS workflow
-	flow.AddEdge(dag.Simple, "Login to Form", "login", "SMSForm")
+	// flow.AddEdge(dag.Simple, "Login to Form", "login", "SMSForm")
 	flow.AddEdge(dag.Simple, "Form to Validation", "SMSForm", "ValidateInput")
 	flow.AddCondition("ValidateInput", map[string]string{"valid": "SendSMS"}) // Removed invalid -> ErrorPage since we use ResetTo
 	flow.AddCondition("SendSMS", map[string]string{"sent": "SMSResult", "failed": "ErrorPage"})
