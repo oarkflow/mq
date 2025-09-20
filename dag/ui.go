@@ -27,14 +27,14 @@ type EdgeStyleConfig struct {
 func (tm *DAG) calculateEdgeLevels() map[string]EdgeLevel {
 	levels := make(map[string]int)
 	edgeLevels := make(map[string]EdgeLevel)
-	
+
 	// Find start nodes (nodes with no incoming edges)
 	inDegree := make(map[string]int)
 	tm.nodes.ForEach(func(_ string, node *Node) bool {
 		inDegree[node.ID] = 0
 		return true
 	})
-	
+
 	// Calculate in-degrees
 	tm.nodes.ForEach(func(_ string, node *Node) bool {
 		for _, edge := range node.Edges {
@@ -42,14 +42,14 @@ func (tm *DAG) calculateEdgeLevels() map[string]EdgeLevel {
 		}
 		return true
 	})
-	
+
 	// Also count conditional edges
 	for _, conditions := range tm.conditions {
 		for _, toNodeID := range conditions {
 			inDegree[toNodeID]++
 		}
 	}
-	
+
 	// BFS to calculate levels
 	queue := make([]string, 0)
 	for nodeID, degree := range inDegree {
@@ -58,12 +58,12 @@ func (tm *DAG) calculateEdgeLevels() map[string]EdgeLevel {
 			queue = append(queue, nodeID)
 		}
 	}
-	
+
 	for len(queue) > 0 {
 		currentID := queue[0]
 		queue = queue[1:]
 		currentLevel := levels[currentID]
-		
+
 		if node, exists := tm.nodes.Get(currentID); exists {
 			// Process regular edges
 			for _, edge := range node.Edges {
@@ -72,7 +72,7 @@ func (tm *DAG) calculateEdgeLevels() map[string]EdgeLevel {
 					levels[edge.To.ID] = newLevel
 					queue = append(queue, edge.To.ID)
 				}
-				
+
 				// Store edge level information
 				edgeKey := fmt.Sprintf("%s->%s", currentID, edge.To.ID)
 				edgeLevels[edgeKey] = EdgeLevel{
@@ -81,7 +81,7 @@ func (tm *DAG) calculateEdgeLevels() map[string]EdgeLevel {
 				}
 			}
 		}
-		
+
 		// Process conditional edges
 		if conditions, exists := tm.conditions[currentID]; exists {
 			for _, toNodeID := range conditions {
@@ -90,7 +90,7 @@ func (tm *DAG) calculateEdgeLevels() map[string]EdgeLevel {
 					levels[toNodeID] = newLevel
 					queue = append(queue, toNodeID)
 				}
-				
+
 				// Store conditional edge level
 				edgeKey := fmt.Sprintf("%s->%s:conditional", currentID, toNodeID)
 				edgeLevels[edgeKey] = EdgeLevel{
@@ -100,7 +100,7 @@ func (tm *DAG) calculateEdgeLevels() map[string]EdgeLevel {
 			}
 		}
 	}
-	
+
 	return edgeLevels
 }
 
@@ -116,10 +116,10 @@ func (tm *DAG) getEdgeStyle(level EdgeLevel) EdgeStyleConfig {
 		"#5D4037", // Dark Brown - Level 6 (muted)
 		"#455A64", // Dark Blue Grey - Level 7 (muted)
 	}
-	
+
 	colorIndex := level.Level % len(baseColors)
 	baseColor := baseColors[colorIndex]
-	
+
 	switch level.Type {
 	case Iterator:
 		return EdgeStyleConfig{
@@ -160,9 +160,9 @@ func (tm *DAG) getConditionalEdgeStyle(level int) EdgeStyleConfig {
 		"#827717", // Muted Olive - Level 6
 		"#FF8F00", // Muted Amber - Level 7
 	}
-	
+
 	colorIndex := level % len(baseColors)
-	
+
 	return EdgeStyleConfig{
 		Color:     baseColors[colorIndex],
 		Style:     "dashed",
@@ -175,14 +175,14 @@ func (tm *DAG) getConditionalEdgeStyle(level int) EdgeStyleConfig {
 // calculateNodeLevels dynamically calculates the level of each node based on DAG structure
 func (tm *DAG) calculateNodeLevels() map[string]int {
 	levels := make(map[string]int)
-	
+
 	// Find start nodes (nodes with no incoming edges)
 	inDegree := make(map[string]int)
 	tm.nodes.ForEach(func(_ string, node *Node) bool {
 		inDegree[node.ID] = 0
 		return true
 	})
-	
+
 	// Calculate in-degrees
 	tm.nodes.ForEach(func(_ string, node *Node) bool {
 		for _, edge := range node.Edges {
@@ -190,14 +190,14 @@ func (tm *DAG) calculateNodeLevels() map[string]int {
 		}
 		return true
 	})
-	
+
 	// Also count conditional edges
 	for _, conditions := range tm.conditions {
 		for _, toNodeID := range conditions {
 			inDegree[toNodeID]++
 		}
 	}
-	
+
 	// BFS to calculate levels
 	queue := make([]string, 0)
 	for nodeID, degree := range inDegree {
@@ -206,12 +206,12 @@ func (tm *DAG) calculateNodeLevels() map[string]int {
 			queue = append(queue, nodeID)
 		}
 	}
-	
+
 	for len(queue) > 0 {
 		currentID := queue[0]
 		queue = queue[1:]
 		currentLevel := levels[currentID]
-		
+
 		if node, exists := tm.nodes.Get(currentID); exists {
 			// Process regular edges
 			for _, edge := range node.Edges {
@@ -222,7 +222,7 @@ func (tm *DAG) calculateNodeLevels() map[string]int {
 				}
 			}
 		}
-		
+
 		// Process conditional edges
 		if conditions, exists := tm.conditions[currentID]; exists {
 			for _, toNodeID := range conditions {
@@ -234,7 +234,7 @@ func (tm *DAG) calculateNodeLevels() map[string]int {
 			}
 		}
 	}
-	
+
 	return levels
 }
 
@@ -251,7 +251,7 @@ func (tm *DAG) getNodeStyle(nodeType NodeType, level int) (fillColor, shape, bor
 		"#EFEBE9", // Brown 50 - Level 6
 		"#FAFAFA", // Grey 50 - Level 7
 	}
-	
+
 	levelBorders := []string{
 		"#546E7A", // Blue Grey 600 - Level 0
 		"#689F38", // Light Green 700 - Level 1
@@ -262,11 +262,11 @@ func (tm *DAG) getNodeStyle(nodeType NodeType, level int) (fillColor, shape, bor
 		"#5D4037", // Brown 700 - Level 6
 		"#455A64", // Blue Grey 700 - Level 7
 	}
-	
+
 	colorIndex := level % len(levelColors)
 	baseFill := levelColors[colorIndex]
 	baseBorder := levelBorders[colorIndex]
-	
+
 	switch nodeType {
 	case Function:
 		return baseFill, "box", baseBorder
@@ -418,7 +418,7 @@ func (tm *DAG) ExportDOT(direction ...Direction) string {
 		rankDir = direction[0]
 	}
 	var sb strings.Builder
-	
+
 	// Graph header and global attributes
 	sb.WriteString(fmt.Sprintf("digraph \"%s\" {\n", tm.name))
 	sb.WriteString("  graph [\n")
@@ -434,7 +434,7 @@ func (tm *DAG) ExportDOT(direction ...Direction) string {
 	sb.WriteString("    layout=dot,\n")
 	sb.WriteString("    center=true\n")
 	sb.WriteString("  ];\n")
-	
+
 	// Add professional color legend as a comment
 	sb.WriteString("  // Professional DAG Visualization\n")
 	sb.WriteString("  // - Muted color scheme for better readability\n")
@@ -442,7 +442,7 @@ func (tm *DAG) ExportDOT(direction ...Direction) string {
 	sb.WriteString("  // - Simple edges: solid lines (light weight)\n")
 	sb.WriteString("  // - Iterator edges: bold lines (medium weight)\n")
 	sb.WriteString("  // - Conditional edges: dashed lines (distinct styling)\n\n")
-	
+
 	// Node styling
 	sb.WriteString("  node [\n")
 	sb.WriteString("    fontname=\"Inter, -apple-system, BlinkMacSystemFont, sans-serif\",\n")
@@ -452,7 +452,7 @@ func (tm *DAG) ExportDOT(direction ...Direction) string {
 	sb.WriteString("    margin=\"0.15,0.08\",\n")
 	sb.WriteString("    width=0, height=0, fixedsize=false\n")
 	sb.WriteString("  ];\n")
-	
+
 	// Edge styling
 	sb.WriteString("  edge [\n")
 	sb.WriteString("    fontname=\"Inter, -apple-system, BlinkMacSystemFont, sans-serif\",\n")
@@ -460,7 +460,7 @@ func (tm *DAG) ExportDOT(direction ...Direction) string {
 	sb.WriteString("    penwidth=1.0,\n")
 	sb.WriteString("    arrowsize=0.6,\n")
 	sb.WriteString("  ];\n\n")
-	
+
 	// Render graph content
 	tm.renderCompactDAG(&sb, "  ")
 	sb.WriteString("}\n")
@@ -470,11 +470,11 @@ func (tm *DAG) ExportDOT(direction ...Direction) string {
 // renderCompactDAG is responsible for outputting nodes, clusters, and edges
 func (tm *DAG) renderCompactDAG(sb *strings.Builder, indent string) {
 	sorted := tm.TopologicalSort()
-	
+
 	// Calculate edge and node levels for dynamic styling
 	edgeLevels := tm.calculateEdgeLevels()
 	nodeLevels := tm.calculateNodeLevels()
-	
+
 	// Nodes with level-based styling
 	for _, id := range sorted {
 		node, ok := tm.nodes.Get(id)
@@ -484,12 +484,12 @@ func (tm *DAG) renderCompactDAG(sb *strings.Builder, indent string) {
 		nodeLevel := nodeLevels[id]
 		tm.renderCompactNode(sb, node, nodeLevel, indent)
 	}
-	
+
 	// Sub-DAG clusters
 	hasSub := false
 	for _, id := range sorted {
 		node, _ := tm.nodes.Get(id)
-		if sub, ok := isDAGNode(node); ok && sub.consumerTopic != "" {
+		if sub, ok := isDAGNode(node); ok {
 			if !hasSub {
 				sb.WriteString(indent + "// Sub-workflows\n")
 				hasSub = true
@@ -497,13 +497,13 @@ func (tm *DAG) renderCompactDAG(sb *strings.Builder, indent string) {
 			tm.renderCompactSubDAGCluster(sb, id, sub, indent)
 		}
 	}
-	
+
 	// Edges with level-based styling
 	for _, id := range sorted {
 		node, _ := tm.nodes.Get(id)
 		tm.renderCompactEdges(sb, node, edgeLevels, indent)
 	}
-	
+
 	// Conditional edges with level-based styling
 	if len(tm.conditions) > 0 {
 		sb.WriteString("\n")
@@ -514,19 +514,19 @@ func (tm *DAG) renderCompactDAG(sb *strings.Builder, indent string) {
 // renderCompactNode renders a single node with professional level-based styling
 func (tm *DAG) renderCompactNode(sb *strings.Builder, node *Node, nodeLevel int, indent string) {
 	var fillColor, shape, borderColor string
-	
+
 	// Check if this is a sub-DAG node
-	if subDAG, ok := isDAGNode(node); ok && subDAG.consumerTopic != "" {
+	if _, ok := isDAGNode(node); ok {
 		fillColor = "#E3F2FD"
 		shape = "box"
 		borderColor = "#1976D2"
 	} else {
 		fillColor, shape, borderColor = tm.getNodeStyle(node.NodeType, nodeLevel)
 	}
-	
+
 	// Clean, simple label
 	cleanLabel := strings.ReplaceAll(node.Label, `"`, `\"`)
-	
+
 	sb.WriteString(fmt.Sprintf("%s\"%s\" [", indent, node.ID))
 	sb.WriteString(fmt.Sprintf(`label="  \n  %s  \n ", `, cleanLabel))
 	sb.WriteString(fmt.Sprintf(`fillcolor="%s", `, fillColor))
@@ -538,18 +538,18 @@ func (tm *DAG) renderCompactNode(sb *strings.Builder, node *Node, nodeLevel int,
 // renderCompactSubDAGCluster renders sub-DAG with clean cluster styling
 func (tm *DAG) renderCompactSubDAGCluster(sb *strings.Builder, parentNodeID string, subDAG *DAG, indent string) {
 	clusterName := fmt.Sprintf("cluster_%s", parentNodeID)
-	
+
 	// Calculate edge levels and node levels for the sub-DAG
 	subEdgeLevels := subDAG.calculateEdgeLevels()
 	subNodeLevels := subDAG.calculateNodeLevels()
-	
+
 	sb.WriteString(fmt.Sprintf("%ssubgraph \"%s\" {\n", indent, clusterName))
 	sb.WriteString(fmt.Sprintf("%s  label=\"  \n %s \n  \";\n", indent, subDAG.name))
 	sb.WriteString(fmt.Sprintf("%s  style=\"dashed\";\n", indent))
 	sb.WriteString(fmt.Sprintf("%s  color=\"#BDBDBD\";\n", indent))
 	sb.WriteString(fmt.Sprintf("%s  fontsize=8;\n", indent))
 	sb.WriteString(fmt.Sprintf("%s  bgcolor=\"#FAFAFA\";\n", indent))
-	
+
 	// Render sub-DAG nodes with level-based styling
 	subSortedNodes := subDAG.TopologicalSort()
 	for _, subNodeID := range subSortedNodes {
@@ -561,7 +561,7 @@ func (tm *DAG) renderCompactSubDAGCluster(sb *strings.Builder, parentNodeID stri
 		nodeLevel := subNodeLevels[subNodeID]
 		tm.renderCompactPrefixedNode(sb, subNode, prefixedID, indent+"  ", nodeLevel)
 	}
-	
+
 	// Render sub-DAG edges with level-based styling
 	for _, subNodeID := range subSortedNodes {
 		subNode, exists := subDAG.nodes.Get(subNodeID)
@@ -570,13 +570,13 @@ func (tm *DAG) renderCompactSubDAGCluster(sb *strings.Builder, parentNodeID stri
 		}
 		tm.renderCompactPrefixedEdges(sb, subNode, parentNodeID, indent+"  ", subEdgeLevels)
 	}
-	
+
 	// Render sub-DAG conditional edges with level-based styling
 	for fromNodeID, conditions := range subDAG.conditions {
 		for condition, toNodeID := range conditions {
 			fromPrefixed := fmt.Sprintf("%s_%s", parentNodeID, fromNodeID)
 			toPrefixed := fmt.Sprintf("%s_%s", parentNodeID, toNodeID)
-			
+
 			// Calculate level for conditional edge
 			edgeKey := fmt.Sprintf("%s->%s:conditional", fromNodeID, toNodeID)
 			var level int
@@ -585,10 +585,10 @@ func (tm *DAG) renderCompactSubDAGCluster(sb *strings.Builder, parentNodeID stri
 			} else {
 				level = 0
 			}
-			
+
 			style := subDAG.getConditionalEdgeStyle(level)
 			cleanCondition := strings.ReplaceAll(condition, `"`, `\"`)
-			
+
 			sb.WriteString(fmt.Sprintf("%s  \"%s\" -> \"%s\" [", indent, fromPrefixed, toPrefixed))
 			sb.WriteString(fmt.Sprintf(`color="%s", `, style.Color))
 			sb.WriteString(fmt.Sprintf(`style="%s", `, style.Style))
@@ -602,16 +602,16 @@ func (tm *DAG) renderCompactSubDAGCluster(sb *strings.Builder, parentNodeID stri
 			sb.WriteString("];\n")
 		}
 	}
-	
+
 	sb.WriteString(fmt.Sprintf("%s}\n", indent))
 }
 
 // renderCompactPrefixedNode renders a prefixed node with professional level-based styling
 func (tm *DAG) renderCompactPrefixedNode(sb *strings.Builder, node *Node, prefixedID, indent string, nodeLevel int) {
 	fillColor, shape, borderColor := tm.getNodeStyle(node.NodeType, nodeLevel)
-	
+
 	cleanLabel := strings.ReplaceAll(node.Label, `"`, `\"`)
-	
+
 	sb.WriteString(fmt.Sprintf("%s\"%s\" [", indent, prefixedID))
 	sb.WriteString(fmt.Sprintf(`label=" \n %s \n ", `, cleanLabel))
 	sb.WriteString(fmt.Sprintf(`fillcolor="%s", `, fillColor))
@@ -624,9 +624,25 @@ func (tm *DAG) renderCompactPrefixedNode(sb *strings.Builder, node *Node, prefix
 // renderCompactEdges dynamically adjusts label positions and dimensions
 func (tm *DAG) renderCompactEdges(sb *strings.Builder, node *Node, edgeLevels map[string]EdgeLevel, indent string) {
 	for _, edge := range node.Edges {
-		fromID := strings.Join(strings.Split(edge.FromSource, "."), "_")
+		fromID := node.ID
+		if tm.isSubDAGNode(node) {
+			if sub, ok := isDAGNode(node); ok {
+				// Find the end node (node with no outgoing edges)
+				endNodeID := ""
+				sub.nodes.ForEach(func(_ string, n *Node) bool {
+					if len(n.Edges) == 0 {
+						endNodeID = n.ID
+						return false
+					}
+					return true
+				})
+				if endNodeID != "" {
+					fromID = fmt.Sprintf("%s_%s", node.ID, endNodeID)
+				}
+			}
+		}
 		edgeKey := fmt.Sprintf("%s->%s", node.ID, edge.To.ID)
-		
+
 		// Get edge level and styling
 		edgeLevel, exists := edgeLevels[edgeKey]
 		if !exists {
@@ -634,9 +650,9 @@ func (tm *DAG) renderCompactEdges(sb *strings.Builder, node *Node, edgeLevels ma
 			edgeLevel = EdgeLevel{Level: 0, Type: edge.Type}
 		}
 		style := tm.getEdgeStyle(edgeLevel)
-		
+
 		sb.WriteString(fmt.Sprintf("%s\"%s\" -> \"%s\"", indent, fromID, edge.To.ID))
-		
+
 		// Apply styling attributes
 		sb.WriteString(" [")
 		sb.WriteString(fmt.Sprintf(`color="%s", `, style.Color))
@@ -644,18 +660,18 @@ func (tm *DAG) renderCompactEdges(sb *strings.Builder, node *Node, edgeLevels ma
 		sb.WriteString(fmt.Sprintf(`penwidth=%s, `, style.PenWidth))
 		sb.WriteString(fmt.Sprintf(`arrowsize=%s, `, style.ArrowSize))
 		sb.WriteString(fmt.Sprintf(`fontsize=%s, `, style.FontSize))
-		
+
 		if edge.Label != "" {
 			cleanLabel := strings.ReplaceAll(edge.Label, `"`, `\"`)
 			sb.WriteString(fmt.Sprintf(`label=" \n %s \n ", `, cleanLabel))
 			sb.WriteString(fmt.Sprintf(`labeldistance=%.1f, `, math.Max(1.1, math.Min(2.0, float64(len(edge.Label))*0.05+1.1))))
 			sb.WriteString(fmt.Sprintf(`labelangle=%d`, 0))
 		}
-		
+
 		// Add edge type indicator in tooltip for debugging
 		edgeTypeLabel := fmt.Sprintf("Level %d - %s", edgeLevel.Level, edgeLevel.Type.String())
 		sb.WriteString(fmt.Sprintf(`, tooltip="%s"`, edgeTypeLabel))
-		
+
 		sb.WriteString("];\n")
 	}
 }
@@ -666,16 +682,16 @@ func (tm *DAG) renderCompactPrefixedEdges(sb *strings.Builder, node *Node, prefi
 	for _, edge := range node.Edges {
 		toPrefixed := fmt.Sprintf("%s_%s", prefix, edge.To.ID)
 		edgeKey := fmt.Sprintf("%s->%s", node.ID, edge.To.ID)
-		
+
 		// Get edge level and styling
 		edgeLevel, exists := edgeLevels[edgeKey]
 		if !exists {
 			edgeLevel = EdgeLevel{Level: 0, Type: edge.Type}
 		}
 		style := tm.getEdgeStyle(edgeLevel)
-		
+
 		sb.WriteString(fmt.Sprintf("%s\"%s\" -> \"%s\"", indent, fromPrefixed, toPrefixed))
-		
+
 		// Apply styling attributes
 		sb.WriteString(" [")
 		sb.WriteString(fmt.Sprintf(`color="%s", `, style.Color))
@@ -683,18 +699,18 @@ func (tm *DAG) renderCompactPrefixedEdges(sb *strings.Builder, node *Node, prefi
 		sb.WriteString(fmt.Sprintf(`penwidth=%s, `, style.PenWidth))
 		sb.WriteString(fmt.Sprintf(`arrowsize=%s, `, style.ArrowSize))
 		sb.WriteString(fmt.Sprintf(`fontsize=%s, `, style.FontSize))
-		
+
 		if edge.Label != "" {
 			cleanLabel := strings.ReplaceAll(edge.Label, `"`, `\"`)
 			sb.WriteString(fmt.Sprintf(`label=" \n %s \n ", `, cleanLabel))
 			sb.WriteString(fmt.Sprintf(`labeldistance=%.1f, `, math.Max(1.1, math.Min(1.3, float64(edgeLevel.Level)*0.1+1.1))))
 			sb.WriteString(`labelangle=0`)
 		}
-		
+
 		// Add edge type indicator
 		edgeTypeLabel := fmt.Sprintf("Level %d - %s", edgeLevel.Level, edgeLevel.Type.String())
 		sb.WriteString(fmt.Sprintf(`, tooltip="%s"`, edgeTypeLabel))
-		
+
 		sb.WriteString("];\n")
 	}
 }
@@ -704,7 +720,7 @@ func (tm *DAG) renderCompactConditionalEdges(sb *strings.Builder, edgeLevels map
 	for fromNodeID, conditions := range tm.conditions {
 		for condition, toNodeID := range conditions {
 			edgeKey := fmt.Sprintf("%s->%s:conditional", fromNodeID, toNodeID)
-			
+
 			// Get or calculate level for conditional edge
 			var level int
 			if edgeLevel, exists := edgeLevels[edgeKey]; exists {
@@ -712,10 +728,10 @@ func (tm *DAG) renderCompactConditionalEdges(sb *strings.Builder, edgeLevels map
 			} else {
 				level = 0 // Default level
 			}
-			
+
 			style := tm.getConditionalEdgeStyle(level)
 			cleanCondition := strings.ReplaceAll(condition, `"`, `\"`)
-			
+
 			sb.WriteString(fmt.Sprintf("%s\"%s\" -> \"%s\" [", indent, fromNodeID, toNodeID))
 			sb.WriteString(fmt.Sprintf(`color="%s", `, style.Color))
 			sb.WriteString(fmt.Sprintf(`style="%s", `, style.Style))
