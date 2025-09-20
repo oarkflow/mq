@@ -12,6 +12,7 @@ import (
 	"github.com/oarkflow/json"
 
 	"github.com/oarkflow/mq"
+	"github.com/oarkflow/mq/consts"
 	dagstorage "github.com/oarkflow/mq/dag/storage" // Import dag storage package with alias
 	"github.com/oarkflow/mq/logger"
 	mqstorage "github.com/oarkflow/mq/storage"
@@ -490,6 +491,10 @@ func (tm *TaskManager) processNode(exec *task) {
 		return
 	}
 	if result.Last || node.NodeType == Page {
+		if node.NodeType == Page {
+			exec.ctx = context.WithValue(exec.ctx, consts.ContentType, consts.TypeHtml)
+			result.Ctx = context.WithValue(result.Ctx, consts.ContentType, consts.TypeHtml)
+		}
 		tm.result = &result
 		tm.resultCh <- result
 		if result.Last {
@@ -906,7 +911,7 @@ func (tm *TaskManager) retryDeferredTasks() {
 
 func (tm *TaskManager) processFinalResult(state *TaskState) {
 	state.Status = mq.Completed
-	state.targetResults.Clear()
+	// state.targetResults.Clear()
 	// update metrics using the task start time for duration calculation
 	tm.dag.updateTaskMetrics(tm.taskID, state.Result, time.Since(tm.createdAt))
 	if tm.dag.finalResult != nil {

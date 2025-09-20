@@ -319,20 +319,13 @@ type SMSFormNode struct {
 }
 
 func (s *SMSFormNode) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
-	// Check if this is a form submission
 	var inputData map[string]any
-	if task.Payload != nil && len(task.Payload) > 0 {
-		if err := json.Unmarshal(task.Payload, &inputData); err == nil {
-			// Check if this is validation error data (contains validation_error)
-			if _, hasValidationError := inputData["validation_error"]; hasValidationError {
-				// This is validation error data, show the form with errors
-			} else {
-				// If we have valid input data, pass it through for validation
-				return mq.Result{Payload: task.Payload, Ctx: ctx}
-			}
-		}
+	if len(task.Payload) > 0 {
+		json.Unmarshal(task.Payload, &inputData)
 	}
-
+	if inputData == nil {
+		inputData = make(map[string]any)
+	}
 	// Show the form (either initial load or with validation errors)
 	htmlTemplate := `
 <!DOCTYPE html>
