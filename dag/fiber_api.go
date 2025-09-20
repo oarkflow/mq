@@ -491,7 +491,11 @@ func (tm *DAG) SVGViewerHTML(svgContent string) string {
             const containerWidth = viewerContainer.clientWidth - 4; // Account for border
             const containerHeight = viewerContainer.clientHeight - 4;
 
-            // Get SVG viewBox dimensions
+            // Set SVG to container size
+            mainSvg.setAttribute('width', containerWidth + 'px');
+            mainSvg.setAttribute('height', containerHeight + 'px');
+
+            // Get SVG viewBox dimensions for logging
             let svgWidth, svgHeight;
             const viewBox = mainSvg.getAttribute('viewBox');
 
