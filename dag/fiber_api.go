@@ -516,14 +516,8 @@ func (tm *DAG) SVGViewerHTML(svgContent string) string {
                 }
             }
 
-            // Calculate scale to fit SVG entirely within container with padding
-            const padding = 20; // 20px padding on all sides
-            const availableWidth = containerWidth - padding * 2;
-            const availableHeight = containerHeight - padding * 2;
-
-            const scaleX = availableWidth / svgWidth;
-            const scaleY = availableHeight / svgHeight;
-            initialScale = Math.min(scaleX, scaleY, 1); // Don't scale up beyond 100%%
+            // Set initial scale to 1 for full-width rendering
+            initialScale = 1;
 
             // Reset position
             currentX = 0;
@@ -533,15 +527,14 @@ func (tm *DAG) SVGViewerHTML(svgContent string) string {
             // Apply initial transform
             updateTransform();
 
+            // Set cursor for dragging
+            svgContainer.style.cursor = 'grab';
+
             console.log('SVG initialized:', {
                 svgWidth: svgWidth,
                 svgHeight: svgHeight,
                 containerWidth: containerWidth,
                 containerHeight: containerHeight,
-                availableWidth: availableWidth,
-                availableHeight: availableHeight,
-                scaleX: scaleX,
-                scaleY: scaleY,
                 initialScale: initialScale
             });
         }
@@ -569,13 +562,11 @@ func (tm *DAG) SVGViewerHTML(svgContent string) string {
 
         // Mouse events for dragging
         svgContainer.addEventListener('mousedown', function(e) {
-            if (currentZoom > initialScale) { // Only allow dragging when zoomed in
-                isDragging = true;
-                startX = e.clientX - currentX;
-                startY = e.clientY - currentY;
-                svgContainer.style.cursor = 'grabbing';
-                e.preventDefault();
-            }
+            isDragging = true;
+            startX = e.clientX - currentX;
+            startY = e.clientY - currentY;
+            svgContainer.style.cursor = 'grabbing';
+            e.preventDefault();
         });
 
         document.addEventListener('mousemove', function(e) {
@@ -593,7 +584,7 @@ func (tm *DAG) SVGViewerHTML(svgContent string) string {
 
         // Touch events for mobile
         svgContainer.addEventListener('touchstart', function(e) {
-            if (currentZoom > initialScale && e.touches.length === 1) {
+            if (e.touches.length === 1) {
                 isDragging = true;
                 const touch = e.touches[0];
                 startX = touch.clientX - currentX;
