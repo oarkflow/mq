@@ -229,6 +229,46 @@ func (p *Publisher) Request(ctx context.Context, task Task, queue string) Result
 	defer func() {
 		_ = conn.Close()
 	}()
+
+	// Authenticate if security is enabled
+	if p.opts.enableSecurity {
+		if p.opts.username == "" || p.opts.password == "" {
+			return Result{Error: fmt.Errorf("username and password required for authentication")}
+		}
+
+		authPayload := map[string]string{
+			"username": p.opts.username,
+			"password": p.opts.password,
+		}
+		payload, err := json.Marshal(authPayload)
+		if err != nil {
+			return Result{Error: err}
+		}
+
+		headers := map[string]string{
+			consts.PublisherKey: p.id,
+			consts.ContentType:  consts.TypeJson,
+		}
+		msg, err := codec.NewMessage(consts.AUTH, payload, "", headers)
+		if err != nil {
+			return Result{Error: err}
+		}
+
+		err = codec.SendMessage(ctx, conn, msg)
+		if err != nil {
+			return Result{Error: err}
+		}
+
+		// Wait for AUTH_ACK
+		resp, err := codec.ReadMessage(ctx, conn)
+		if err != nil {
+			return Result{Error: fmt.Errorf("authentication failed: %w", err)}
+		}
+		if resp.Command != consts.AUTH_ACK {
+			return Result{Error: fmt.Errorf("authentication failed: %s", string(resp.Payload))}
+		}
+	}
+
 	err = p.send(ctx, queue, task, conn, consts.PUBLISH)
 	resultCh := make(chan Result)
 	go func() {

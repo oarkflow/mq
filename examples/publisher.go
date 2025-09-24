@@ -20,10 +20,11 @@ func main() {
 	)
 	for i := 0; i < 2; i++ {
 		// publisher := mq.NewPublisher("publish-1", mq.WithTLS(true, "./certs/server.crt", "./certs/server.key"))
-		err := publisher.Publish(context.Background(), task, "queue1")
-		if err != nil {
-			panic(err)
+		result := publisher.Request(context.Background(), task, "queue1")
+		if result.Error != nil {
+			panic(result.Error)
 		}
+		fmt.Println(string(result.Payload))
 	}
 	fmt.Println("Async task published successfully")
 }

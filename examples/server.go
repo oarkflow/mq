@@ -24,7 +24,7 @@ func main() {
 	}
 	b.NewQueue("queue1")
 	b.NewQueue("queue2")
-	b.StartEnhanced(context.Background())
+	b.Start(context.Background())
 }
 
 // InitializeDefaults adds default permissions, roles, and users for development/testing

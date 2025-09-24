@@ -148,7 +148,7 @@ func GetConnection(addr string, config TLSConfig) (net.Conn, error) {
 		return nil, err
 	}
 	// Store the new connection in the pool.
-	connPool.Store(key, conn)
+	// connPool.Store(key, conn) // Disable pooling for now
 	return conn, nil
 }
 
