@@ -18,10 +18,11 @@ import (
 )
 
 type Publisher struct {
-	opts     *Options
-	id       string
-	conn     net.Conn
-	connLock sync.Mutex
+	opts          *Options
+	id            string
+	conn          net.Conn
+	connLock      sync.Mutex
+	authenticated bool
 }
 
 func NewPublisher(id string, opts ...Option) *Publisher {
@@ -60,12 +61,70 @@ func (p *Publisher) ensureConnection(ctx context.Context) error {
 	return fmt.Errorf("failed to connect to broker after retries: %w", err)
 }
 
+// Auth authenticates the publisher with the broker
+func (p *Publisher) Auth(ctx context.Context, username, password string) error {
+	if err := p.ensureConnection(ctx); err != nil {
+		return err
+	}
+
+	p.connLock.Lock()
+	conn := p.conn
+	p.connLock.Unlock()
+
+	authPayload := map[string]string{
+		"username": username,
+		"password": password,
+	}
+	payload, err := json.Marshal(authPayload)
+	if err != nil {
+		return err
+	}
+
+	headers := map[string]string{
+		consts.PublisherKey: p.id,
+		consts.ContentType:  consts.TypeJson,
+	}
+	msg, err := codec.NewMessage(consts.AUTH, payload, "", headers)
+	if err != nil {
+		return err
+	}
+
+	err = codec.SendMessage(ctx, conn, msg)
+	if err != nil {
+		return err
+	}
+
+	// Wait for AUTH_ACK
+	resp, err := codec.ReadMessage(ctx, conn)
+	if err != nil {
+		return err
+	}
+
+	if resp.Command != consts.AUTH_ACK {
+		return fmt.Errorf("authentication failed: %s", string(resp.Payload))
+	}
+
+	return nil
+}
+
 // Publish method that uses the persistent connection.
 func (p *Publisher) Publish(ctx context.Context, task Task, queue string) error {
 	// Ensure connection is established.
 	if err := p.ensureConnection(ctx); err != nil {
 		return err
 	}
+
+	// Authenticate if security is enabled and not already authenticated
+	if p.opts.enableSecurity && !p.authenticated {
+		if p.opts.username == "" || p.opts.password == "" {
+			return fmt.Errorf("username and password required for authentication")
+		}
+		if err := p.Auth(ctx, p.opts.username, p.opts.password); err != nil {
+			return fmt.Errorf("authentication failed: %w", err)
+		}
+		p.authenticated = true
+	}
+
 	delay := p.opts.initialDelay
 	for i := 0; i < p.opts.maxRetries; i++ {
 		// Use the persistent connection.

@@ -6,6 +6,9 @@ func (c CMD) IsValid() bool { return c >= PING && c <= CONSUMER_STOP }
 
 const (
 	PING CMD = iota + 1
+	AUTH
+	AUTH_ACK
+	AUTH_DENY
 	SUBSCRIBE
 	SUBSCRIBE_ACK
 
@@ -42,6 +45,12 @@ func (c CMD) String() string {
 	switch c {
 	case PING:
 		return "PING"
+	case AUTH:
+		return "AUTH"
+	case AUTH_ACK:
+		return "AUTH_ACK"
+	case AUTH_DENY:
+		return "AUTH_DENY"
 	case SUBSCRIBE:
 		return "SUBSCRIBE"
 	case SUBSCRIBE_ACK:

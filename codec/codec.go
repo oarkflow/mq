@@ -445,7 +445,7 @@ func validateCommand(cmd consts.CMD) error {
 }
 
 func validateQueue(queue string) error {
-	if len(queue) == 0 || len(queue) > MaxQueueLength {
+	if len(queue) > MaxQueueLength {
 		return ErrInvalidQueue
 	}
 	return nil

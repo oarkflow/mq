@@ -314,3 +314,39 @@ func WithConsumerTimeout(timeout time.Duration) Option {
 		opts.consumerTimeout = timeout
 	}
 }
+
+func WithAdminAddr(addr string) Option {
+	return func(opts *Options) {
+		opts.adminAddr = addr
+	}
+}
+
+func WithMetricsAddr(addr string) Option {
+	return func(opts *Options) {
+		opts.metricsAddr = addr
+	}
+}
+
+func WithSecurity(enabled bool) Option {
+	return func(opts *Options) {
+		opts.enableSecurity = enabled
+	}
+}
+
+func WithMonitoring(enabled bool) Option {
+	return func(opts *Options) {
+		opts.enableMonitoring = enabled
+	}
+}
+
+func WithUsername(username string) Option {
+	return func(opts *Options) {
+		opts.username = username
+	}
+}
+
+func WithPassword(password string) Option {
+	return func(opts *Options) {
+		opts.password = password
+	}
+}

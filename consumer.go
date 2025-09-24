@@ -162,6 +162,40 @@ func (c *Consumer) subscribe(ctx context.Context, queue string) error {
 	return c.waitForAck(ctx, c.conn)
 }
 
+// Auth authenticates the consumer with the broker
+func (c *Consumer) Auth(ctx context.Context, username, password string) error {
+	authPayload := map[string]string{
+		"username": username,
+		"password": password,
+	}
+	payload, err := json.Marshal(authPayload)
+	if err != nil {
+		return err
+	}
+
+	headers := HeadersWithConsumerID(ctx, c.id)
+	msg, err := codec.NewMessage(consts.AUTH, payload, "", headers)
+	if err != nil {
+		return fmt.Errorf("error creating auth message: %v", err)
+	}
+
+	if err := c.send(ctx, c.conn, msg); err != nil {
+		return fmt.Errorf("error sending auth: %v", err)
+	}
+
+	// Wait for AUTH_ACK
+	resp, err := c.receive(ctx, c.conn)
+	if err != nil {
+		return fmt.Errorf("error receiving auth response: %v", err)
+	}
+
+	if resp.Command != consts.AUTH_ACK {
+		return fmt.Errorf("authentication failed: %s", string(resp.Payload))
+	}
+
+	return nil
+}
+
 func (c *Consumer) OnClose(_ context.Context, _ net.Conn) error {
 	fmt.Println("Consumer closed")
 	return nil
@@ -557,6 +591,16 @@ func (c *Consumer) Consume(ctx context.Context) error {
 	// Initial connection
 	if err := c.attemptConnect(); err != nil {
 		return fmt.Errorf("initial connection failed: %w", err)
+	}
+
+	// Authenticate if security is enabled
+	if c.opts.enableSecurity {
+		if c.opts.username == "" || c.opts.password == "" {
+			return fmt.Errorf("username and password required for authentication")
+		}
+		if err := c.Auth(ctx, c.opts.username, c.opts.password); err != nil {
+			return fmt.Errorf("authentication failed: %w", err)
+		}
 	}
 
 	// Initialize pool
