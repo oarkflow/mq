@@ -13,9 +13,6 @@ func main() {
 		mq.WithCallback(tasks.Callback),
 		mq.WithBrokerURL(":8081"),
 		mq.WithSecurity(true),
-		// mq.WithMonitoring(true),
-		// mq.WithAdminAddr(":8080"),
-		// mq.WithMetricsAddr(":9090"),
 	)
 	InitializeDefaults(b.SecurityManager())
 	// b := mq.NewBroker(mq.WithCallback(tasks.Callback), mq.WithTLS(true, "./certs/server.crt", "./certs/server.key"), mq.WithCAPath("./certs/ca.cert"))

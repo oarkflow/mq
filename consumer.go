@@ -202,7 +202,13 @@ func (c *Consumer) OnClose(_ context.Context, _ net.Conn) error {
 }
 
 func (c *Consumer) OnError(_ context.Context, conn net.Conn, err error) {
-	fmt.Println("Error reading from connection:", err, conn.RemoteAddr())
+	if c.isConnectionClosed(err) {
+		log.Printf("Connection to broker closed for consumer %s at %s", c.id, conn.RemoteAddr())
+		// Trigger reconnection if possible
+		c.reconnectCh <- struct{}{}
+	} else {
+		log.Printf("Error reading from connection: %v", err)
+	}
 }
 
 func (c *Consumer) OnMessage(ctx context.Context, msg *codec.Message, conn net.Conn) error {
@@ -826,6 +832,10 @@ func minInt(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func (c *Consumer) isConnectionClosed(err error) bool {
+	return err == io.EOF || strings.Contains(err.Error(), "connection closed") || strings.Contains(err.Error(), "connection reset")
 }
 
 func isConnectionError(err error) bool {
