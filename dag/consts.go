@@ -11,7 +11,7 @@ const (
 
 type NodeType int
 
-func (c NodeType) IsValid() bool { return c >= Function && c <= Page }
+func (c NodeType) IsValid() bool { return c >= Function && c <= HTTPAPI }
 
 func (c NodeType) String() string {
 	switch c {
@@ -19,6 +19,10 @@ func (c NodeType) String() string {
 		return "Function"
 	case Page:
 		return "Page"
+	case RPC:
+		return "RPC"
+	case HTTPAPI:
+		return "HTTPAPI"
 	}
 	return "Function"
 }
@@ -26,6 +30,8 @@ func (c NodeType) String() string {
 const (
 	Function NodeType = iota
 	Page
+	RPC
+	HTTPAPI
 )
 
 type EdgeType int

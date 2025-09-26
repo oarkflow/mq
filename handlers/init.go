@@ -23,4 +23,8 @@ func Init() {
 	dag.AddHandler("output", func(id string) mq.Processor { return NewOutputHandler(id) })
 	dag.AddHandler("split", func(id string) mq.Processor { return NewSplitHandler(id) })
 	dag.AddHandler("join", func(id string) mq.Processor { return NewJoinHandler(id) })
+
+	// External service handlers
+	dag.AddHandler("rpc", func(id string) mq.Processor { return NewRPCNodeHandler(id) })
+	dag.AddHandler("http_api", func(id string) mq.Processor { return NewHTTPAPINodeHandler(id) })
 }
