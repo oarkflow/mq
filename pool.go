@@ -714,7 +714,8 @@ func (wp *Pool) handleTask(task *QueueTask) {
 	// Cleanup task from storage
 	if wp.taskStorage != nil {
 		if err := wp.taskStorage.DeleteTask(task.payload.ID); err != nil {
-			wp.logger.Warn().Str("taskID", task.payload.ID).Msgf("Failed to delete task from storage: %v", err)
+			// Task might already be deleted (duplicate processing) - this is expected with at-least-once delivery
+			wp.logger.Debug().Str("taskID", task.payload.ID).Msgf("Task already removed from storage: %v", err)
 		}
 	}
 

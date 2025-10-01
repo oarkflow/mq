@@ -1269,6 +1269,11 @@ func (b *Broker) readMessage(ctx context.Context, c net.Conn) error {
 func (b *Broker) dispatchWorker(ctx context.Context, queue *Queue) {
 	delay := b.opts.initialDelay
 	for task := range queue.tasks {
+		// Check if broker is shutting down
+		if atomic.LoadInt32(&b.isShutdown) == 1 {
+			return
+		}
+
 		// Handle each task in a separate goroutine to avoid blocking the dispatch loop
 		go func(t *QueuedTask) {
 			if b.opts.BrokerRateLimiter != nil {
@@ -1279,6 +1284,11 @@ func (b *Broker) dispatchWorker(ctx context.Context, queue *Queue) {
 			currentDelay := delay
 
 			for !success && t.RetryCount <= b.opts.maxRetries {
+				// Check if broker is shutting down
+				if atomic.LoadInt32(&b.isShutdown) == 1 {
+					return
+				}
+
 				if b.dispatchTaskToConsumer(ctx, queue, t) {
 					success = true
 					b.acknowledgeTask(ctx, t.Message.Queue, queue.name)
@@ -1387,12 +1397,99 @@ func (b *Broker) URL() string {
 }
 
 func (b *Broker) Close() error {
-	if b != nil && b.listener != nil {
-		log.Printf("Broker is closing...")
-		// Stop deferred task processor
-		b.StopDeferredTaskProcessor()
-		return b.listener.Close()
+	// Check if already shutdown
+	if !atomic.CompareAndSwapInt32(&b.isShutdown, 0, 1) {
+		log.Printf("Broker already closed")
+		return nil // Already shutdown
 	}
+
+	log.Printf("Broker is closing...")
+
+	// Stop deferred task processor first
+	b.StopDeferredTaskProcessor()
+
+	// Stop health checker
+	if b.healthChecker != nil {
+		b.healthChecker.Stop()
+	}
+
+	// Stop admin server
+	if b.adminServer != nil {
+		b.adminServer.Stop()
+	}
+
+	// Stop metrics server
+	if b.metricsServer != nil {
+		b.metricsServer.Stop()
+	}
+
+	// Signal shutdown to main Start loop and background routines
+	select {
+	case <-b.shutdown:
+		// Already closed
+	default:
+		close(b.shutdown)
+	}
+
+	// Close listener to stop accepting new connections
+	if b.listener != nil {
+		b.listener.Close()
+	}
+
+	// Close all consumer connections
+	b.consumers.ForEach(func(_ string, con *consumer) bool {
+		if con.conn != nil {
+			con.conn.Close()
+		}
+		return true
+	})
+
+	// Close all publisher connections
+	b.publishers.ForEach(func(_ string, pub *publisher) bool {
+		if pub.conn != nil {
+			pub.conn.Close()
+		}
+		return true
+	})
+
+	// Wait for background goroutines to finish (with timeout)
+	done := make(chan struct{})
+	go func() {
+		b.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		log.Printf("All background routines finished")
+	case <-time.After(5 * time.Second):
+		log.Printf("Timeout waiting for background routines, forcing shutdown")
+	}
+
+	// Close all queue task channels to stop dispatch workers
+	// Do this AFTER waiting for goroutines to prevent panic on closed channel
+	b.queues.ForEach(func(name string, queue *Queue) bool {
+		select {
+		case <-queue.tasks:
+			// Already closed
+		default:
+			close(queue.tasks)
+		}
+		return true
+	})
+
+	// Close all DLQ task channels
+	b.deadLetter.ForEach(func(name string, dlq *Queue) bool {
+		select {
+		case <-dlq.tasks:
+			// Already closed
+		default:
+			close(dlq.tasks)
+		}
+		return true
+	})
+
+	log.Printf("Broker shutdown complete")
 	return nil
 }
 

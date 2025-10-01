@@ -86,9 +86,7 @@ func (c *Consumer) send(ctx context.Context, conn net.Conn, msg *codec.Message) 
 }
 
 func (c *Consumer) receive(ctx context.Context, conn net.Conn) (*codec.Message, error) {
-	c.connMutex.RLock()
-	defer c.connMutex.RUnlock()
-
+	// Check shutdown before attempting read
 	if atomic.LoadInt32(&c.isShutdown) == 1 {
 		return nil, fmt.Errorf("consumer is shutdown")
 	}
@@ -97,6 +95,7 @@ func (c *Consumer) receive(ctx context.Context, conn net.Conn) (*codec.Message, 
 		return nil, fmt.Errorf("connection is nil")
 	}
 
+	// Don't hold lock during blocking read - this allows Close() to proceed
 	return codec.ReadMessage(ctx, conn)
 }
 
@@ -197,17 +196,35 @@ func (c *Consumer) Auth(ctx context.Context, username, password string) error {
 }
 
 func (c *Consumer) OnClose(_ context.Context, _ net.Conn) error {
-	fmt.Println("Consumer closed")
+	// Only log if not already shutdown (prevents spam during graceful shutdown)
+	if atomic.LoadInt32(&c.isShutdown) == 0 {
+		c.logger.Debug("Connection closed",
+			logger.Field{Key: "consumer_id", Value: c.id})
+	}
 	return nil
 }
 
 func (c *Consumer) OnError(_ context.Context, conn net.Conn, err error) {
+	// Don't trigger reconnection if shutting down
+	if atomic.LoadInt32(&c.isShutdown) == 1 {
+		return
+	}
+
 	if c.isConnectionClosed(err) {
-		log.Printf("Connection to broker closed for consumer %s at %s", c.id, conn.RemoteAddr())
+		c.logger.Warn("Connection to broker closed, triggering reconnection",
+			logger.Field{Key: "consumer_id", Value: c.id},
+			logger.Field{Key: "broker_addr", Value: conn.RemoteAddr().String()})
+
 		// Trigger reconnection if possible
-		c.reconnectCh <- struct{}{}
+		select {
+		case c.reconnectCh <- struct{}{}:
+		default:
+			// Channel full, reconnection already pending
+		}
 	} else {
-		log.Printf("Error reading from connection: %v", err)
+		c.logger.Error("Error reading from connection",
+			logger.Field{Key: "consumer_id", Value: c.id},
+			logger.Field{Key: "error", Value: err.Error()})
 	}
 }
 
@@ -645,18 +662,43 @@ func (c *Consumer) Consume(ctx context.Context) error {
 		logger.Field{Key: "consumer_id", Value: c.id},
 		logger.Field{Key: "queue", Value: c.queue})
 
-	// Main processing loop with enhanced error handling
+	// Main processing loop - will exit when context is cancelled or shutdown signal received
+	c.messageProcessingLoop(ctx)
+
+	c.logger.Info("Consumer stopped",
+		logger.Field{Key: "consumer_id", Value: c.id})
+
+	return nil
+} // messageProcessingLoop handles the actual message processing
+func (c *Consumer) messageProcessingLoop(ctx context.Context) {
+	// Create a ticker for periodic shutdown checks
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
 	for {
+		// Single point of shutdown check
 		select {
 		case <-ctx.Done():
-			c.logger.Info("Context cancelled, stopping consumer",
+			c.logger.Info("Context cancelled",
 				logger.Field{Key: "consumer_id", Value: c.id})
-			return c.Close()
+			// Close connection immediately to unblock any reads
+			c.connMutex.Lock()
+			if c.conn != nil {
+				c.conn.Close()
+			}
+			c.connMutex.Unlock()
+			return
 
 		case <-c.shutdown:
 			c.logger.Info("Shutdown signal received",
 				logger.Field{Key: "consumer_id", Value: c.id})
-			return nil
+			// Close connection immediately to unblock any reads
+			c.connMutex.Lock()
+			if c.conn != nil {
+				c.conn.Close()
+			}
+			c.connMutex.Unlock()
+			return
 
 		case <-c.reconnectCh:
 			c.logger.Info("Reconnection triggered",
@@ -665,33 +707,59 @@ func (c *Consumer) Consume(ctx context.Context) error {
 				c.logger.Error("Reconnection failed, will retry based on backoff policy",
 					logger.Field{Key: "consumer_id", Value: c.id},
 					logger.Field{Key: "error", Value: err.Error()})
-				// The handleReconnection method now implements its own backoff,
-				// so we don't need to do anything here except continue the loop
 			}
 
+		case <-ticker.C:
+			// Periodic check - do nothing, just allows checking other select cases
+
 		default:
+			// Check shutdown flag before processing
+			if atomic.LoadInt32(&c.isShutdown) == 1 {
+				return
+			}
+
 			// Apply rate limiting if configured
 			if c.opts.ConsumerRateLimiter != nil {
 				c.opts.ConsumerRateLimiter.Wait()
 			}
 
-			// Process messages with timeout
+			// Process messages with timeout (non-blocking with quick return on shutdown)
 			if err := c.processWithTimeout(ctx); err != nil {
+				// Check if shutdown was initiated
 				if atomic.LoadInt32(&c.isShutdown) == 1 {
-					return nil
+					return
 				}
 
-				c.logger.Error("Error processing message",
-					logger.Field{Key: "consumer_id", Value: c.id},
-					logger.Field{Key: "error", Value: err.Error()})
+				// Check if context was cancelled (graceful shutdown)
+				if err == context.Canceled || err == context.DeadlineExceeded {
+					c.logger.Info("Context cancelled during message processing",
+						logger.Field{Key: "consumer_id", Value: c.id})
+					return
+				}
 
-				// Trigger reconnection for connection errors
-				if isConnectionError(err) {
+				// Handle connection closed errors
+				if isConnectionError(err) || strings.Contains(err.Error(), "shutdown") {
+					c.logger.Debug("Connection error detected",
+						logger.Field{Key: "consumer_id", Value: c.id},
+						logger.Field{Key: "error", Value: err.Error()})
+
+					// If we're shutting down, don't try to reconnect
+					if atomic.LoadInt32(&c.isShutdown) == 1 {
+						return
+					}
+
+					// Trigger reconnection
 					select {
 					case c.reconnectCh <- struct{}{}:
 					default:
 					}
+					continue
 				}
+
+				// Log other errors but continue processing
+				c.logger.Error("Error processing message",
+					logger.Field{Key: "consumer_id", Value: c.id},
+					logger.Field{Key: "error", Value: err.Error()})
 
 				// Brief pause before retrying
 				time.Sleep(100 * time.Millisecond)
@@ -700,10 +768,13 @@ func (c *Consumer) Consume(ctx context.Context) error {
 	}
 }
 
-// processWithTimeout processes messages WITHOUT I/O timeouts for persistent broker connections
+// processWithTimeout processes messages with context awareness
 func (c *Consumer) processWithTimeout(ctx context.Context) error {
-	// Consumer should wait indefinitely for messages from broker - NO I/O timeout
-	// Only individual task processing should have timeouts, not the consumer connection
+	// Check shutdown first
+	if atomic.LoadInt32(&c.isShutdown) == 1 {
+		return fmt.Errorf("consumer is shutdown")
+	}
+
 	c.connMutex.RLock()
 	conn := c.conn
 	c.connMutex.RUnlock()
@@ -712,10 +783,13 @@ func (c *Consumer) processWithTimeout(ctx context.Context) error {
 		return fmt.Errorf("no connection available")
 	}
 
-	// CRITICAL: Never set any connection timeouts for broker-consumer communication
-	// The consumer must maintain a persistent connection to the broker indefinitely
-	// Read message without ANY timeout - consumer should be long-running background service
+	// Just read the message - connection will be closed on shutdown
 	err := c.readMessage(ctx, conn)
+
+	// If shutdown happened during read, return immediately
+	if atomic.LoadInt32(&c.isShutdown) == 1 {
+		return fmt.Errorf("consumer is shutdown")
+	}
 
 	// If message was processed successfully, reset reconnection attempts
 	if err == nil {
@@ -730,6 +804,11 @@ func (c *Consumer) processWithTimeout(ctx context.Context) error {
 }
 
 func (c *Consumer) handleReconnection(ctx context.Context) error {
+	// Check shutdown immediately
+	if atomic.LoadInt32(&c.isShutdown) == 1 {
+		return fmt.Errorf("consumer is shutdown")
+	}
+
 	c.reconnectMutex.Lock()
 	defer c.reconnectMutex.Unlock()
 
@@ -766,6 +845,11 @@ func (c *Consumer) handleReconnection(ctx context.Context) error {
 		}
 	}
 
+	// Check shutdown again after potential wait
+	if atomic.LoadInt32(&c.isShutdown) == 1 {
+		return fmt.Errorf("consumer is shutdown")
+	}
+
 	c.lastReconnectAttempt = time.Now()
 
 	// If we've exceeded reasonable attempts, implement longer backoff
@@ -783,6 +867,11 @@ func (c *Consumer) handleReconnection(ctx context.Context) error {
 		case <-c.shutdown:
 			return fmt.Errorf("consumer is shutdown")
 		}
+	}
+
+	// Final shutdown check before reconnecting
+	if atomic.LoadInt32(&c.isShutdown) == 1 {
+		return fmt.Errorf("consumer is shutdown")
 	}
 
 	// Mark as disconnected

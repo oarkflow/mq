@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -67,18 +68,25 @@ func main() {
 
 	fmt.Println("\n✅ Consumers created")
 
-	// Start periodic statistics reporting for first consumer
-	go reportStatistics(consumers[0])
-
 	// Start consuming messages
 	fmt.Println("\n🔄 Starting message consumption...")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// Start periodic statistics reporting for first consumer with context
+	statsCtx, statsCancel := context.WithCancel(context.Background())
+	defer statsCancel()
+	go reportStatistics(statsCtx, consumers[0])
+
+	// Wait group to track all consumers
+	var wg sync.WaitGroup
+
 	// Run all consumers in background
 	for _, consumer := range consumers {
 		c := consumer // capture for goroutine
+		wg.Add(1)
 		go func() {
+			defer wg.Done()
 			if err := c.Consume(ctx); err != nil {
 				log.Printf("❌ Consumer error: %v", err)
 			}
@@ -96,19 +104,40 @@ func main() {
 
 	fmt.Println("\n\n🛑 Shutdown signal received...")
 
-	// Cancel context to stop consumption
-	cancel()
+	// Stop statistics reporting first
+	fmt.Println("  1. Stopping statistics reporting...")
+	statsCancel()
+	// Give statistics goroutine time to finish its current print cycle
+	time.Sleep(100 * time.Millisecond)
+	fmt.Println("     ✅ Statistics reporting stopped")
 
-	// Give a moment for context cancellation to propagate
-	time.Sleep(500 * time.Millisecond)
-
-	fmt.Println("  1. Closing consumers (this will stop worker pools)...")
+	fmt.Println("  2. Closing consumers (this will stop worker pools)...")
 	for i, consumer := range consumers {
 		if err := consumer.Close(); err != nil {
 			fmt.Printf("❌ Consumer %d close error: %v\n", i, err)
 		}
 	}
 	fmt.Println("     ✅ All consumers closed")
+
+	// Cancel context to stop consumption
+	fmt.Println("  3. Cancelling context to stop message processing...")
+	cancel()
+
+	// Wait for all Consume() goroutines to finish
+	fmt.Println("  4. Waiting for all consumers to finish...")
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	// Wait with timeout
+	select {
+	case <-done:
+		fmt.Println("     ✅ All consumers finished")
+	case <-time.After(5 * time.Second):
+		fmt.Println("     ⚠️  Timeout waiting for consumers to finish")
+	}
 
 	fmt.Println("\n✅ Graceful shutdown complete")
 	fmt.Println("👋 Consumer stopped")
@@ -289,33 +318,39 @@ func isRetryableError(err error) bool {
 }
 
 // reportStatistics periodically reports consumer statistics
-func reportStatistics(consumer *mq.Consumer) {
+func reportStatistics(ctx context.Context, consumer *mq.Consumer) {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		metrics := consumer.Metrics()
+	for {
+		select {
+		case <-ctx.Done():
+			// Context cancelled, stop reporting
+			return
+		case <-ticker.C:
+			metrics := consumer.Metrics()
 
-		fmt.Println("\n📊 Consumer Statistics:")
-		fmt.Println("  " + strings.Repeat("-", 50))
-		fmt.Printf("  Consumer ID: %s\n", consumer.GetKey())
-		fmt.Printf("  Total Tasks: %d\n", metrics.TotalTasks)
-		fmt.Printf("  Completed Tasks: %d\n", metrics.CompletedTasks)
-		fmt.Printf("  Failed Tasks: %d\n", metrics.ErrorCount)
-		fmt.Printf("  Scheduled Tasks: %d\n", metrics.TotalScheduled)
-		fmt.Printf("  Memory Used: %d bytes\n", metrics.TotalMemoryUsed)
+			fmt.Println("\n📊 Consumer Statistics:")
+			fmt.Println("  " + strings.Repeat("-", 50))
+			fmt.Printf("  Consumer ID: %s\n", consumer.GetKey())
+			fmt.Printf("  Total Tasks: %d\n", metrics.TotalTasks)
+			fmt.Printf("  Completed Tasks: %d\n", metrics.CompletedTasks)
+			fmt.Printf("  Failed Tasks: %d\n", metrics.ErrorCount)
+			fmt.Printf("  Scheduled Tasks: %d\n", metrics.TotalScheduled)
+			fmt.Printf("  Memory Used: %d bytes\n", metrics.TotalMemoryUsed)
 
-		if metrics.TotalTasks > 0 {
-			successRate := float64(metrics.CompletedTasks) / float64(metrics.TotalTasks) * 100
-			fmt.Printf("  Success Rate: %.1f%%\n", successRate)
+			if metrics.TotalTasks > 0 {
+				successRate := float64(metrics.CompletedTasks) / float64(metrics.TotalTasks) * 100
+				fmt.Printf("  Success Rate: %.1f%%\n", successRate)
+			}
+
+			if metrics.TotalTasks > 0 && metrics.ExecutionTime > 0 {
+				avgTime := time.Duration(metrics.ExecutionTime/metrics.TotalTasks) * time.Millisecond
+				fmt.Printf("  Avg Processing Time: %v\n", avgTime)
+			}
+
+			fmt.Println("  " + strings.Repeat("-", 50))
 		}
-
-		if metrics.TotalTasks > 0 && metrics.ExecutionTime > 0 {
-			avgTime := time.Duration(metrics.ExecutionTime/metrics.TotalTasks) * time.Millisecond
-			fmt.Printf("  Avg Processing Time: %v\n", avgTime)
-		}
-
-		fmt.Println("  " + strings.Repeat("-", 50))
 	}
 }
 
