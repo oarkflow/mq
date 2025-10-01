@@ -3,6 +3,7 @@ package mq
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/oarkflow/mq/logger"
@@ -42,10 +43,28 @@ type BrokerEnhancedConfig struct {
 	DedupPersistent      bool
 
 	// Flow Control Configuration
-	MaxCredits           int64
-	MinCredits           int64
-	CreditRefillRate     int64
-	CreditRefillInterval time.Duration
+	FlowControlStrategy   FlowControlStrategyType
+	FlowControlConfigPath string // Path to flow control config file
+	FlowControlEnvPrefix  string // Environment variable prefix for flow control
+	MaxCredits            int64
+	MinCredits            int64
+	CreditRefillRate      int64
+	CreditRefillInterval  time.Duration
+	// Token bucket specific
+	TokenBucketCapacity       int64
+	TokenBucketRefillRate     int64
+	TokenBucketRefillInterval time.Duration
+	// Leaky bucket specific
+	LeakyBucketCapacity     int64
+	LeakyBucketLeakInterval time.Duration
+	// Credit-based specific
+	CreditBasedMaxCredits     int64
+	CreditBasedRefillRate     int64
+	CreditBasedRefillInterval time.Duration
+	CreditBasedBurstSize      int64
+	// Rate limiter specific
+	RateLimiterRequestsPerSecond int64
+	RateLimiterBurstSize         int64
 
 	// Backpressure Configuration
 	QueueDepthThreshold int
@@ -166,15 +185,70 @@ func (b *Broker) InitializeEnhancements(config *BrokerEnhancedConfig) error {
 	}
 	features.dedupManager = NewDeduplicationManager(dedupConfig)
 
-	// Initialize Flow Controller
-	flowConfig := FlowControlConfig{
-		MaxCredits:     config.MaxCredits,
-		MinCredits:     config.MinCredits,
-		RefillRate:     config.CreditRefillRate,
-		RefillInterval: config.CreditRefillInterval,
-		Logger:         config.Logger,
+	// Initialize Flow Controller using factory
+	factory := NewFlowControllerFactory()
+
+	// Try to load configuration from providers
+	var flowConfig FlowControlConfig
+	var err error
+
+	// First try file-based configuration
+	if config.FlowControlConfigPath != "" {
+		fileProvider := NewFileConfigProvider(config.FlowControlConfigPath)
+		if loadedConfig, loadErr := fileProvider.GetConfig(); loadErr == nil {
+			flowConfig = loadedConfig
+		}
 	}
-	features.flowController = NewFlowController(flowConfig)
+
+	// If no file config, try environment variables
+	if flowConfig.Strategy == "" && config.FlowControlEnvPrefix != "" {
+		envProvider := NewEnvConfigProvider(config.FlowControlEnvPrefix)
+		if loadedConfig, loadErr := envProvider.GetConfig(); loadErr == nil {
+			flowConfig = loadedConfig
+		}
+	}
+
+	// If still no config, use broker config defaults based on strategy
+	if flowConfig.Strategy == "" {
+		flowConfig = FlowControlConfig{
+			Strategy: config.FlowControlStrategy,
+			Logger:   config.Logger,
+		}
+
+		// Set strategy-specific defaults
+		switch config.FlowControlStrategy {
+		case StrategyTokenBucket:
+			flowConfig.MaxCredits = config.TokenBucketCapacity
+			flowConfig.RefillRate = config.TokenBucketRefillRate
+			flowConfig.RefillInterval = config.TokenBucketRefillInterval
+		case StrategyLeakyBucket:
+			flowConfig.MaxCredits = config.LeakyBucketCapacity
+			flowConfig.RefillInterval = config.LeakyBucketLeakInterval
+		case StrategyCreditBased:
+			flowConfig.MaxCredits = config.CreditBasedMaxCredits
+			flowConfig.RefillRate = config.CreditBasedRefillRate
+			flowConfig.RefillInterval = config.CreditBasedRefillInterval
+			flowConfig.BurstSize = config.CreditBasedBurstSize
+		case StrategyRateLimiter:
+			flowConfig.RefillRate = config.RateLimiterRequestsPerSecond
+			flowConfig.BurstSize = config.RateLimiterBurstSize
+		default:
+			// Fallback to token bucket
+			flowConfig.Strategy = StrategyTokenBucket
+			flowConfig.MaxCredits = config.MaxCredits
+			flowConfig.RefillRate = config.CreditRefillRate
+			flowConfig.RefillInterval = config.CreditRefillInterval
+		}
+	}
+
+	// Ensure logger is set
+	flowConfig.Logger = config.Logger
+
+	// Create flow controller using factory
+	features.flowController, err = factory.CreateFlowController(flowConfig)
+	if err != nil {
+		return fmt.Errorf("failed to create flow controller: %w", err)
+	}
 
 	// Initialize Backpressure Monitor
 	backpressureConfig := BackpressureConfig{
@@ -237,19 +311,34 @@ func DefaultBrokerEnhancedConfig() *BrokerEnhancedConfig {
 		ScaleDownThreshold:   0.25,
 		DedupWindow:          5 * time.Minute,
 		DedupCleanupInterval: 1 * time.Minute,
-		MaxCredits:           1000,
-		MinCredits:           100,
-		CreditRefillRate:     10,
-		CreditRefillInterval: 100 * time.Millisecond,
-		QueueDepthThreshold:  1000,
-		MemoryThreshold:      1 * 1024 * 1024 * 1024, // 1GB
-		ErrorRateThreshold:   0.5,
-		SnapshotInterval:     5 * time.Minute,
-		SnapshotRetention:    24 * time.Hour,
-		TracingEnabled:       true,
-		TraceRetention:       24 * time.Hour,
-		TraceExportInterval:  30 * time.Second,
-		EnableEnhancements:   true,
+		// Flow Control defaults (Token Bucket strategy)
+		FlowControlStrategy:          StrategyTokenBucket,
+		FlowControlConfigPath:        "",
+		FlowControlEnvPrefix:         "FLOW_",
+		MaxCredits:                   1000,
+		MinCredits:                   100,
+		CreditRefillRate:             10,
+		CreditRefillInterval:         100 * time.Millisecond,
+		TokenBucketCapacity:          1000,
+		TokenBucketRefillRate:        100,
+		TokenBucketRefillInterval:    100 * time.Millisecond,
+		LeakyBucketCapacity:          500,
+		LeakyBucketLeakInterval:      200 * time.Millisecond,
+		CreditBasedMaxCredits:        1000,
+		CreditBasedRefillRate:        100,
+		CreditBasedRefillInterval:    200 * time.Millisecond,
+		CreditBasedBurstSize:         50,
+		RateLimiterRequestsPerSecond: 100,
+		RateLimiterBurstSize:         200,
+		QueueDepthThreshold:          1000,
+		MemoryThreshold:              1 * 1024 * 1024 * 1024, // 1GB
+		ErrorRateThreshold:           0.5,
+		SnapshotInterval:             5 * time.Minute,
+		SnapshotRetention:            24 * time.Hour,
+		TracingEnabled:               true,
+		TraceRetention:               24 * time.Hour,
+		TraceExportInterval:          30 * time.Second,
+		EnableEnhancements:           true,
 	}
 }
 
