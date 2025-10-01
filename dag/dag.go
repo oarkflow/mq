@@ -11,6 +11,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/recover"
+	"github.com/gofiber/fiber/v2/middleware/session"
 	"github.com/oarkflow/form"
 	"github.com/oarkflow/json"
 	"golang.org/x/time/rate"
@@ -134,6 +135,9 @@ type DAG struct {
 
 	// Task storage for persistence
 	taskStorage dagstorage.TaskStorage
+
+	// Session store for authentication
+	sessionStore *session.Store
 }
 
 // SetPreProcessHook configures a function to be called before each node is processed.
@@ -1015,6 +1019,12 @@ func (tm *DAG) Start(ctx context.Context, addr string) error {
 	app.Use(recover.New(recover.Config{
 		EnableStackTrace: true,
 	}))
+	if tm.sessionStore == nil {
+		tm.sessionStore = session.New(session.Config{
+			CookieHTTPOnly: true,
+			Expiration:     24 * time.Hour,
+		})
+	}
 	tm.Handlers(app, "/")
 	return app.Listen(addr)
 }

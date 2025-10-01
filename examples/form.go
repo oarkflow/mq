@@ -12,6 +12,7 @@ import (
 	"github.com/oarkflow/mq/dag"
 	"github.com/oarkflow/mq/utils"
 
+	"github.com/gofiber/fiber/v2/middleware/session"
 	"github.com/oarkflow/jet"
 
 	"github.com/oarkflow/mq"
@@ -70,6 +71,125 @@ type LoginPage struct {
 }
 
 func (p *LoginPage) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
+	// Check if user is already authenticated via session
+	if sess, ok := ctx.Value("session").(*session.Session); ok {
+		if authenticated, exists := sess.Get("authenticated").(bool); exists && authenticated {
+			// User is already authenticated, show auto-submit page
+			htmlContent := `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Phone Processing System - Already Authenticated</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            margin: 0;
+            padding: 0;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .auth-container {
+            background: white;
+            padding: 2rem;
+            border-radius: 10px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+            width: 100%;
+            max-width: 400px;
+            text-align: center;
+        }
+        .auth-header {
+            margin-bottom: 2rem;
+        }
+        .auth-header h1 {
+            color: #333;
+            margin: 0;
+            font-size: 1.8rem;
+        }
+        .auth-header p {
+            color: #666;
+            margin: 0.5rem 0 0 0;
+        }
+        .success-icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+        }
+        .user-info {
+            background: #f8f9fa;
+            padding: 1rem;
+            border-radius: 5px;
+            margin: 1rem 0;
+        }
+        .user-info p {
+            margin: 0.5rem 0;
+            color: #333;
+        }
+        .countdown {
+            font-size: 1.2rem;
+            font-weight: bold;
+            color: #667eea;
+            margin: 1rem 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="auth-container">
+        <div class="auth-header">
+            <div class="success-icon">✅</div>
+            <h1>Already Authenticated</h1>
+            <p>Welcome back!</p>
+        </div>
+        <div class="user-info">
+            <p><strong>Username:</strong> ` + fmt.Sprintf("%v", sess.Get("username")) + `</p>
+            <p><strong>Role:</strong> ` + fmt.Sprintf("%v", sess.Get("user_role")) + `</p>
+        </div>
+        <div class="countdown">
+            Redirecting in <span id="countdown">1</span> second...
+        </div>
+    </div>
+
+    <form id="autoSubmitForm" method="post" action="/process?task_id=` + fmt.Sprintf("%v", ctx.Value("task_id")) + `&next=true" style="display: none;">
+        <input type="hidden" name="authenticated" value="true">
+        <input type="hidden" name="username" value="` + fmt.Sprintf("%v", sess.Get("username")) + `">
+        <input type="hidden" name="user_role" value="` + fmt.Sprintf("%v", sess.Get("user_role")) + `">
+        <input type="hidden" name="auth_token" value="` + fmt.Sprintf("%v", sess.Get("auth_token")) + `">
+        <input type="hidden" name="skip_login" value="true">
+    </form>
+
+    <script>
+        let countdown = 1;
+        const countdownElement = document.getElementById('countdown');
+
+        const timer = setInterval(() => {
+            countdown--;
+            countdownElement.textContent = countdown;
+
+            if (countdown <= 0) {
+                clearInterval(timer);
+                document.getElementById('autoSubmitForm').submit();
+            }
+        }, 1000);
+    </script>
+</body>
+</html>`
+
+			ctx = context.WithValue(ctx, consts.ContentType, consts.TypeHtml)
+			resultData := map[string]any{
+				"html_content": htmlContent,
+				"step":         "authenticated",
+			}
+			resultPayload, _ := json.Marshal(resultData)
+			return mq.Result{
+				Payload: resultPayload,
+				Ctx:     ctx,
+			}
+		}
+	}
+
 	// Check if this is a form submission
 	var inputData map[string]any
 	if len(task.Payload) > 0 {
@@ -264,6 +384,20 @@ func (p *VerifyCredentials) ProcessTask(ctx context.Context, task *mq.Task) mq.R
 		return mq.Result{Error: fmt.Errorf("VerifyCredentials Error: %s", err.Error()), Ctx: ctx}
 	}
 
+	// Check if user is already authenticated via session
+	if sess, ok := ctx.Value("session").(*session.Session); ok {
+		if authenticated, exists := sess.Get("authenticated").(bool); exists && authenticated {
+			// User is already authenticated, restore session data
+			data["authenticated"] = true
+			data["username"] = sess.Get("username")
+			data["user_role"] = sess.Get("user_role")
+			data["auth_token"] = sess.Get("auth_token")
+			delete(data, "html_content")
+			updatedPayload, _ := json.Marshal(data)
+			return mq.Result{Payload: updatedPayload, Ctx: ctx}
+		}
+	}
+
 	username, _ := data["username"].(string)
 	password, _ := data["password"].(string)
 
@@ -302,6 +436,15 @@ func (p *GenerateToken) ProcessTask(ctx context.Context, task *mq.Task) mq.Resul
 		data["auth_token"] = "jwt_token_123456789"
 		data["token_expires"] = "2025-09-19T13:00:00Z"
 		data["login_success"] = true
+
+		// Store authentication in session
+		if sess, ok := ctx.Value("session").(*session.Session); ok {
+			sess.Set("authenticated", true)
+			sess.Set("username", data["username"])
+			sess.Set("user_role", data["user_role"])
+			sess.Set("auth_token", data["auth_token"])
+			sess.Save()
+		}
 	}
 
 	delete(data, "html_content")

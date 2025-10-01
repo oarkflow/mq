@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gofiber/fiber/v2/middleware/session"
 	"github.com/oarkflow/json"
 	"github.com/oarkflow/mq"
 	dagstorage "github.com/oarkflow/mq/dag/storage"
@@ -599,4 +600,27 @@ func (h *ActivityAlertHandler) HandleAlert(alert Alert) error {
 		)
 	}
 	return nil
+}
+
+func CanSession(ctx context.Context, key string) bool {
+	sess, ok := ctx.Value("session").(*session.Session)
+	if !ok || sess == nil {
+		return false
+	}
+	if authenticated, exists := sess.Get(key).(bool); exists && authenticated {
+		return true
+	}
+	return false
+}
+
+func GetSession(ctx context.Context, key string) (any, bool) {
+	sess, ok := ctx.Value("session").(*session.Session)
+	if !ok || sess == nil {
+		return nil, false
+	}
+	value := sess.Get(key)
+	if value != nil {
+		return value, true
+	}
+	return nil, false
 }

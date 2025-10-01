@@ -36,6 +36,12 @@ func (tm *DAG) RenderFiber(c *fiber.Ctx) error {
 	accept := c.Get("Accept")
 	userCtx := form.UserContext(ctx)
 	ctx = context.WithValue(ctx, "method", c.Method())
+	if tm.sessionStore != nil {
+		sess, err := tm.sessionStore.Get(c)
+		if err == nil {
+			ctx = context.WithValue(ctx, "session", sess)
+		}
+	}
 
 	if c.Method() == fiber.MethodGet && userCtx.Get("task_id") != "" {
 		manager, ok := tm.taskManager.Get(userCtx.Get("task_id"))
