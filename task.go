@@ -115,8 +115,9 @@ type Task struct {
 	CreatedAt   time.Time       `json:"created_at"`
 	ProcessedAt time.Time       `json:"processed_at"`
 	Expiry      time.Time       `json:"expiry"`
-	Error       error           `json:"-"`               // Don't serialize errors directly
-	ErrorMsg    string          `json:"error,omitempty"` // Serialize error message if present
+	DeferUntil  time.Time       `json:"defer_until,omitempty"` // NEW: For deferred task execution
+	Error       error           `json:"-"`                     // Don't serialize errors directly
+	ErrorMsg    string          `json:"error,omitempty"`       // Serialize error message if present
 	ID          string          `json:"id"`
 	Topic       string          `json:"topic"`
 	Status      Status          `json:"status"` // Use Status type instead of string
@@ -229,6 +230,20 @@ func WithExpiry(expiry time.Time) TaskOption {
 func WithTTL(ttl time.Duration) TaskOption {
 	return func(t *Task) {
 		t.Expiry = time.Now().Add(ttl)
+	}
+}
+
+// TaskOption for deferring task execution until a specific time
+func WithDeferUntil(deferUntil time.Time) TaskOption {
+	return func(t *Task) {
+		t.DeferUntil = deferUntil
+	}
+}
+
+// TaskOption for deferring task execution for a specific duration
+func WithDeferDuration(duration time.Duration) TaskOption {
+	return func(t *Task) {
+		t.DeferUntil = time.Now().Add(duration)
 	}
 }
 

@@ -382,6 +382,7 @@ var Config = &DynamicConfig{
 type Pool struct {
 	taskStorage                TaskStorage
 	stop                       chan struct{}
+	stopOnce                   sync.Once // Ensure Stop() is only called once
 	taskNotify                 chan struct{}
 	workerAdjust               chan int
 	handler                    Handler
@@ -1169,65 +1170,68 @@ func min(a, b int) int {
 }
 
 func (wp *Pool) Stop() {
-	wp.logger.Info().Msg("Initiating graceful shutdown")
-	wp.gracefulShutdown = true
+	// Use sync.Once to ensure Stop is only executed once
+	wp.stopOnce.Do(func() {
+		wp.logger.Info().Msg("Initiating graceful shutdown")
+		wp.gracefulShutdown = true
 
-	// Pause new task processing
-	wp.Pause()
+		// Pause new task processing
+		wp.Pause()
 
-	// Signal all goroutines to stop
-	close(wp.stop)
+		// Signal all goroutines to stop
+		close(wp.stop)
 
-	// Create channels for coordinated shutdown
-	workersFinished := make(chan struct{})
-	tasksFinished := make(chan struct{})
+		// Create channels for coordinated shutdown
+		workersFinished := make(chan struct{})
+		tasksFinished := make(chan struct{})
 
-	// Wait for workers to finish
-	go func() {
-		wp.wg.Wait()
-		close(workersFinished)
-	}()
+		// Wait for workers to finish
+		go func() {
+			wp.wg.Wait()
+			close(workersFinished)
+		}()
 
-	// Wait for pending tasks to complete
-	go func() {
-		wp.taskCompletionNotifier.Wait()
-		close(tasksFinished)
-	}()
+		// Wait for pending tasks to complete
+		go func() {
+			wp.taskCompletionNotifier.Wait()
+			close(tasksFinished)
+		}()
 
-	// Wait with timeout
-	shutdownTimer := time.NewTimer(wp.gracefulShutdownTimeout)
-	defer shutdownTimer.Stop()
+		// Wait with timeout
+		shutdownTimer := time.NewTimer(wp.gracefulShutdownTimeout)
+		defer shutdownTimer.Stop()
 
-	workersComplete := false
-	tasksComplete := false
+		workersComplete := false
+		tasksComplete := false
 
-	for !workersComplete || !tasksComplete {
-		select {
-		case <-workersFinished:
-			if !workersComplete {
-				wp.logger.Info().Msg("All workers have finished")
-				workersComplete = true
+		for !workersComplete || !tasksComplete {
+			select {
+			case <-workersFinished:
+				if !workersComplete {
+					wp.logger.Info().Msg("All workers have finished")
+					workersComplete = true
+				}
+			case <-tasksFinished:
+				if !tasksComplete {
+					wp.logger.Info().Msg("All pending tasks have completed")
+					tasksComplete = true
+				}
+			case <-shutdownTimer.C:
+				wp.logger.Warn().Msgf("Graceful shutdown timeout (%v) reached, forcing shutdown", wp.gracefulShutdownTimeout)
+				goto forceShutdown
 			}
-		case <-tasksFinished:
-			if !tasksComplete {
-				wp.logger.Info().Msg("All pending tasks have completed")
-				tasksComplete = true
-			}
-		case <-shutdownTimer.C:
-			wp.logger.Warn().Msgf("Graceful shutdown timeout (%v) reached, forcing shutdown", wp.gracefulShutdownTimeout)
-			goto forceShutdown
 		}
-	}
 
-forceShutdown:
-	// Final cleanup
-	wp.cleanup()
+	forceShutdown:
+		// Final cleanup
+		wp.cleanup()
 
-	if wp.completionCallback != nil {
-		wp.completionCallback()
-	}
+		if wp.completionCallback != nil {
+			wp.completionCallback()
+		}
 
-	wp.logger.Info().Msg("Pool shutdown completed")
+		wp.logger.Info().Msg("Pool shutdown completed")
+	}) // Close the Do() function
 }
 
 // cleanup performs final resource cleanup

@@ -24,3 +24,4 @@ go.work
 *.svg
 .qodo
 .history
+*.log

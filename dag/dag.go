@@ -344,6 +344,18 @@ func NewDAG(name, key string, finalResultCallback func(taskID string, result mq.
 	)
 	d.server = mq.NewBroker(opts...)
 
+	// Initialize all enhanced features for DAG broker
+	enhancedConfig := mq.DefaultBrokerEnhancedConfig()
+	enhancedConfig.Logger = d.server.Options().Logger()
+	enhancedConfig.EnableEnhancements = true
+
+	// Initialize enhanced features (DLQ, WAL, ACK, dedup, flow control, etc.)
+	if err := d.server.InitializeEnhancements(enhancedConfig); err != nil {
+		log.Printf("[WARN] Failed to initialize enhanced features for DAG: %v", err)
+	} else {
+		log.Printf("[INFO] Enhanced features initialized for DAG: %s", name)
+	}
+
 	// Now initialize enhanced features that need the server
 	logger := d.server.Options().Logger()
 	d.validator = NewDAGValidator(d)

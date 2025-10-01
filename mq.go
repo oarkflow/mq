@@ -465,13 +465,15 @@ type StoredMessage struct {
 
 type Broker struct {
 	// Core broker functionality
-	queues     storage.IMap[string, *Queue] // Modified to support tenant-specific queues
-	consumers  storage.IMap[string, *consumer]
-	publishers storage.IMap[string, *publisher]
-	deadLetter storage.IMap[string, *Queue]
-	opts       *Options
-	pIDs       storage.IMap[string, bool]
-	listener   net.Listener
+	queues        storage.IMap[string, *Queue] // Modified to support tenant-specific queues
+	consumers     storage.IMap[string, *consumer]
+	publishers    storage.IMap[string, *publisher]
+	deadLetter    storage.IMap[string, *Queue]
+	deferredTasks storage.IMap[string, *QueuedTask] // NEW: Store for deferred tasks
+	dlqHandlers   storage.IMap[string, Handler]     // NEW: Custom handlers for DLQ queues
+	opts          *Options
+	pIDs          storage.IMap[string, bool]
+	listener      net.Listener
 
 	// Enhanced production features
 	connectionPool     *ConnectionPool
@@ -485,9 +487,11 @@ type Broker struct {
 	authenticatedConns storage.IMap[string, bool]              // authenticated connections
 	taskHeaders        storage.IMap[string, map[string]string] // task headers by task ID
 	pendingTasks       map[string]map[string]*Task             // consumerID -> taskID -> task
+	enhanced           *EnhancedFeatures                       // enhanced features (DLQ, WAL, ACK, etc.)
 	mu                 sync.RWMutex                            // for pendingTasks
 	isShutdown         int32
 	shutdown           chan struct{}
+	stopDeferredChan   chan struct{} // NEW: Signal to stop deferred task processor
 	wg                 sync.WaitGroup
 	logger             logger.Logger
 }
@@ -497,13 +501,15 @@ func NewBroker(opts ...Option) *Broker {
 
 	broker := &Broker{
 		// Core broker functionality
-		queues:       memory.New[string, *Queue](),
-		publishers:   memory.New[string, *publisher](),
-		consumers:    memory.New[string, *consumer](),
-		deadLetter:   memory.New[string, *Queue](),
-		pIDs:         memory.New[string, bool](),
-		pendingTasks: make(map[string]map[string]*Task),
-		opts:         options,
+		queues:        memory.New[string, *Queue](),
+		publishers:    memory.New[string, *publisher](),
+		consumers:     memory.New[string, *consumer](),
+		deadLetter:    memory.New[string, *Queue](),
+		deferredTasks: memory.New[string, *QueuedTask](), // NEW: Initialize deferred tasks map
+		dlqHandlers:   memory.New[string, Handler](),     // NEW: Initialize DLQ handlers map
+		pIDs:          memory.New[string, bool](),
+		pendingTasks:  make(map[string]map[string]*Task),
+		opts:          options,
 
 		// Enhanced production features
 		connectionPool:     NewConnectionPool(1000), // max 1000 connections
@@ -514,6 +520,7 @@ func NewBroker(opts ...Option) *Broker {
 		authenticatedConns: memory.New[string, bool](),
 		taskHeaders:        memory.New[string, map[string]string](),
 		shutdown:           make(chan struct{}),
+		stopDeferredChan:   make(chan struct{}), // NEW: Initialize stop channel for deferred processor
 		logger:             options.Logger(),
 	}
 
@@ -886,6 +893,7 @@ func (b *Broker) PublishHandler(ctx context.Context, conn net.Conn, msg *codec.M
 	// Store headers for response routing
 	b.taskHeaders.Set(taskID, msg.Headers)
 
+	// Send acknowledgment back to publisher
 	ack, err := codec.NewMessage(consts.PUBLISH_ACK, utils.ToByte(fmt.Sprintf(`{"id":"%s"}`, taskID)), msg.Queue, msg.Headers)
 	if err != nil {
 		log.Printf("Error creating PUBLISH_ACK message: %v\n", err)
@@ -894,7 +902,82 @@ func (b *Broker) PublishHandler(ctx context.Context, conn net.Conn, msg *codec.M
 	if err := b.send(ctx, conn, ack); err != nil {
 		log.Printf("Error sending PUBLISH_ACK: %v\n", err)
 	}
+
+	// Apply enhanced features if enabled
+	if b.enhanced != nil && b.enhanced.enabled {
+		// Parse the task from the message
+		var task Task
+		if err := json.Unmarshal(msg.Payload, &task); err != nil {
+			log.Printf("Error parsing task for enhanced features: %v\n", err)
+			b.broadcastToConsumers(msg)
+			return
+		}
+
+		// Check for duplicates
+		if b.enhanced.dedupManager != nil {
+			isDuplicate, err := b.enhanced.dedupManager.CheckDuplicate(ctx, &task)
+			if err != nil {
+				log.Printf("Error checking duplicate: %v\n", err)
+			} else if isDuplicate {
+				b.logger.Debug("Duplicate message rejected",
+					logger.Field{Key: "taskID", Value: task.ID})
+				return // Don't broadcast duplicates
+			}
+		}
+
+		// Acquire flow control credits
+		if b.enhanced.flowController != nil {
+			if err := b.enhanced.flowController.AcquireCredit(ctx, 1); err != nil {
+				log.Printf("Flow control credit acquisition failed: %v\n", err)
+				// Continue anyway - don't block
+			} else {
+				defer b.enhanced.flowController.ReleaseCredit(1)
+			}
+		}
+
+		// Write to WAL
+		if b.enhanced.walLog != nil {
+			walEntry := &WALEntry{
+				EntryType: WALEntryEnqueue,
+				TaskID:    task.ID,
+				QueueName: msg.Queue,
+				Payload:   msg.Payload, // already []byte
+			}
+			if err := b.enhanced.walLog.WriteEntry(ctx, walEntry); err != nil {
+				b.logger.Error("Failed to write WAL entry",
+					logger.Field{Key: "error", Value: err})
+			}
+		}
+
+		// Start tracing
+		if b.enhanced.lifecycleTracker != nil {
+			b.enhanced.lifecycleTracker.TrackEnqueue(ctx, &task, msg.Queue)
+		}
+
+		// Track for acknowledgment
+		if b.enhanced.ackManager != nil {
+			_ = b.enhanced.ackManager.TrackMessage(ctx, &task, msg.Queue, pub.id)
+		}
+
+		// Check if task is deferred
+		if !task.DeferUntil.IsZero() && task.DeferUntil.After(time.Now()) {
+			// Create QueuedTask for deferred execution
+			queuedTask := &QueuedTask{
+				Message:    msg,
+				Task:       &task,
+				RetryCount: 0,
+			}
+			// Add to deferred tasks queue
+			b.AddDeferredTask(queuedTask)
+			log.Printf("[DEFERRED] Task %s deferred until %s",
+				task.ID, task.DeferUntil.Format(time.RFC3339))
+			return // Don't broadcast yet
+		}
+	}
+
+	// Broadcast to consumers
 	b.broadcastToConsumers(msg)
+
 	go func() {
 		select {
 		case <-ctx.Done():
@@ -927,6 +1010,9 @@ func (b *Broker) SubscribeHandler(ctx context.Context, conn net.Conn, msg *codec
 func (b *Broker) Start(ctx context.Context) error {
 	// Start health checker
 	b.healthChecker.Start()
+
+	// Start deferred task processor
+	b.StartDeferredTaskProcessor(ctx)
 
 	// Start connection cleanup routine
 	b.wg.Add(1)
@@ -1303,6 +1389,8 @@ func (b *Broker) URL() string {
 func (b *Broker) Close() error {
 	if b != nil && b.listener != nil {
 		log.Printf("Broker is closing...")
+		// Stop deferred task processor
+		b.StopDeferredTaskProcessor()
 		return b.listener.Close()
 	}
 	return nil
