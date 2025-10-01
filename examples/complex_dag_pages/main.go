@@ -86,9 +86,9 @@ type Initialize struct {
 }
 
 func (p *Initialize) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
-	var data map[string]interface{}
+	var data map[string]any
 	if err := json.Unmarshal(task.Payload, &data); err != nil {
-		data = make(map[string]interface{})
+		data = make(map[string]any)
 	}
 	data["initialized"] = true
 	data["timestamp"] = "2025-09-19T12:00:00Z"
@@ -101,7 +101,7 @@ Bob Johnson,1555123456
 Alice Brown,invalid-phone
 Charlie Wilson,+441234567890`
 
-	data["phone_data"] = map[string]interface{}{
+	data["phone_data"] = map[string]any{
 		"content":    sampleCSV,
 		"format":     "csv",
 		"source":     "sample_data",
@@ -241,13 +241,13 @@ type LoginPage struct {
 
 func (p *LoginPage) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 	// Check if this is a form submission
-	var inputData map[string]interface{}
+	var inputData map[string]any
 	if len(task.Payload) > 0 {
 		if err := json.Unmarshal(task.Payload, &inputData); err == nil {
 			// Check if we have form data (username/password)
-			if formData, ok := inputData["form"].(map[string]interface{}); ok {
+			if formData, ok := inputData["form"].(map[string]any); ok {
 				// This is a form submission, pass it through for verification
-				credentials := map[string]interface{}{
+				credentials := map[string]any{
 					"username": formData["username"],
 					"password": formData["password"],
 				}
@@ -259,9 +259,9 @@ func (p *LoginPage) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 	}
 
 	// Otherwise, show the form
-	var data map[string]interface{}
+	var data map[string]any
 	if err := json.Unmarshal(task.Payload, &data); err != nil {
-		data = make(map[string]interface{})
+		data = make(map[string]any)
 	}
 
 	// HTML content for login page
@@ -420,12 +420,12 @@ type VerifyCredentials struct {
 }
 
 func (p *VerifyCredentials) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
-	var data map[string]interface{}
+	var data map[string]any
 	if err := json.Unmarshal(task.Payload, &data); err != nil {
 		return mq.Result{Error: fmt.Errorf("VerifyCredentials Error: %s", err.Error()), Ctx: ctx}
 	}
 
-	credentials, ok := data["credentials"].(map[string]interface{})
+	credentials, ok := data["credentials"].(map[string]any)
 	if !ok {
 		return mq.Result{Error: fmt.Errorf("credentials not found"), Ctx: ctx}
 	}
@@ -451,7 +451,7 @@ type GenerateToken struct {
 }
 
 func (p *GenerateToken) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
-	var data map[string]interface{}
+	var data map[string]any
 	if err := json.Unmarshal(task.Payload, &data); err != nil {
 		return mq.Result{Error: fmt.Errorf("GenerateToken Error: %s", err.Error()), Ctx: ctx}
 	}
@@ -471,14 +471,14 @@ type UploadPhoneDataPage struct {
 
 func (p *UploadPhoneDataPage) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 	// Check if this is a form submission
-	var inputData map[string]interface{}
+	var inputData map[string]any
 	if len(task.Payload) > 0 {
 		if err := json.Unmarshal(task.Payload, &inputData); err == nil {
 			// Check if we have form data (phone_data)
-			if formData, ok := inputData["form"].(map[string]interface{}); ok {
+			if formData, ok := inputData["form"].(map[string]any); ok {
 				// This is a form submission, pass it through for processing
 				if phoneData, exists := formData["phone_data"]; exists && phoneData != "" {
-					inputData["phone_data"] = map[string]interface{}{
+					inputData["phone_data"] = map[string]any{
 						"content":    phoneData.(string),
 						"format":     "csv",
 						"source":     "user_input",
@@ -492,9 +492,9 @@ func (p *UploadPhoneDataPage) ProcessTask(ctx context.Context, task *mq.Task) mq
 	}
 
 	// Otherwise, show the form
-	var data map[string]interface{}
+	var data map[string]any
 	if err := json.Unmarshal(task.Payload, &data); err != nil {
-		data = make(map[string]interface{})
+		data = make(map[string]any)
 	}
 
 	// HTML content for upload page
@@ -764,12 +764,12 @@ type ParsePhoneNumbers struct {
 }
 
 func (p *ParsePhoneNumbers) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
-	var data map[string]interface{}
+	var data map[string]any
 	if err := json.Unmarshal(task.Payload, &data); err != nil {
 		return mq.Result{Error: fmt.Errorf("ParsePhoneNumbers Error: %s", err.Error()), Ctx: ctx}
 	}
 
-	phoneData, ok := data["phone_data"].(map[string]interface{})
+	phoneData, ok := data["phone_data"].(map[string]any)
 	if !ok {
 		return mq.Result{Error: fmt.Errorf("phone_data not found"), Ctx: ctx}
 	}
@@ -779,7 +779,7 @@ func (p *ParsePhoneNumbers) ProcessTask(ctx context.Context, task *mq.Task) mq.R
 		return mq.Result{Error: fmt.Errorf("phone data content not found"), Ctx: ctx}
 	}
 
-	var phones []map[string]interface{}
+	var phones []map[string]any
 
 	// Parse CSV content
 	lines := strings.Split(content, "\n")
@@ -791,7 +791,7 @@ func (p *ParsePhoneNumbers) ProcessTask(ctx context.Context, task *mq.Task) mq.R
 			}
 			values := strings.Split(lines[i], ",")
 			if len(values) >= len(headers) {
-				phone := make(map[string]interface{})
+				phone := make(map[string]any)
 				for j, header := range headers {
 					phone[strings.TrimSpace(header)] = strings.TrimSpace(values[j])
 				}
@@ -811,13 +811,13 @@ type PhoneLoop struct {
 }
 
 func (p *PhoneLoop) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
-	var data map[string]interface{}
+	var data map[string]any
 	if err := json.Unmarshal(task.Payload, &data); err != nil {
 		return mq.Result{Error: fmt.Errorf("PhoneLoop Error: %s", err.Error()), Ctx: ctx}
 	}
 
 	// Extract parsed phones for iteration
-	if phones, ok := data["parsed_phones"].([]interface{}); ok {
+	if phones, ok := data["parsed_phones"].([]any); ok {
 		updatedPayload, _ := json.Marshal(phones)
 		return mq.Result{Payload: updatedPayload, Ctx: ctx}
 	}
@@ -830,7 +830,7 @@ type ValidatePhone struct {
 }
 
 func (p *ValidatePhone) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
-	var phone map[string]interface{}
+	var phone map[string]any
 	if err := json.Unmarshal(task.Payload, &phone); err != nil {
 		return mq.Result{Error: fmt.Errorf("ValidatePhone Error: %s", err.Error()), Ctx: ctx}
 	}
@@ -858,7 +858,7 @@ type SendWelcomeSMS struct {
 }
 
 func (p *SendWelcomeSMS) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
-	var phone map[string]interface{}
+	var phone map[string]any
 	if err := json.Unmarshal(task.Payload, &phone); err != nil {
 		return mq.Result{Error: fmt.Errorf("SendWelcomeSMS Error: %s", err.Error()), Ctx: ctx}
 	}
@@ -892,7 +892,7 @@ type CollectInvalidPhones struct {
 }
 
 func (p *CollectInvalidPhones) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
-	var phone map[string]interface{}
+	var phone map[string]any
 	if err := json.Unmarshal(task.Payload, &phone); err != nil {
 		return mq.Result{Error: fmt.Errorf("CollectInvalidPhones Error: %s", err.Error()), Ctx: ctx}
 	}
@@ -910,14 +910,14 @@ type GenerateReport struct {
 }
 
 func (p *GenerateReport) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
-	var data map[string]interface{}
+	var data map[string]any
 	if err := json.Unmarshal(task.Payload, &data); err != nil {
 		// If it's an array, wrap it in a map
-		var arr []interface{}
+		var arr []any
 		if err2 := json.Unmarshal(task.Payload, &arr); err2 != nil {
 			return mq.Result{Error: fmt.Errorf("GenerateReport Error: %s", err.Error()), Ctx: ctx}
 		}
-		data = map[string]interface{}{
+		data = map[string]any{
 			"processed_results": arr,
 		}
 	}
@@ -926,9 +926,9 @@ func (p *GenerateReport) ProcessTask(ctx context.Context, task *mq.Task) mq.Resu
 	validCount := 0
 	invalidCount := 0
 
-	if results, ok := data["processed_results"].([]interface{}); ok {
+	if results, ok := data["processed_results"].([]any); ok {
 		for _, result := range results {
-			if resultMap, ok := result.(map[string]interface{}); ok {
+			if resultMap, ok := result.(map[string]any); ok {
 				if _, isValid := resultMap["welcome_sent"]; isValid {
 					validCount++
 				} else if _, isInvalid := resultMap["discarded"]; isInvalid {
@@ -938,7 +938,7 @@ func (p *GenerateReport) ProcessTask(ctx context.Context, task *mq.Task) mq.Resu
 		}
 	}
 
-	report := map[string]interface{}{
+	report := map[string]any{
 		"total_processed": validCount + invalidCount,
 		"valid_phones":    validCount,
 		"invalid_phones":  invalidCount,
@@ -956,7 +956,7 @@ type SendSummaryEmail struct {
 }
 
 func (p *SendSummaryEmail) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
-	var data map[string]interface{}
+	var data map[string]any
 	if err := json.Unmarshal(task.Payload, &data); err != nil {
 		return mq.Result{Error: fmt.Errorf("SendSummaryEmail Error: %s", err.Error()), Ctx: ctx}
 	}
@@ -976,7 +976,7 @@ type FinalCleanup struct {
 }
 
 func (p *FinalCleanup) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
-	var data map[string]interface{}
+	var data map[string]any
 	if err := json.Unmarshal(task.Payload, &data); err != nil {
 		return mq.Result{Error: fmt.Errorf("FinalCleanup Error: %s", err.Error()), Ctx: ctx}
 	}

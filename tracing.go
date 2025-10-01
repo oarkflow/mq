@@ -374,13 +374,13 @@ func (tm *TraceManager) SetOnTraceComplete(fn func(*MessageTrace)) {
 }
 
 // GetStats returns tracing statistics
-func (tm *TraceManager) GetStats() map[string]interface{} {
+func (tm *TraceManager) GetStats() map[string]any {
 	tm.mu.RLock()
 	defer tm.mu.RUnlock()
 
 	activeTraces := len(tm.traces)
 
-	return map[string]interface{}{
+	return map[string]any{
 		"active_traces":   activeTraces,
 		"retention":       tm.retention,
 		"export_interval": tm.exportInterval,

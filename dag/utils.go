@@ -234,8 +234,8 @@ func (d *DAG) Clone() *DAG {
 
 		// Initialize other maps
 		conditions:      make(map[string]map[string]string),
-		nextNodesCache:  make(map[string][]*Node),
-		prevNodesCache:  make(map[string][]*Node),
+		nextNodesCache:  &sync.Map{},
+		prevNodesCache:  &sync.Map{},
 		circuitBreakers: make(map[string]*CircuitBreaker),
 		nodeMiddlewares: make(map[string][]mq.Handler),
 
@@ -277,26 +277,36 @@ func (d *DAG) Clone() *DAG {
 	}
 
 	// Deep copy caches
-	for nodeID, nodes := range d.nextNodesCache {
-		clonedNodes := make([]*Node, len(nodes))
-		for i, node := range nodes {
-			// Find the cloned node by ID
-			if clonedNode, exists := clone.nodes.Get(node.ID); exists {
-				clonedNodes[i] = clonedNode
+	if d.nextNodesCache != nil {
+		d.nextNodesCache.Range(func(key, value any) bool {
+			nodeID := key.(string)
+			nodes := value.([]*Node)
+			clonedNodes := make([]*Node, len(nodes))
+			for i, node := range nodes {
+				// Find the cloned node by ID
+				if clonedNode, exists := clone.nodes.Get(node.ID); exists {
+					clonedNodes[i] = clonedNode
+				}
 			}
-		}
-		clone.nextNodesCache[nodeID] = clonedNodes
+			clone.nextNodesCache.Store(nodeID, clonedNodes)
+			return true
+		})
 	}
 
-	for nodeID, nodes := range d.prevNodesCache {
-		clonedNodes := make([]*Node, len(nodes))
-		for i, node := range nodes {
-			// Find the cloned node by ID
-			if clonedNode, exists := clone.nodes.Get(node.ID); exists {
-				clonedNodes[i] = clonedNode
+	if d.prevNodesCache != nil {
+		d.prevNodesCache.Range(func(key, value any) bool {
+			nodeID := key.(string)
+			nodes := value.([]*Node)
+			clonedNodes := make([]*Node, len(nodes))
+			for i, node := range nodes {
+				// Find the cloned node by ID
+				if clonedNode, exists := clone.nodes.Get(node.ID); exists {
+					clonedNodes[i] = clonedNode
+				}
 			}
-		}
-		clone.prevNodesCache[nodeID] = clonedNodes
+			clone.prevNodesCache.Store(nodeID, clonedNodes)
+			return true
+		})
 	}
 
 	// Deep copy circuit breakers

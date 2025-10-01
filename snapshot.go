@@ -408,7 +408,7 @@ func (sm *SnapshotManager) DeleteSnapshot(queueName string, timestamp time.Time)
 }
 
 // GetSnapshotStats returns statistics about snapshots
-func (sm *SnapshotManager) GetSnapshotStats() map[string]interface{} {
+func (sm *SnapshotManager) GetSnapshotStats() map[string]any {
 	totalSnapshots := 0
 	var totalSize int64
 
@@ -425,7 +425,7 @@ func (sm *SnapshotManager) GetSnapshotStats() map[string]interface{} {
 		return nil
 	})
 
-	return map[string]interface{}{
+	return map[string]any{
 		"total_snapshots":   totalSnapshots,
 		"total_size_bytes":  totalSize,
 		"retention_period":  sm.retentionPeriod,

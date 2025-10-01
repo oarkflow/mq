@@ -448,7 +448,10 @@ func (tm *DAG) SVGViewerHTML(svgContent string) string {
 <body>
     <div class="header">
         <h1>DAG Pipeline</h1>
-        <p>%s - Workflow Visualization</p>
+        <p>
+			<span>%s - Workflow Visualization</span>
+			<span><a href="/process" class="text-blue-500">Start New Task</a></span>
+		</p>
     </div>
 
     <div class="svg-viewer-container relative">

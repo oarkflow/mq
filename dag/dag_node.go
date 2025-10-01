@@ -411,9 +411,11 @@ func (tm *DAG) IsLastNode(nodeID string) (bool, error) {
 // GetNextNodes returns the next nodes for a given node
 func (tm *DAG) GetNextNodes(nodeID string) ([]*Node, error) {
 	nodeID = strings.Split(nodeID, Delimiter)[0]
+
+	// Check cache
 	if tm.nextNodesCache != nil {
-		if cached, exists := tm.nextNodesCache[nodeID]; exists {
-			return cached, nil
+		if cached, exists := tm.nextNodesCache.Load(nodeID); exists {
+			return cached.([]*Node), nil
 		}
 	}
 
@@ -440,7 +442,7 @@ func (tm *DAG) GetNextNodes(nodeID string) ([]*Node, error) {
 
 	// Cache the result
 	if tm.nextNodesCache != nil {
-		tm.nextNodesCache[nodeID] = nextNodes
+		tm.nextNodesCache.Store(nodeID, nextNodes)
 	}
 
 	return nextNodes, nil
@@ -449,9 +451,11 @@ func (tm *DAG) GetNextNodes(nodeID string) ([]*Node, error) {
 // GetPreviousNodes returns the previous nodes for a given node
 func (tm *DAG) GetPreviousNodes(nodeID string) ([]*Node, error) {
 	nodeID = strings.Split(nodeID, Delimiter)[0]
+
+	// Check cache
 	if tm.prevNodesCache != nil {
-		if cached, exists := tm.prevNodesCache[nodeID]; exists {
-			return cached, nil
+		if cached, exists := tm.prevNodesCache.Load(nodeID); exists {
+			return cached.([]*Node), nil
 		}
 	}
 
@@ -482,7 +486,7 @@ func (tm *DAG) GetPreviousNodes(nodeID string) ([]*Node, error) {
 
 	// Cache the result
 	if tm.prevNodesCache != nil {
-		tm.prevNodesCache[nodeID] = prevNodes
+		tm.prevNodesCache.Store(nodeID, prevNodes)
 	}
 
 	return prevNodes, nil

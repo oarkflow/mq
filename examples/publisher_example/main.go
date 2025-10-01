@@ -109,7 +109,7 @@ func publishOrders(ctx context.Context, publisher *mq.Publisher) error {
 	fmt.Println("\n  📦 Publishing orders...")
 
 	for i := 1; i <= 5; i++ {
-		orderData := map[string]interface{}{
+		orderData := map[string]any{
 			"type":        "order",
 			"order_id":    fmt.Sprintf("ORD-%d", i),
 			"customer_id": fmt.Sprintf("CUST-%d", i),
@@ -152,7 +152,7 @@ func publishPayments(ctx context.Context, publisher *mq.Publisher) error {
 	fmt.Println("\n  💳 Publishing payments...")
 
 	for i := 1; i <= 3; i++ {
-		paymentData := map[string]interface{}{
+		paymentData := map[string]any{
 			"type":       "payment",
 			"payment_id": fmt.Sprintf("PAY-%d", i),
 			"order_id":   fmt.Sprintf("ORD-%d", i),
@@ -189,7 +189,7 @@ func publishPayments(ctx context.Context, publisher *mq.Publisher) error {
 func publishNotifications(ctx context.Context, publisher *mq.Publisher) error {
 	fmt.Println("\n  📧 Publishing notifications...")
 
-	notifications := []map[string]interface{}{
+	notifications := []map[string]any{
 		{
 			"type":       "notification",
 			"notif_type": "email",
@@ -234,11 +234,11 @@ func publishNotifications(ctx context.Context, publisher *mq.Publisher) error {
 
 // publishPeriodicMessage publishes a periodic heartbeat/analytics message
 func publishPeriodicMessage(ctx context.Context, publisher *mq.Publisher) error {
-	data := map[string]interface{}{
+	data := map[string]any{
 		"type":      "analytics",
 		"event":     "heartbeat",
 		"timestamp": time.Now().Unix(),
-		"metrics": map[string]interface{}{
+		"metrics": map[string]any{
 			"cpu_usage":    75.5,
 			"memory_usage": 60.2,
 			"active_users": 1250,

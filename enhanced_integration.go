@@ -477,8 +477,8 @@ func (b *Broker) RecoverFromSnapshot(ctx context.Context) error {
 }
 
 // GetEnhancedStats returns comprehensive statistics
-func (b *Broker) GetEnhancedStats() map[string]interface{} {
-	stats := make(map[string]interface{})
+func (b *Broker) GetEnhancedStats() map[string]any {
+	stats := make(map[string]any)
 
 	if b.enhanced == nil {
 		return stats

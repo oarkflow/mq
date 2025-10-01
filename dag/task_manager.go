@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"math/rand" // ...new import for jitter...
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -85,20 +86,31 @@ type TaskManager struct {
 	iteratorNodes      mqstorage.IMap[string, []Edge]
 	currentNodePayload mqstorage.IMap[string, json.RawMessage]
 	currentNodeResult  mqstorage.IMap[string, mq.Result]
-	taskQueue          chan *task
-	result             *mq.Result
-	resultQueue        chan nodeResult
-	resultCh           chan mq.Result
-	stopCh             chan struct{}
-	taskID             string
-	dag                *DAG
-	maxRetries         int
-	baseBackoff        time.Duration
-	recoveryHandler    func(ctx context.Context, result mq.Result) error
-	pauseMu            sync.Mutex
-	pauseCh            chan struct{}
-	wg                 sync.WaitGroup
-	storage            dagstorage.TaskStorage // Added TaskStorage for persistence
+
+	// High-performance lock-free ring buffers for task and result processing
+	taskRingBuffer   *StreamingRingBuffer[*task]
+	resultRingBuffer *StreamingRingBuffer[nodeResult]
+
+	// Legacy channels for backward compatibility (deprecated)
+	taskQueue   chan *task
+	resultQueue chan nodeResult
+
+	result          *mq.Result
+	resultCh        chan mq.Result
+	stopCh          chan struct{}
+	taskID          string
+	dag             *DAG
+	maxRetries      int
+	baseBackoff     time.Duration
+	recoveryHandler func(ctx context.Context, result mq.Result) error
+	pauseMu         sync.Mutex
+	pauseCh         chan struct{}
+	wg              sync.WaitGroup
+	storage         dagstorage.TaskStorage // Added TaskStorage for persistence
+
+	// Performance optimization flags
+	useLockFreeBuffers bool
+	workerCount        int
 }
 
 func NewTaskManager(dag *DAG, taskID string, resultCh chan mq.Result, iteratorNodes mqstorage.IMap[string, []Edge], taskStorage dagstorage.TaskStorage) *TaskManager {
@@ -106,6 +118,18 @@ func NewTaskManager(dag *DAG, taskID string, resultCh chan mq.Result, iteratorNo
 		MaxRetries:  3,
 		BaseBackoff: time.Second,
 	}
+
+	// Determine optimal worker count based on CPU cores
+	workerCount := runtime.NumCPU()
+	if workerCount < 4 {
+		workerCount = 4
+	}
+
+	// Use high-performance ring buffers for better throughput
+	// Buffer capacity: 8K tasks, batch size: 128 for streaming
+	taskRingBuffer := NewStreamingRingBuffer[*task](8192, 128)
+	resultRingBuffer := NewStreamingRingBuffer[nodeResult](8192, 128)
+
 	tm := &TaskManager{
 		createdAt:          time.Now(),
 		taskStates:         memory.New[string, *TaskState](),
@@ -114,8 +138,15 @@ func NewTaskManager(dag *DAG, taskID string, resultCh chan mq.Result, iteratorNo
 		deferredTasks:      memory.New[string, *task](),
 		currentNodePayload: memory.New[string, json.RawMessage](),
 		currentNodeResult:  memory.New[string, mq.Result](),
-		taskQueue:          make(chan *task, DefaultChannelSize),
-		resultQueue:        make(chan nodeResult, DefaultChannelSize),
+
+		// High-performance lock-free ring buffers
+		taskRingBuffer:   taskRingBuffer,
+		resultRingBuffer: resultRingBuffer,
+
+		// Legacy channel fallbacks (smaller buffers)
+		taskQueue:   make(chan *task, 1024),
+		resultQueue: make(chan nodeResult, 1024),
+
 		resultCh:           resultCh,
 		stopCh:             make(chan struct{}),
 		taskID:             taskID,
@@ -125,10 +156,18 @@ func NewTaskManager(dag *DAG, taskID string, resultCh chan mq.Result, iteratorNo
 		recoveryHandler:    config.RecoveryHandler,
 		iteratorNodes:      iteratorNodes,
 		storage:            taskStorage,
+		useLockFreeBuffers: true,
+		workerCount:        workerCount,
 	}
 
-	tm.wg.Add(3)
-	go tm.run()
+	// Start worker pool for high-throughput task processing
+	tm.wg.Add(workerCount + 2) // workers + result processor + retry processor
+
+	// Launch multiple worker goroutines for parallel task processing
+	for i := 0; i < workerCount; i++ {
+		go tm.runWorker(i)
+	}
+
 	go tm.waitForResult()
 	go tm.retryDeferredTasks()
 
@@ -155,6 +194,7 @@ func (tm *TaskManager) enqueueTask(ctx context.Context, startNode, taskID string
 		tm.taskStates.Set(startNode, newTaskState(startNode))
 	}
 	t := newTask(ctx, taskID, startNode, payload)
+
 	// Persist task to storage
 	if tm.storage != nil {
 		persistentTask := &dagstorage.PersistentTask{
@@ -176,11 +216,20 @@ func (tm *TaskManager) enqueueTask(ctx context.Context, startNode, taskID string
 			tm.logActivity(ctx, taskID, startNode, "task_created", "Task enqueued for processing", nil)
 		}
 	}
+
+	// Try high-performance lock-free ring buffer first
+	if tm.useLockFreeBuffers {
+		if tm.taskRingBuffer.Push(t) {
+			return // Successfully enqueued to ring buffer
+		}
+	}
+
+	// Fallback to channel if ring buffer is full or disabled
 	select {
 	case tm.taskQueue <- t:
-		// Successfully enqueued
+		// Successfully enqueued to channel
 	default:
-		// Queue is full, add to deferred tasks with limit
+		// Both ring buffer and channel are full, add to deferred tasks with limit
 		if tm.deferredTasks.Size() < 1000 { // Limit deferred tasks to prevent memory issues
 			tm.deferredTasks.Set(taskID, t)
 			tm.dag.Logger().Warn("Task queue full, deferring task",
@@ -190,6 +239,77 @@ func (tm *TaskManager) enqueueTask(ctx context.Context, startNode, taskID string
 			tm.dag.Logger().Error("Deferred tasks queue also full, dropping task",
 				logger.Field{Key: "taskID", Value: taskID},
 				logger.Field{Key: "nodeID", Value: startNode})
+		}
+	}
+}
+
+// runWorker is a high-performance worker that processes tasks from the lock-free ring buffer
+// using batch operations for maximum throughput with linear streaming.
+func (tm *TaskManager) runWorker(workerID int) {
+	defer tm.wg.Done()
+
+	if tm.dag.debug {
+		tm.dag.Logger().Info("Starting high-performance worker",
+			logger.Field{Key: "workerID", Value: workerID},
+			logger.Field{Key: "bufferCapacity", Value: tm.taskRingBuffer.Capacity()})
+	}
+
+	// Batch processing buffer for linear streaming
+	const batchSize = 32
+	ticker := time.NewTicker(10 * time.Millisecond) // Batch interval
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-tm.stopCh:
+			if tm.dag.debug {
+				log.Printf("Stopping worker %d", workerID)
+			}
+			return
+		default:
+			// Check pause state
+			tm.pauseMu.Lock()
+			pch := tm.pauseCh
+			tm.pauseMu.Unlock()
+			if pch != nil {
+				select {
+				case <-tm.stopCh:
+					if tm.dag.debug {
+						log.Printf("Stopping worker %d during pause", workerID)
+					}
+					return
+				case <-pch:
+					// Resume from pause
+				}
+			}
+
+			// Process tasks using lock-free ring buffer with batch operations
+			if tm.useLockFreeBuffers {
+				// Try batch pop for linear streaming (higher throughput)
+				tasks := tm.taskRingBuffer.PopBatch(batchSize)
+				if len(tasks) > 0 {
+					// Process all tasks in the batch sequentially for linear streaming
+					for _, tsk := range tasks {
+						if tsk != nil {
+							tm.processNode(tsk)
+						}
+					}
+					continue
+				}
+			}
+
+			// Fallback to channel-based processing
+			select {
+			case <-tm.stopCh:
+				return
+			case tsk := <-tm.taskQueue:
+				if tsk != nil {
+					tm.processNode(tsk)
+				}
+			case <-ticker.C:
+				// Periodic check to prevent busy waiting
+				runtime.Gosched()
+			}
 		}
 	}
 }
@@ -226,21 +346,55 @@ func (tm *TaskManager) run() {
 	}
 }
 
-// waitForResult listens for node results on resultQueue and processes them.
+// waitForResult listens for node results using high-performance ring buffer with batch processing.
 func (tm *TaskManager) waitForResult() {
 	defer tm.wg.Done()
+
+	// Batch processing for linear streaming
+	const batchSize = 32
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+
 	for {
 		select {
 		case <-tm.stopCh:
 			log.Println("Stopping TaskManager result listener")
 			return
-		case nr := <-tm.resultQueue:
+		default:
+			// Process results using lock-free ring buffer with batch operations
+			if tm.useLockFreeBuffers {
+				results := tm.resultRingBuffer.PopBatch(batchSize)
+				if len(results) > 0 {
+					// Process all results in the batch sequentially for linear streaming
+					for _, nr := range results {
+						select {
+						case <-tm.stopCh:
+							log.Println("Stopping TaskManager result listener during batch processing")
+							return
+						default:
+							tm.onNodeCompleted(nr)
+						}
+					}
+					continue
+				}
+			}
+
+			// Fallback to channel-based processing
 			select {
 			case <-tm.stopCh:
-				log.Println("Stopping TaskManager result listener during processing")
+				log.Println("Stopping TaskManager result listener")
 				return
-			default:
-				tm.onNodeCompleted(nr)
+			case nr := <-tm.resultQueue:
+				select {
+				case <-tm.stopCh:
+					log.Println("Stopping TaskManager result listener during processing")
+					return
+				default:
+					tm.onNodeCompleted(nr)
+				}
+			case <-ticker.C:
+				// Periodic check to prevent busy waiting
+				runtime.Gosched()
 			}
 		}
 	}
@@ -689,9 +843,17 @@ func (tm *TaskManager) handleNext(ctx context.Context, node *Node, state *TaskSt
 }
 
 func (tm *TaskManager) enqueueResult(nr nodeResult) {
+	// Try high-performance lock-free ring buffer first
+	if tm.useLockFreeBuffers {
+		if tm.resultRingBuffer.Push(nr) {
+			return // Successfully enqueued to ring buffer
+		}
+	}
+
+	// Fallback to channel if ring buffer is full or disabled
 	select {
 	case tm.resultQueue <- nr:
-		// Successfully enqueued
+		// Successfully enqueued to channel
 	default:
 		tm.dag.Logger().Error("Result queue is full, dropping result",
 			logger.Field{Key: "nodeID", Value: nr.nodeID},

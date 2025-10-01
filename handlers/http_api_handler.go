@@ -153,7 +153,7 @@ func (h *HTTPAPINodeHandler) makeHTTPCall(ctx context.Context, method, url strin
 	}
 
 	// Try to parse response body as JSON
-	var jsonBody interface{}
+	var jsonBody any
 	if err := json.Unmarshal(respBody, &jsonBody); err != nil {
 		// If not JSON, store as string
 		result["body"] = string(respBody)

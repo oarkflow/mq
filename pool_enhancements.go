@@ -190,7 +190,7 @@ func (m *WorkerHealthMonitor) restartWorker(workerID int) {
 }
 
 // GetHealthStats returns health statistics for all workers
-func (m *WorkerHealthMonitor) GetHealthStats() map[string]interface{} {
+func (m *WorkerHealthMonitor) GetHealthStats() map[string]any {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -209,7 +209,7 @@ func (m *WorkerHealthMonitor) GetHealthStats() map[string]interface{} {
 		totalErrors += health.ErrorCount
 	}
 
-	return map[string]interface{}{
+	return map[string]any{
 		"total_workers":         len(m.workers),
 		"healthy_workers":       healthyCount,
 		"unhealthy_workers":     unhealthyCount,
@@ -481,7 +481,7 @@ func (g *GracefulShutdownManager) SetOnShutdownEnd(fn func()) {
 }
 
 // PoolEnhancedStats returns enhanced statistics about the pool
-func PoolEnhancedStats(pool *Pool) map[string]interface{} {
+func PoolEnhancedStats(pool *Pool) map[string]any {
 	pool.taskQueueLock.Lock()
 	queueLen := len(pool.taskQueue)
 	queueCap := cap(pool.taskQueue)
@@ -494,31 +494,31 @@ func PoolEnhancedStats(pool *Pool) map[string]interface{} {
 	var memStats runtime.MemStats
 	runtime.ReadMemStats(&memStats)
 
-	return map[string]interface{}{
-		"workers": map[string]interface{}{
+	return map[string]any{
+		"workers": map[string]any{
 			"count":  atomic.LoadInt32(&pool.numOfWorkers),
 			"paused": pool.paused,
 		},
-		"queue": map[string]interface{}{
+		"queue": map[string]any{
 			"length":      queueLen,
 			"capacity":    queueCap,
 			"utilization": float64(queueLen) / float64(queueCap) * 100,
 		},
-		"overflow": map[string]interface{}{
+		"overflow": map[string]any{
 			"length": overflowLen,
 		},
-		"tasks": map[string]interface{}{
+		"tasks": map[string]any{
 			"total":     atomic.LoadInt64(&pool.metrics.TotalTasks),
 			"completed": atomic.LoadInt64(&pool.metrics.CompletedTasks),
 			"errors":    atomic.LoadInt64(&pool.metrics.ErrorCount),
 		},
-		"memory": map[string]interface{}{
+		"memory": map[string]any{
 			"alloc":       memStats.Alloc,
 			"total_alloc": memStats.TotalAlloc,
 			"sys":         memStats.Sys,
 			"num_gc":      memStats.NumGC,
 		},
-		"dlq": map[string]interface{}{
+		"dlq": map[string]any{
 			"size": pool.dlq.Size(),
 		},
 	}

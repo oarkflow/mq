@@ -21,25 +21,25 @@ type RPCNodeHandler struct {
 
 // RPCRequest represents a JSON-RPC 2.0 request
 type RPCRequest struct {
-	Jsonrpc string      `json:"jsonrpc"`
-	Method  string      `json:"method"`
-	Params  interface{} `json:"params,omitempty"`
-	ID      interface{} `json:"id,omitempty"`
+	Jsonrpc string `json:"jsonrpc"`
+	Method  string `json:"method"`
+	Params  any    `json:"params,omitempty"`
+	ID      any    `json:"id,omitempty"`
 }
 
 // RPCResponse represents a JSON-RPC 2.0 response
 type RPCResponse struct {
-	Jsonrpc string      `json:"jsonrpc"`
-	Result  interface{} `json:"result,omitempty"`
-	Error   *RPCError   `json:"error,omitempty"`
-	ID      interface{} `json:"id,omitempty"`
+	Jsonrpc string    `json:"jsonrpc"`
+	Result  any       `json:"result,omitempty"`
+	Error   *RPCError `json:"error,omitempty"`
+	ID      any       `json:"id,omitempty"`
 }
 
 // RPCError represents a JSON-RPC 2.0 error
 type RPCError struct {
-	Code    int         `json:"code"`
-	Message string      `json:"message"`
-	Data    interface{} `json:"data,omitempty"`
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+	Data    any    `json:"data,omitempty"`
 }
 
 func NewRPCNodeHandler(id string) *RPCNodeHandler {
@@ -121,7 +121,7 @@ func (h *RPCNodeHandler) ProcessTask(ctx context.Context, task *mq.Task) mq.Resu
 	return mq.Result{Payload: responsePayload, Ctx: ctx}
 }
 
-func (h *RPCNodeHandler) makeRPCCall(ctx context.Context, endpoint string, req RPCRequest) (interface{}, error) {
+func (h *RPCNodeHandler) makeRPCCall(ctx context.Context, endpoint string, req RPCRequest) (any, error) {
 	reqBody, err := json.Marshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal RPC request: %w", err)

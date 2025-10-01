@@ -211,7 +211,7 @@ func (dm *DeduplicationManager) SetOnDuplicate(fn func(*DedupEntry)) {
 }
 
 // GetStats returns deduplication statistics
-func (dm *DeduplicationManager) GetStats() map[string]interface{} {
+func (dm *DeduplicationManager) GetStats() map[string]any {
 	dm.mu.RLock()
 	defer dm.mu.RUnlock()
 
@@ -220,7 +220,7 @@ func (dm *DeduplicationManager) GetStats() map[string]interface{} {
 		totalDuplicates += entry.Count - 1 // Subtract 1 for original message
 	}
 
-	return map[string]interface{}{
+	return map[string]any{
 		"cache_size":       len(dm.cache),
 		"total_duplicates": totalDuplicates,
 		"window":           dm.window,
@@ -316,13 +316,13 @@ func (tbs *TokenBucketStrategy) GetAvailableCredits() int64 {
 }
 
 // GetStats returns token bucket statistics
-func (tbs *TokenBucketStrategy) GetStats() map[string]interface{} {
+func (tbs *TokenBucketStrategy) GetStats() map[string]any {
 	tbs.mu.Lock()
 	defer tbs.mu.Unlock()
 
 	utilization := float64(tbs.capacity-tbs.tokens) / float64(tbs.capacity) * 100
 
-	return map[string]interface{}{
+	return map[string]any{
 		"strategy":    "token_bucket",
 		"tokens":      tbs.tokens,
 		"capacity":    tbs.capacity,
@@ -367,7 +367,7 @@ type FlowControlStrategy interface {
 	// GetAvailableCredits returns current available credits
 	GetAvailableCredits() int64
 	// GetStats returns strategy-specific statistics
-	GetStats() map[string]interface{}
+	GetStats() map[string]any
 	// Shutdown cleans up resources
 	Shutdown()
 }
@@ -613,8 +613,8 @@ func (lbs *LeakyBucketStrategy) GetAvailableCredits() int64 {
 }
 
 // GetStats returns leaky bucket statistics
-func (lbs *LeakyBucketStrategy) GetStats() map[string]interface{} {
-	return map[string]interface{}{
+func (lbs *LeakyBucketStrategy) GetStats() map[string]any {
+	return map[string]any{
 		"strategy":    "leaky_bucket",
 		"queue_size":  len(lbs.queue),
 		"capacity":    lbs.capacity,
@@ -742,13 +742,13 @@ func (cbs *CreditBasedStrategy) GetAvailableCredits() int64 {
 }
 
 // GetStats returns credit-based statistics
-func (cbs *CreditBasedStrategy) GetStats() map[string]interface{} {
+func (cbs *CreditBasedStrategy) GetStats() map[string]any {
 	cbs.mu.Lock()
 	defer cbs.mu.Unlock()
 
 	utilization := float64(cbs.maxCredits-cbs.credits) / float64(cbs.maxCredits) * 100
 
-	return map[string]interface{}{
+	return map[string]any{
 		"strategy":    "credit_based",
 		"credits":     cbs.credits,
 		"max_credits": cbs.maxCredits,
@@ -834,8 +834,8 @@ func (rls *RateLimiterStrategy) GetAvailableCredits() int64 {
 }
 
 // GetStats returns rate limiter statistics
-func (rls *RateLimiterStrategy) GetStats() map[string]interface{} {
-	return map[string]interface{}{
+func (rls *RateLimiterStrategy) GetStats() map[string]any {
+	return map[string]any{
 		"strategy": "rate_limiter",
 		"limit":    rls.limiter.Limit(),
 		"burst":    rls.limiter.Burst(),
@@ -889,9 +889,9 @@ func (fc *FlowController) AdjustMaxCredits(newMax int64) {
 }
 
 // GetStats returns flow control statistics
-func (fc *FlowController) GetStats() map[string]interface{} {
+func (fc *FlowController) GetStats() map[string]any {
 	stats := fc.strategy.GetStats()
-	stats["config"] = map[string]interface{}{
+	stats["config"] = map[string]any{
 		"strategy":        fc.config.Strategy,
 		"max_credits":     fc.config.MaxCredits,
 		"min_credits":     fc.config.MinCredits,

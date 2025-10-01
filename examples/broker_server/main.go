@@ -190,28 +190,28 @@ func reportStats(broker *mq.Broker) {
 		fmt.Println("  " + "-" + string(make([]byte, 50)))
 
 		// Acknowledgment stats
-		if ackStats, ok := stats["acknowledgments"].(map[string]interface{}); ok {
+		if ackStats, ok := stats["acknowledgments"].(map[string]any); ok {
 			fmt.Printf("  📝 Acknowledgments:\n")
 			fmt.Printf("     Pending: %v\n", ackStats["pending_count"])
 			fmt.Printf("     Redeliver queue: %v\n", ackStats["redeliver_backlog"])
 		}
 
 		// WAL stats
-		if walStats, ok := stats["wal"].(map[string]interface{}); ok {
+		if walStats, ok := stats["wal"].(map[string]any); ok {
 			fmt.Printf("  📚 Write-Ahead Log:\n")
 			fmt.Printf("     Sequence ID: %v\n", walStats["current_sequence_id"])
 			fmt.Printf("     Files: %v\n", walStats["total_files"])
 		}
 
 		// Deduplication stats
-		if dedupStats, ok := stats["deduplication"].(map[string]interface{}); ok {
+		if dedupStats, ok := stats["deduplication"].(map[string]any); ok {
 			fmt.Printf("  🔍 Deduplication:\n")
 			fmt.Printf("     Cache size: %v\n", dedupStats["cache_size"])
 			fmt.Printf("     Duplicates blocked: %v\n", dedupStats["total_duplicates"])
 		}
 
 		// Flow control stats
-		if flowStats, ok := stats["flow_control"].(map[string]interface{}); ok {
+		if flowStats, ok := stats["flow_control"].(map[string]any); ok {
 			fmt.Printf("  🚦 Flow Control:\n")
 			fmt.Printf("     Credits available: %v\n", flowStats["credits"])
 			if util, ok := flowStats["utilization"].(float64); ok {
@@ -220,13 +220,13 @@ func reportStats(broker *mq.Broker) {
 		}
 
 		// Snapshot stats
-		if snapshotStats, ok := stats["snapshots"].(map[string]interface{}); ok {
+		if snapshotStats, ok := stats["snapshots"].(map[string]any); ok {
 			fmt.Printf("  💾 Snapshots:\n")
 			fmt.Printf("     Total snapshots: %v\n", snapshotStats["total_snapshots"])
 		}
 
 		// Tracing stats
-		if traceStats, ok := stats["tracing"].(map[string]interface{}); ok {
+		if traceStats, ok := stats["tracing"].(map[string]any); ok {
 			fmt.Printf("  🔬 Tracing:\n")
 			fmt.Printf("     Active traces: %v\n", traceStats["active_traces"])
 		}

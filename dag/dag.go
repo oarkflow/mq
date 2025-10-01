@@ -99,8 +99,8 @@ type DAG struct {
 	hasPageNode              bool
 	paused                   bool
 	httpPrefix               string
-	nextNodesCache           map[string][]*Node
-	prevNodesCache           map[string][]*Node
+	nextNodesCache           *sync.Map // map[string][]*Node - thread-safe cache
+	prevNodesCache           *sync.Map // map[string][]*Node - thread-safe cache
 	// New hook fields:
 	PreProcessHook  func(ctx context.Context, node *Node, taskID string, payload json.RawMessage) context.Context
 	PostProcessHook func(ctx context.Context, node *Node, taskID string, result mq.Result)
@@ -331,8 +331,8 @@ func NewDAG(name, key string, finalResultCallback func(taskID string, result mq.
 		finalResult:     finalResultCallback,
 		metrics:         &TaskMetrics{}, // <-- initialize metrics
 		circuitBreakers: make(map[string]*CircuitBreaker),
-		nextNodesCache:  make(map[string][]*Node),
-		prevNodesCache:  make(map[string][]*Node),
+		nextNodesCache:  &sync.Map{},
+		prevNodesCache:  &sync.Map{},
 		nodeMiddlewares: make(map[string][]mq.Handler),
 		taskStorage:     dagstorage.NewMemoryTaskStorage(), // Initialize default memory storage
 	}
@@ -870,8 +870,8 @@ func (tm *DAG) Validate() error {
 	tm.report = report
 
 	// Build caches for next and previous nodes
-	tm.nextNodesCache = make(map[string][]*Node)
-	tm.prevNodesCache = make(map[string][]*Node)
+	tm.nextNodesCache = &sync.Map{}
+	tm.prevNodesCache = &sync.Map{}
 	tm.nodes.ForEach(func(key string, node *Node) bool {
 		var next []*Node
 		for _, edge := range node.Edges {
@@ -884,7 +884,7 @@ func (tm *DAG) Validate() error {
 				}
 			}
 		}
-		tm.nextNodesCache[node.ID] = next
+		tm.nextNodesCache.Store(node.ID, next)
 		return true
 	})
 	tm.nodes.ForEach(func(key string, _ *Node) bool {
@@ -904,7 +904,7 @@ func (tm *DAG) Validate() error {
 			}
 			return true
 		})
-		tm.prevNodesCache[key] = prev
+		tm.prevNodesCache.Store(key, prev)
 		return true
 	})
 	return nil

@@ -326,7 +326,7 @@ func (w *WriteAheadLog) Replay(handler func(*WALEntry) error) error {
 }
 
 // Checkpoint writes a checkpoint entry and optionally truncates old logs
-func (w *WriteAheadLog) Checkpoint(ctx context.Context, state map[string]interface{}) error {
+func (w *WriteAheadLog) Checkpoint(ctx context.Context, state map[string]any) error {
 	stateData, err := json.Marshal(state)
 	if err != nil {
 		return fmt.Errorf("failed to marshal checkpoint state: %w", err)
@@ -422,7 +422,7 @@ func (w *WriteAheadLog) Shutdown(ctx context.Context) error {
 }
 
 // GetStats returns statistics about the WAL
-func (w *WriteAheadLog) GetStats() map[string]interface{} {
+func (w *WriteAheadLog) GetStats() map[string]any {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -435,7 +435,7 @@ func (w *WriteAheadLog) GetStats() map[string]interface{} {
 
 	files, _ := filepath.Glob(filepath.Join(w.dir, "wal-*.log"))
 
-	return map[string]interface{}{
+	return map[string]any{
 		"current_sequence_id": w.sequenceID,
 		"current_file_size":   currentFileSize,
 		"total_files":         len(files),

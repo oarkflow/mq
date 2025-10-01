@@ -153,7 +153,7 @@ func handleTask(ctx context.Context, task *mq.Task) mq.Result {
 	fmt.Printf("  Priority: %d\n", task.Priority)
 
 	// Parse task payload
-	var data map[string]interface{}
+	var data map[string]any
 	if err := json.Unmarshal(task.Payload, &data); err != nil {
 		fmt.Printf("  ❌ Failed to parse task data: %v\n", err)
 		return mq.Result{
@@ -212,7 +212,7 @@ func handleTask(ctx context.Context, task *mq.Task) mq.Result {
 }
 
 // processOrder handles order processing tasks
-func processOrder(data map[string]interface{}) error {
+func processOrder(data map[string]any) error {
 	fmt.Printf("  📦 Processing order...\n")
 
 	// Extract order details
@@ -236,7 +236,7 @@ func processOrder(data map[string]interface{}) error {
 }
 
 // processPayment handles payment processing tasks
-func processPayment(data map[string]interface{}) error {
+func processPayment(data map[string]any) error {
 	fmt.Printf("  💳 Processing payment...\n")
 
 	paymentID := data["payment_id"]
@@ -261,7 +261,7 @@ func processPayment(data map[string]interface{}) error {
 }
 
 // processNotification handles notification tasks
-func processNotification(data map[string]interface{}) error {
+func processNotification(data map[string]any) error {
 	fmt.Printf("  📧 Processing notification...\n")
 
 	recipient := data["recipient"]
@@ -279,7 +279,7 @@ func processNotification(data map[string]interface{}) error {
 }
 
 // processGeneric handles unknown task types
-func processGeneric(data map[string]interface{}) error {
+func processGeneric(data map[string]any) error {
 	fmt.Printf("  ⚙️  Processing generic task...\n")
 
 	// Just print the data

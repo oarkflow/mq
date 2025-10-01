@@ -71,13 +71,13 @@ type LoginPage struct {
 
 func (p *LoginPage) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 	// Check if this is a form submission
-	var inputData map[string]interface{}
+	var inputData map[string]any
 	if len(task.Payload) > 0 {
 		if err := json.Unmarshal(task.Payload, &inputData); err == nil {
 			// Check if we have form data (username/password)
-			if formData, ok := inputData["form"].(map[string]interface{}); ok {
+			if formData, ok := inputData["form"].(map[string]any); ok {
 				// This is a form submission, pass it through for verification
-				credentials := map[string]interface{}{
+				credentials := map[string]any{
 					"username": formData["username"],
 					"password": formData["password"],
 				}
@@ -89,9 +89,9 @@ func (p *LoginPage) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
 	}
 
 	// Otherwise, show the form
-	var data map[string]interface{}
+	var data map[string]any
 	if err := json.Unmarshal(task.Payload, &data); err != nil {
-		data = make(map[string]interface{})
+		data = make(map[string]any)
 	}
 
 	// HTML content for login page
@@ -259,7 +259,7 @@ type VerifyCredentials struct {
 }
 
 func (p *VerifyCredentials) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
-	var data map[string]interface{}
+	var data map[string]any
 	if err := json.Unmarshal(task.Payload, &data); err != nil {
 		return mq.Result{Error: fmt.Errorf("VerifyCredentials Error: %s", err.Error()), Ctx: ctx}
 	}
@@ -293,7 +293,7 @@ type GenerateToken struct {
 }
 
 func (p *GenerateToken) ProcessTask(ctx context.Context, task *mq.Task) mq.Result {
-	var data map[string]interface{}
+	var data map[string]any
 	if err := json.Unmarshal(task.Payload, &data); err != nil {
 		return mq.Result{Error: fmt.Errorf("GenerateToken Error: %s", err.Error()), Ctx: ctx}
 	}

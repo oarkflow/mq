@@ -417,9 +417,25 @@ func (h *EnhancedAPIHandler) getCacheStats(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	nextCacheSize := 0
+	if h.dag.nextNodesCache != nil {
+		h.dag.nextNodesCache.Range(func(key, value any) bool {
+			nextCacheSize++
+			return true
+		})
+	}
+
+	prevCacheSize := 0
+	if h.dag.prevNodesCache != nil {
+		h.dag.prevNodesCache.Range(func(key, value any) bool {
+			prevCacheSize++
+			return true
+		})
+	}
+
 	stats := map[string]any{
-		"next_nodes_cache_size": len(h.dag.nextNodesCache),
-		"prev_nodes_cache_size": len(h.dag.prevNodesCache),
+		"next_nodes_cache_size": nextCacheSize,
+		"prev_nodes_cache_size": prevCacheSize,
 		"timestamp":             time.Now(),
 	}
 

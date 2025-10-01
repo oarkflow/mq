@@ -382,7 +382,7 @@ func (am *AckManager) Shutdown(ctx context.Context) error {
 }
 
 // GetStats returns statistics about the acknowledgment manager
-func (am *AckManager) GetStats() map[string]interface{} {
+func (am *AckManager) GetStats() map[string]any {
 	am.mu.RLock()
 	defer am.mu.RUnlock()
 
@@ -402,7 +402,7 @@ func (am *AckManager) GetStats() map[string]interface{} {
 		avgWaitTime = totalWaitTime / time.Duration(len(am.pending))
 	}
 
-	return map[string]interface{}{
+	return map[string]any{
 		"pending_count":     len(am.pending),
 		"oldest_pending":    oldestPending,
 		"avg_wait_time":     avgWaitTime,
